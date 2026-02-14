@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
-from pathlib import Path
 from typing import Any
 
 from rattler.exceptions import GatewayError
@@ -12,9 +11,8 @@ from rattler.repo_data import Gateway, SourceConfig
 from pixi_browse.platform_utils import platform_sort_key
 
 
-def create_gateway(*, cache_dir: Path) -> Gateway:
+def create_gateway() -> Gateway:
     return Gateway(
-        cache_dir=cache_dir,
         default_config=SourceConfig(
             sharded_enabled=True,
             cache_action="cache-or-fetch",

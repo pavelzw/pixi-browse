@@ -62,7 +62,7 @@ class CondaMetadataTui(App[None]):
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
         self.theme = "rose-pine"
-        self._gateway: Gateway = create_gateway(cache_dir=self._gateway_cache_path())
+        self._gateway: Gateway = create_gateway()
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -135,12 +135,6 @@ class CondaMetadataTui(App[None]):
         if self._visible_package_names:
             self._request_package_preview(self._visible_package_names[0])
         return True
-
-    def _gateway_cache_path(self) -> Path:
-        # todo: use rattler default
-        cache_path = Path.home() / ".cache" / "pixi-browse" / "repodata-gateway"
-        cache_path.mkdir(parents=True, exist_ok=True)
-        return cache_path
 
     async def _discover_available_platforms(self) -> list[Platform]:
         return await discover_available_platforms(
