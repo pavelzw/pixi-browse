@@ -7,6 +7,8 @@
 
 A TUI to browse conda packages
 
+![pixi-browse demo](.github/assets/demo.gif)
+
 ## Installation
 
 This project is managed by [pixi](https://pixi.sh).
