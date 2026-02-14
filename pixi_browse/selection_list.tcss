@@ -1,0 +1,47 @@
+Screen {
+    layout: vertical;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 1fr;
+    min-width: 28;
+    border: round $accent;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+#sidebar-title {
+    text-style: bold;
+    padding: 1 0 0 0;
+    margin-bottom: 1;
+}
+
+#sidebar-list {
+    height: 1fr;
+    border: solid $surface;
+    padding: 0 0 0 1;
+    scrollbar-size-vertical: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#status {
+    margin-top: 1;
+    color: $text-muted;
+    min-height: 1;
+}
+
+#main-panel {
+    width: 2fr;
+    border: round $primary;
+    margin-right: 1;
+    padding: 1 2;
+}
+
+#main-placeholder {
+    color: $text-muted;
+}
