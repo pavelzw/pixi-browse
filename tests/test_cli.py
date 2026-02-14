@@ -1,3 +1,4 @@
+from click.utils import strip_ansi
 from rattler.platform import Platform
 from typer.testing import CliRunner
 
@@ -9,11 +10,12 @@ def test_help_includes_expected_options() -> None:
     runner = CliRunner()
 
     result = runner.invoke(entrypoint.cli, ["--help"])
+    output = strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert "--channel" in result.output
-    assert "--platform" in result.output
-    assert "--version" in result.output
+    assert "--channel" in output
+    assert "--platform" in output
+    assert "--version" in output
 
 
 def test_version_flag_prints_version_and_exits() -> None:

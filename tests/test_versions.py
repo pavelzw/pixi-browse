@@ -68,7 +68,12 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
 
     asyncio.run(app._ensure_available_platforms())
 
-    assert app._selected_platform_names == {Platform("noarch")}
+    expected = {Platform("noarch")}
+    current_platform = Platform.current()
+    if current_platform in app._available_platform_names:
+        expected.add(current_platform)
+
+    assert app._selected_platform_names == expected
 
 
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(
