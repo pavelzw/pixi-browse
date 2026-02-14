@@ -4,15 +4,12 @@ on:
   push:
     branches:
       - main
-permissions:
-  contents: write
+    tags:
+      - "*"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    outputs:
-      version-changed: ${{ steps.version-metadata.outputs.changed }}
-      new-version: ${{ steps.version-metadata.outputs.newVersion }}
     permissions:
       contents: read
     steps:
@@ -32,21 +29,14 @@ jobs:
         with:
           name: artifact
           path: dist/*
-      - uses: quantco/ui-actions/version-metadata@cd71d2a0e30b25569f6d723e57acca83347e58fc # v1.0.18
-        id: version-metadata
-        with:
-          file: ./pyproject.toml
-          token: ${{ secrets.GITHUB_TOKEN }}
-          version-extraction-override: 'regex:version = "(.*)"'
 
   release:
     name: Publish package
-    if: github.event_name == 'push' && github.repository == 'pavelzw/pixi-browse' && github.ref_name == 'main' && needs.build.outputs.version-changed == 'true'
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [build]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      contents: write
     environment: pypi
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -55,14 +45,3 @@ jobs:
           path: dist
       - name: Publish package on PyPi
         uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Push v${{ needs.build.outputs.new-version }} tag
-        run: |
-          git tag v${{ needs.build.outputs.new-version }}
-          git push origin v${{ needs.build.outputs.new-version }}
-      - name: Create release
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
-        with:
-          generate_release_notes: true
-          tag_name: v${{ needs.build.outputs.new-version }}
-          draft: true

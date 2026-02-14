@@ -1,12 +1,14 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools", "setuptools-scm", "wheel"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
 
 [project]
 name = "pixi-browse"
 description = "A TUI to browse conda packages"
 authors = [{ name = "Pavel Zwerschke", email = "pavelzw@gmail.com" }]
-version = "0.0.1"
+dynamic = ["version"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",

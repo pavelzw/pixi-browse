@@ -9,7 +9,8 @@ postinstall = "pip install --no-build-isolation --no-deps --disable-pip-version-
 [dependencies]
 python = ">=3.13"
 pip = "*"
-hatchling = "*"
+setuptools = ">=61"
+setuptools-scm = "*"
 textual = ">=7.5.0,<8"
 py-rattler = ">=0.22.0,<0.23"
 typer = ">=0.23.1,<0.24"
@@ -17,9 +18,8 @@ typer = ">=0.23.1,<0.24"
 [feature.test.dependencies]
 pytest = ">=6"
 pytest-cov = "*"
-ty = "*"
 mypy = "*"
-textual-dev = "*"
+ty = "*"
 [feature.test.tasks]
 test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
