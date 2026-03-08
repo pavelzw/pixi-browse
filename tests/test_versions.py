@@ -596,12 +596,112 @@ def test_section_highlight_clears_preview_state_for_same_entry_revisit(
         return _FakeStatic()
 
     monkeypatch.setattr(app, "query_one", _fake_query_one)
+    reset_calls: list[str] = []
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
 
     app._set_sidebar_highlight(0)
 
     assert app._previewed_version_key is None
     assert app._pending_preview_version_key is None
     assert updates[-1].startswith("# polars\n\nPlatform section: osx-arm64")
+    assert reset_calls == ["reset"]
+
+
+def test_request_selected_version_preview_resets_scroll_for_cached_details(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    preview_key = (
+        "polars",
+        "1.33.1",
+        "u64_idx_habc1234_1",
+        1,
+        "osx-arm64",
+        "polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._version_details_cache = {preview_key: "cached preview"}
+    updates: list[str] = []
+    reset_calls: list[str] = []
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
+
+    app._request_selected_version_preview("polars", entry)
+
+    assert updates == ["cached preview"]
+    assert reset_calls == ["reset"]
+    assert app._previewed_version_key == preview_key
+
+
+def test_request_selected_version_preview_resets_scroll_for_uncached_details(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.2"),
+        build="u64_idx_habc1234_2",
+        build_number=2,
+        subdir="osx-arm64",
+        file_name="polars-1.33.2-u64_idx_habc1234_2.conda",
+    )
+    updates: list[str] = []
+    reset_calls: list[str] = []
+    worker_calls: list[dict[str, object]] = []
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._request_selected_version_preview("polars", entry)
+
+    assert updates == ["# polars 1.33.2\n\nLoading repodata for selected version..."]
+    assert reset_calls == ["reset"]
+    assert worker_calls == [
+        {
+            "group": "version-preview",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
 
 
 def test_help_text_includes_expected_keybinds() -> None:

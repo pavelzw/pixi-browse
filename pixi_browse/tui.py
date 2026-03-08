@@ -696,7 +696,11 @@ class CondaMetadataTui(App[None]):
         return self.focused is self.query_one("#main-panel", MainPanel)
 
     def _reset_main_panel_scroll(self) -> None:
-        self.query_one("#main-panel", MainPanel).scroll_to(y=0, animate=False)
+        self.query_one("#main-panel", MainPanel).scroll_home(
+            animate=False,
+            immediate=True,
+            x_axis=False,
+        )
 
     def _scroll_main_panel(self, delta: float) -> None:
         main_panel = self.query_one("#main-panel", MainPanel)
@@ -977,6 +981,7 @@ class CondaMetadataTui(App[None]):
         cached = self._version_details_cache.get(preview_key)
         if cached is not None:
             self.query_one("#main-placeholder", Static).update(cached)
+            self._reset_main_panel_scroll()
             self._previewed_version_key = preview_key
             return
 
@@ -984,6 +989,7 @@ class CondaMetadataTui(App[None]):
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
             "Loading repodata for selected version..."
         )
+        self._reset_main_panel_scroll()
         self.run_worker(
             self._load_and_render_selected_version_preview(
                 package_name, entry, preview_key
@@ -1710,6 +1716,7 @@ class CondaMetadataTui(App[None]):
                 f"Platform section: {escape(row.subdir)}\n"
                 "Press Enter to collapse or expand."
             )
+            self._reset_main_panel_scroll()
             return
         if row.kind == "back":
             self._previewed_version_key = None
