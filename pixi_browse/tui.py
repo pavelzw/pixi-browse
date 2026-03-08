@@ -177,8 +177,8 @@ class CondaMetadataTui(App[None]):
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
         self.theme = "rose-pine"
-        self._gateway: Gateway = create_gateway()
-        self._package_client = Client.default_client()
+        self._client = Client.default_client()
+        self._gateway: Gateway = create_gateway(client=self._client)
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -838,7 +838,7 @@ class CondaMetadataTui(App[None]):
         if cached is not None:
             return cached
 
-        paths_json = await PathsJson.from_remote_url(self._package_client, url)
+        paths_json = await PathsJson.from_remote_url(self._client, url)
         paths = [str(path.relative_path) for path in paths_json.paths]
         self._version_paths_cache[preview_key] = paths
         return paths
@@ -850,7 +850,7 @@ class CondaMetadataTui(App[None]):
         if cached is not None:
             return cached
 
-        about_json = await AboutJson.from_remote_url(self._package_client, url)
+        about_json = await AboutJson.from_remote_url(self._client, url)
         extra = about_json.extra if isinstance(about_json.extra, dict) else {}
         recipe_maintainers = extra.get("recipe-maintainers", [])
         if isinstance(recipe_maintainers, str):
@@ -874,7 +874,7 @@ class CondaMetadataTui(App[None]):
         }
         try:
             rendered_recipe_bytes = await fetch_raw_package_file_from_url(
-                self._package_client,
+                self._client,
                 url,
                 "info/recipe/rendered_recipe.yaml",
             )

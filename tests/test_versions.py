@@ -75,6 +75,25 @@ class _FakeKeyEvent:
         self.stopped = True
 
 
+def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) -> None:
+    shared_client = object()
+    gateway_calls: list[object] = []
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.Client.default_client",
+        lambda: shared_client,
+    )
+    monkeypatch.setattr(
+        "pixi_browse.tui.create_gateway",
+        lambda *, client=None: gateway_calls.append(client) or object(),
+    )
+
+    app = CondaMetadataTui()
+
+    assert app._client is shared_client
+    assert gateway_calls == [shared_client]
+
+
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
     app = CondaMetadataTui()
     version = Version("1.2.3")
