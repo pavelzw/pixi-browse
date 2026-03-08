@@ -412,6 +412,98 @@ def test_on_key_ctrl_d_pages_sidebar(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_set_sidebar_highlight_updates_version_preview(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._mode = "versions"
+    app._selected_package = "polars"
+    app._version_rows = [
+        VersionRow(kind="section", subdir="osx-arm64"),
+        VersionRow(kind="entry", subdir="osx-arm64", entry=entry),
+    ]
+
+    class _FakeOptionList:
+        highlighted: int | None = None
+
+    option_list = _FakeOptionList()
+    preview_calls: list[tuple[str, VersionEntry]] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version_entry: preview_calls.append(
+            (package_name, version_entry)
+        ),
+    )
+
+    app._set_sidebar_highlight(1)
+
+    assert option_list.highlighted == 1
+    assert preview_calls == [("polars", entry)]
+
+
+def test_section_highlight_clears_preview_state_for_same_entry_revisit(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._mode = "versions"
+    app._selected_package = "polars"
+    app._version_rows = [
+        VersionRow(kind="section", subdir="osx-arm64"),
+        VersionRow(kind="entry", subdir="osx-arm64", entry=entry),
+    ]
+    app._previewed_version_key = (
+        "polars",
+        "1.33.1",
+        "u64_idx_habc1234_1",
+        1,
+        "osx-arm64",
+        "polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    updates: list[str] = []
+
+    class _FakeOptionList:
+        highlighted: int | None = None
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#sidebar-list":
+            return option_list
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+
+    app._set_sidebar_highlight(0)
+
+    assert app._previewed_version_key is None
+    assert app._pending_preview_version_key is None
+    assert updates[-1].startswith("# polars\n\nPlatform section: osx-arm64")
+
+
 def test_help_text_includes_expected_keybinds() -> None:
     app = CondaMetadataTui()
 

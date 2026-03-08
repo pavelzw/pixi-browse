@@ -716,7 +716,9 @@ class CondaMetadataTui(App[None]):
         if option_count <= 0:
             return
         package_list = self.query_one("#sidebar-list", OptionList)
-        package_list.highlighted = max(0, min(index, option_count - 1))
+        highlighted = max(0, min(index, option_count - 1))
+        package_list.highlighted = highlighted
+        self._update_main_panel_for_sidebar_highlight(highlighted)
 
     def _move_sidebar_highlight(self, delta: int) -> None:
         option_count = self._sidebar_option_count()
@@ -1621,29 +1623,19 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_version_key = None
         self._request_selected_version_preview(package_name, row.entry)
 
-    def on_option_list_option_highlighted(
-        self, event: OptionList.OptionHighlighted
-    ) -> None:
-        if event.option_list.id != "sidebar-list":
-            return
+    def _update_main_panel_for_sidebar_highlight(self, option_index: int) -> None:
         if self._mode == "packages":
-            if not self._visible_package_names:
+            if option_index < 0 or option_index >= len(self._visible_package_names):
                 return
-            if event.option_index < 0 or event.option_index >= len(
-                self._visible_package_names
-            ):
-                return
-            self._request_package_preview(
-                self._visible_package_names[event.option_index]
-            )
+            self._request_package_preview(self._visible_package_names[option_index])
             return
 
         if self._mode != "versions":
             return
-        if event.option_index < 0 or event.option_index >= len(self._version_rows):
+        if option_index < 0 or option_index >= len(self._version_rows):
             return
 
-        row = self._version_rows[event.option_index]
+        row = self._version_rows[option_index]
         package_name = self._selected_package
         if package_name is None:
             return
@@ -1652,6 +1644,8 @@ class CondaMetadataTui(App[None]):
             self._request_selected_version_preview(package_name, row.entry)
             return
         if row.kind == "section" and row.subdir is not None:
+            self._previewed_version_key = None
+            self._pending_preview_version_key = None
             self.query_one("#main-placeholder", Static).update(
                 f"# {escape(package_name)}\n\n"
                 f"Platform section: {escape(row.subdir)}\n"
@@ -1659,9 +1653,18 @@ class CondaMetadataTui(App[None]):
             )
             return
         if row.kind == "back":
+            self._previewed_version_key = None
+            self._pending_preview_version_key = None
             cached = self._package_records_cache.get(package_name)
             if cached is not None:
                 self._update_main_panel_for_package(package_name, cached)
+
+    def on_option_list_option_highlighted(
+        self, event: OptionList.OptionHighlighted
+    ) -> None:
+        if event.option_list.id != "sidebar-list":
+            return
+        self._update_main_panel_for_sidebar_highlight(event.option_index)
 
     async def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
