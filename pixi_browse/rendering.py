@@ -187,6 +187,7 @@ def render_selected_version_details(
     recipe_maintainers: Sequence[str] | None = None,
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
+    rattler_build_version: str | None = None,
 ) -> str:
     name_value = (
         record.name.source if hasattr(record.name, "source") else str(record.name)
@@ -253,6 +254,11 @@ def render_selected_version_details(
         "Recipe maintainers:", recipe_maintainers
     )
     provenance_lines = format_provenance(provenance_remote_url, provenance_sha)
+    built_using_lines = (
+        [f"Built with rattler-build {escape(rattler_build_version)}"]
+        if rattler_build_version
+        else []
+    )
     if package_paths_error is not None:
         file_lines = [
             "Files:",
@@ -275,6 +281,7 @@ def render_selected_version_details(
             *([""] + homepage_lines if homepage_lines else []),
             *([""] + recipe_maintainer_lines if recipe_maintainer_lines else []),
             *([""] + provenance_lines if provenance_lines else []),
+            *([""] + built_using_lines if built_using_lines else []),
             "",
             *dependencies,
             "",

@@ -7,9 +7,11 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import yaml
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson
+from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
@@ -783,6 +785,22 @@ class CondaMetadataTui(App[None]):
     def _render_kv_box(self, rows: list[tuple[str, str]], width: int) -> list[str]:
         return render_kv_box(rows, width)
 
+    @staticmethod
+    def _extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
+        data = yaml.safe_load(rendered_recipe_text)
+        if not isinstance(data, dict):
+            return None
+
+        system_tools = data.get("system_tools")
+        if not isinstance(system_tools, dict):
+            return None
+
+        rattler_build_version = system_tools.get("rattler-build")
+        if rattler_build_version is None:
+            return None
+
+        return str(rattler_build_version)
+
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
     ) -> Any | None:
@@ -848,7 +866,19 @@ class CondaMetadataTui(App[None]):
                 str(extra.get("remote_url")) if extra.get("remote_url") else None
             ),
             "provenance_sha": str(extra.get("sha")) if extra.get("sha") else None,
+            "rattler_build_version": None,
         }
+        try:
+            rendered_recipe_bytes = await fetch_raw_package_file_from_url(
+                self._package_client,
+                url,
+                "info/recipe/rendered_recipe.yaml",
+            )
+            about_urls["rattler_build_version"] = self._extract_rattler_build_version(
+                rendered_recipe_bytes.decode("utf-8", errors="replace")
+            )
+        except Exception:
+            pass
         self._version_about_urls_cache[preview_key] = about_urls
         return about_urls
 
@@ -865,6 +895,7 @@ class CondaMetadataTui(App[None]):
         recipe_maintainers: list[str] | None = None,
         provenance_remote_url: str | None = None,
         provenance_sha: str | None = None,
+        rattler_build_version: str | None = None,
     ) -> str:
         return render_selected_version_details(
             package_name,
@@ -878,6 +909,7 @@ class CondaMetadataTui(App[None]):
             recipe_maintainers=recipe_maintainers,
             provenance_remote_url=provenance_remote_url,
             provenance_sha=provenance_sha,
+            rattler_build_version=rattler_build_version,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -901,6 +933,7 @@ class CondaMetadataTui(App[None]):
                 "recipe_maintainers": [],
                 "provenance_remote_url": None,
                 "provenance_sha": None,
+                "rattler_build_version": None,
             }
             try:
                 package_paths = await self._get_package_paths(
@@ -924,6 +957,7 @@ class CondaMetadataTui(App[None]):
                 recipe_maintainers=about_urls["recipe_maintainers"],
                 provenance_remote_url=about_urls["provenance_remote_url"],
                 provenance_sha=about_urls["provenance_sha"],
+                rattler_build_version=about_urls["rattler_build_version"],
             )
 
         self._version_details_cache[preview_key] = rendered

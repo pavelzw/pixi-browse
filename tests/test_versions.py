@@ -146,6 +146,7 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         recipe_maintainers=["@pavelzw", "xhochy"],
         provenance_remote_url="https://github.com/conda-forge/polars-feedstock.git",
         provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        rattler_build_version="0.38.0",
     )
 
     assert (
@@ -176,6 +177,7 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
         in rendered
     )
+    assert "Built with rattler-build 0.38.0" in rendered
     assert "https://github.com/example/demo" in rendered
     assert "https://docs.example.com/demo" in rendered
     assert "https://example.com/demo" in rendered
@@ -338,9 +340,21 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         calls.append(url)
         return _FakeAboutJson()
 
+    async def _fake_fetch_raw_package_file_from_url(
+        client: object, url: str, path: str
+    ) -> bytes:
+        del client
+        assert url == "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+        assert path == "info/recipe/rendered_recipe.yaml"
+        return b"system_tools:\n  rattler-build: 0.38.0\n"
+
     monkeypatch.setattr(
         "pixi_browse.tui.AboutJson.from_remote_url",
         _fake_from_remote_url,
+    )
+    monkeypatch.setattr(
+        "pixi_browse.tui.fetch_raw_package_file_from_url",
+        _fake_fetch_raw_package_file_from_url,
     )
 
     url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
@@ -354,9 +368,24 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         "recipe_maintainers": ["@pavelzw", "xhochy"],
         "provenance_remote_url": "https://github.com/conda-forge/polars-feedstock.git",
         "provenance_sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        "rattler_build_version": "0.38.0",
     }
     assert cached_about_urls == about_urls
     assert calls == [url]
+
+
+def test_extract_rattler_build_version_from_rendered_recipe() -> None:
+    rendered_recipe = """
+context:
+  some-value: true
+system_tools:
+  rattler-build: 0.38.0
+  micromamba: 2.3.2
+package:
+  name: demo
+"""
+
+    assert CondaMetadataTui._extract_rattler_build_version(rendered_recipe) == "0.38.0"
 
 
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
