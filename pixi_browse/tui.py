@@ -18,6 +18,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key, Paste, Resize
+from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 
 from pixi_browse.downloads import download_url_to_path
@@ -102,11 +103,58 @@ class MainPanel(VerticalScroll):
             event.stop()
 
 
+class HelpScreen(ModalScreen[None]):
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #help-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        max-height: 90%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #help-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #help-body {
+        color: $text;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+        Binding("question_mark", "dismiss", show=False),
+    ]
+
+    def __init__(self, help_text: str) -> None:
+        super().__init__()
+        self._help_text = help_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-dialog"):
+            yield Static("Keybinds", id="help-title")
+            yield Static(self._help_text, id="help-body")
+
+    async def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(result)
+
+
 class CondaMetadataTui(App[None]):
     CSS_PATH = "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
     DOWNLOAD_TIMEOUT_SECONDS = 60.0
     BINDINGS = [
+        Binding("question_mark", "show_help", "Help", show=False),
         Binding("f", "filter_key_f", "Filter"),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
@@ -683,6 +731,39 @@ class CondaMetadataTui(App[None]):
     def _reset_sidebar_vim_pending(self) -> None:
         self._sidebar_vim_g_pending = False
 
+    @staticmethod
+    def _format_help_section(
+        title: str, rows: list[tuple[str, str]], *, key_width: int = 18
+    ) -> list[str]:
+        lines = [title]
+        lines.extend(f"  {key:<{key_width}}{description}" for key, description in rows)
+        return lines
+
+    def _help_text(self) -> str:
+        navigation = self._format_help_section(
+            "Navigation",
+            [
+                ("j / k", "Move selection or scroll"),
+                ("h / l", "Focus left / right pane"),
+                ("gg / G", "Jump to top / bottom"),
+                ("Ctrl+u / Ctrl+d", "Page up / down"),
+                ("Enter", "Open / select"),
+                ("Esc", "Back or close current overlay"),
+            ],
+        )
+        app = self._format_help_section(
+            "App",
+            [
+                ("?", "Show this help"),
+                ("/ or f", "Start package filter"),
+                ("p", "Open platform selector"),
+                ("c", "Edit channel"),
+                ("d", "Download selected artifact in versions view"),
+                ("q", "Quit"),
+            ],
+        )
+        return "\n".join([*navigation, "", *app])
+
     def _format_record_value(self, value: Any) -> str:
         return format_record_value(value)
 
@@ -1245,6 +1326,9 @@ class CondaMetadataTui(App[None]):
         self._set_channel_edit_mode(True, reset_draft=False)
         self._channel_draft = ""
         self._update_filter_indicator()
+
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen(self._help_text()))
 
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:

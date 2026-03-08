@@ -13,6 +13,7 @@ from pixi_browse.rendering import (
     render_package_preview,
     render_selected_version_details,
 )
+from pixi_browse.tui import HelpScreen
 
 
 @dataclass(frozen=True)
@@ -309,6 +310,29 @@ def test_on_key_ctrl_d_pages_sidebar(monkeypatch) -> None:
 
     assert page_calls == [1]
     assert event.stopped is True
+
+
+def test_help_text_includes_expected_keybinds() -> None:
+    app = CondaMetadataTui()
+
+    help_text = app._help_text()
+
+    assert "?                 Show this help" in help_text
+    assert "j / k             Move selection or scroll" in help_text
+    assert "h / l             Focus left / right pane" in help_text
+    assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
+
+
+def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    pushed: list[HelpScreen] = []
+
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
+
+    app.action_show_help()
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], HelpScreen)
 
 
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(
