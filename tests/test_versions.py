@@ -9,7 +9,10 @@ from rich.text import Text
 from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.rendering import render_selected_version_details
+from pixi_browse.rendering import (
+    render_package_preview,
+    render_selected_version_details,
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,45 @@ def test_render_selected_version_details_includes_package_paths() -> None:
     assert " - bin/demo" in rendered
     assert " - lib/python3.13/site-packages/demo.py" in rendered
     assert "placeholder: coming soon" not in rendered
+
+
+def test_render_package_preview_shows_version_selector_preview() -> None:
+    records = [
+        _DetailedRecord(
+            version=Version("1.2.3"),
+            build="py313h123_1",
+            build_number=1,
+            subdir="linux-64",
+            file_name="demo-1.2.3-py313h123_1.conda",
+        ),
+        _DetailedRecord(
+            version=Version("1.2.2"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.2-py313h123_0.conda",
+        ),
+    ]
+
+    rendered = render_package_preview(
+        "demo",
+        records,
+        record_sort_key=lambda record: (
+            record.version,
+            record.build,
+            record.subdir,
+            record.build_number,
+        ),
+    )
+
+    assert "Version selector preview" in rendered
+    assert "Press Enter to open the version list." in rendered
+    assert "▾ linux-64 (1)" in rendered
+    assert "▾ noarch (1)" in rendered
+    assert "1.2.3" in rendered
+    assert "py313h123_1" in rendered
+    assert "URL" not in rendered
+    assert "Dependencies" not in rendered
 
 
 def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:

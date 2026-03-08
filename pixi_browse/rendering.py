@@ -78,97 +78,47 @@ def render_package_preview(
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
 
-    latest = records[0]
-    latest_version = str(latest.version)
-    latest_version_records = [
-        record for record in records if str(record.version) == latest_version
-    ]
-    latest_extra_builds = max(0, len(latest_version_records) - 1)
-    latest_extra_text = (
-        f" (+ {latest_extra_builds} build{'s' if latest_extra_builds != 1 else ''})"
-        if latest_extra_builds
-        else ""
-    )
-
-    license_name = latest.license if latest.license is not None else "unknown"
-    size_text = format_byte_size(latest.size)
-    md5_text = latest.md5.hex() if latest.md5 is not None else "not available"
-    sha256_text = latest.sha256.hex() if latest.sha256 is not None else "not available"
-
-    grouped_by_version: dict[str, list[Any]] = defaultdict(list)
+    grouped_by_subdir: dict[str, list[Any]] = defaultdict(list)
     for record in records:
-        grouped_by_version[str(record.version)].append(record)
+        grouped_by_subdir[record.subdir].append(record)
 
-    for version_records in grouped_by_version.values():
-        version_records.sort(key=record_sort_key, reverse=True)
+    for subdir_records in grouped_by_subdir.values():
+        subdir_records.sort(
+            key=lambda record: (
+                *record_sort_key(record),
+                record.file_name,
+            ),
+            reverse=True,
+        )
 
-    sorted_versions = sorted(
-        grouped_by_version.items(),
-        key=lambda item: record_sort_key(item[1][0]),
-        reverse=True,
+    sorted_subdirs = sorted(
+        grouped_by_subdir,
+        key=lambda subdir: (subdir == "noarch", subdir),
     )
-    other_versions = [
-        (version, version_records)
-        for version, version_records in sorted_versions
-        if version != latest_version
-    ]
 
-    name_value = (
-        latest.name.source if hasattr(latest.name, "source") else str(latest.name)
-    )
-    artifact_line = f"{latest.file_name}{latest_extra_text}"
-    divider = "-" * max(44, len(artifact_line))
+    version_width = max(len(str(record.version)) for record in records)
+    build_width = max(len(record.build) for record in records)
 
     lines = [
-        f"# {package_name}",
+        f"# {escape(package_name)}",
         "",
-        artifact_line,
-        divider,
-        "",
-        format_detail_row("Name", name_value),
-        format_detail_row("Version", latest_version),
-        format_detail_row("Build", latest.build),
-        format_detail_row("Size", size_text),
-        format_detail_row("License", license_name),
-        format_detail_row("Subdir", latest.subdir),
-        format_detail_row("File Name", latest.file_name),
-        format_detail_row("URL", str(latest.url)),
-        format_detail_row("MD5", md5_text),
-        format_detail_row("SHA256", sha256_text),
-        "",
-        "Dependencies:",
+        f"Version selector preview ({len(records)} artifact{'s' if len(records) != 1 else ''}):",
+        "Press Enter to open the version list.",
     ]
 
-    if latest.depends:
-        lines.extend(f" - {dependency}" for dependency in latest.depends)
-    else:
-        lines.append(" - none")
-
-    lines.extend(
-        [
-            "",
-            "Run exports: not available in repodata",
-            "",
-            f"Other Versions ({len(other_versions)}):",
-        ]
-    )
-
-    if other_versions:
-        lines.append("Version    Build")
-        preview_count = 4
-        for version, version_records in other_versions[:preview_count]:
-            best = version_records[0]
-            extra_builds = max(0, len(version_records) - 1)
-            extra_text = (
-                f"  (+ {extra_builds} build{'s' if extra_builds != 1 else ''})"
-                if extra_builds
-                else ""
+    for subdir in sorted_subdirs:
+        subdir_records = grouped_by_subdir[subdir]
+        lines.extend(
+            [
+                "",
+                f"▾ {escape(subdir)} ({len(subdir_records)})",
+            ]
+        )
+        for record in subdir_records:
+            lines.append(
+                f"{escape(str(record.version)):<{version_width}} "
+                f"{escape(record.build):<{build_width}}"
             )
-            lines.append(f"{version:<10} {best.build}{extra_text}")
-
-        remaining = len(other_versions) - preview_count
-        if remaining > 0:
-            lines.append(f"... and {remaining} more")
 
     return "\n".join(lines)
 
