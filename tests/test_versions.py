@@ -1,6 +1,7 @@
 import asyncio
 import io
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from rattler.platform import Platform
 from rattler.version import Version
@@ -8,6 +9,7 @@ from rich.text import Text
 from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
+from pixi_browse.rendering import render_selected_version_details
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,36 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+@dataclass(frozen=True)
+class _DetailedRecord:
+    version: Version
+    build: str
+    build_number: int
+    subdir: str
+    file_name: str
+    channel: str = "conda-forge"
+    size: int = 2048
+    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+    license: str = "BSD-3-Clause"
+    license_family: str = "BSD"
+    arch: str = "x86_64"
+    platform: str = "linux"
+    noarch: str | None = None
+    features: str | None = None
+    track_features: str | None = None
+    python_site_packages_path: str | None = None
+    md5: bytes = bytes.fromhex("00112233445566778899aabbccddeeff")
+    sha256: bytes = bytes.fromhex(
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    )
+    legacy_bz2_md5: bytes | None = None
+    legacy_bz2_size: int | None = None
+    depends: list[str] | None = None
+    constrains: list[str] | None = None
+    url: str = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    name: str = "demo"
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
@@ -51,6 +83,66 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
         "demo-1.2.3-py313h123_0.conda",
         "demo-1.2.3-py313h123_0.tar.bz2",
     }
+
+
+def test_render_selected_version_details_includes_package_paths() -> None:
+    record = _DetailedRecord(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+        depends=["python >=3.13"],
+    )
+
+    rendered = render_selected_version_details(
+        "demo",
+        record,
+        content_width=90,
+        package_paths=["bin/demo", "lib/python3.13/site-packages/demo.py"],
+    )
+
+    assert "Files:" in rendered
+    assert " - bin/demo" in rendered
+    assert " - lib/python3.13/site-packages/demo.py" in rendered
+    assert "placeholder: coming soon" not in rendered
+
+
+def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
+    calls: list[str] = []
+
+    class _FakePathEntry:
+        def __init__(self, relative_path: str) -> None:
+            self.relative_path = relative_path
+
+    class _FakePathsJson:
+        paths = [
+            _FakePathEntry("bin/demo"),
+            _FakePathEntry("lib/python3.13/site-packages/demo.py"),
+        ]
+
+    async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
+        del client
+        calls.append(url)
+        return _FakePathsJson()
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.PathsJson.from_remote_url",
+        _fake_from_remote_url,
+    )
+
+    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    paths = asyncio.run(app._get_package_paths(preview_key, url))
+    cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
+
+    assert paths == [
+        "bin/demo",
+        "lib/python3.13/site-packages/demo.py",
+    ]
+    assert cached_paths == paths
+    assert calls == [url]
 
 
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:

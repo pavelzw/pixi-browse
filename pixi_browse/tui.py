@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from rattler.exceptions import GatewayError
+from rattler.networking import Client
+from rattler.package import PathsJson
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
@@ -63,6 +65,7 @@ class CondaMetadataTui(App[None]):
         selected_platforms = set(default_platforms or [])
         self.theme = "rose-pine"
         self._gateway: Gateway = create_gateway()
+        self._package_client = Client.default_client()
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -78,6 +81,7 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
+        self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
         self._version_details_cache: dict[VersionPreviewKey, str] = {}
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
@@ -321,6 +325,7 @@ class CondaMetadataTui(App[None]):
 
     def _clear_record_caches(self) -> None:
         self._package_records_cache.clear()
+        self._version_paths_cache.clear()
         self._version_details_cache.clear()
 
     def _reset_preview_state(self) -> None:
@@ -380,6 +385,10 @@ class CondaMetadataTui(App[None]):
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
+            "version_paths_cache": {
+                preview_key: list(paths)
+                for preview_key, paths in self._version_paths_cache.items()
+            },
             "version_details_cache": dict(self._version_details_cache),
             "last_package_highlight": self._last_package_highlight,
             "last_package_scroll_y": self._last_package_scroll_y,
@@ -405,6 +414,7 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = snapshot["all_package_names"]
         self._visible_package_names = snapshot["visible_package_names"]
         self._package_records_cache = snapshot["package_records_cache"]
+        self._version_paths_cache = snapshot["version_paths_cache"]
         self._version_details_cache = snapshot["version_details_cache"]
         self._last_package_highlight = snapshot["last_package_highlight"]
         self._last_package_scroll_y = snapshot["last_package_scroll_y"]
@@ -587,11 +597,32 @@ class CondaMetadataTui(App[None]):
             entry.file_name,
         )
 
-    def _render_selected_version_details(self, package_name: str, record: Any) -> str:
+    async def _get_package_paths(
+        self, preview_key: VersionPreviewKey, url: str
+    ) -> list[str]:
+        cached = self._version_paths_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        paths_json = await PathsJson.from_remote_url(self._package_client, url)
+        paths = [str(path.relative_path) for path in paths_json.paths]
+        self._version_paths_cache[preview_key] = paths
+        return paths
+
+    def _render_selected_version_details(
+        self,
+        package_name: str,
+        record: Any,
+        *,
+        package_paths: list[str] | None = None,
+        package_paths_error: str | None = None,
+    ) -> str:
         return render_selected_version_details(
             package_name,
             record,
             content_width=self._main_panel_content_width(),
+            package_paths=package_paths,
+            package_paths_error=package_paths_error,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -606,7 +637,21 @@ class CondaMetadataTui(App[None]):
         if record is None:
             rendered = "No matching repodata record found for selected version."
         else:
-            rendered = self._render_selected_version_details(package_name, record)
+            package_paths: list[str] | None = None
+            package_paths_error: str | None = None
+            try:
+                package_paths = await self._get_package_paths(
+                    preview_key, str(record.url)
+                )
+            except Exception as exc:
+                package_paths_error = str(exc)
+
+            rendered = self._render_selected_version_details(
+                package_name,
+                record,
+                package_paths=package_paths,
+                package_paths_error=package_paths_error,
+            )
 
         self._version_details_cache[preview_key] = rendered
         self.query_one("#main-placeholder", Static).update(rendered)

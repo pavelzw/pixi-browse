@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from rich.markup import escape
@@ -178,6 +178,8 @@ def render_selected_version_details(
     record: Any,
     *,
     content_width: int,
+    package_paths: Sequence[str] | None = None,
+    package_paths_error: str | None = None,
 ) -> str:
     name_value = (
         record.name.source if hasattr(record.name, "source") else str(record.name)
@@ -209,14 +211,24 @@ def render_selected_version_details(
         ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
     ]
 
-    dependencies = [
-        f" - {escape(str(dependency))}"
-        for dependency in (record.depends if record.depends else [])
-    ] or [" - none"]
-    constrains = [
-        f" - {escape(str(constraint))}"
-        for constraint in (record.constrains if record.constrains else [])
-    ] or [" - none"]
+    dependencies = (
+        ["Dependencies:"]
+        + [
+            f" - {escape(str(dependency))}"
+            for dependency in (record.depends if record.depends else [])
+        ]
+        if record.depends
+        else ["Dependencies: none"]
+    )
+    constrains = (
+        ["Constrains:"]
+        + [
+            f" - {escape(str(constraint))}"
+            for constraint in (record.constrains if record.constrains else [])
+        ]
+        if record.constrains
+        else ["Constrains: none"]
+    )
     url = str(record.url)
     escaped_url = escape(url)
     link_target = escaped_url.replace('"', '\\"')
@@ -227,20 +239,30 @@ def render_selected_version_details(
         "Repodata metadata:",
     ]
     lines.extend(render_kv_box(table_rows, content_width))
+    if package_paths_error is not None:
+        file_lines = [
+            "Files:",
+            f" - unavailable: {escape(package_paths_error)}",
+        ]
+    elif package_paths:
+        file_lines = [
+            "Files:",
+            *[f" - {escape(path)}" for path in package_paths],
+        ]
+    else:
+        file_lines = ["Files: none"]
+
     lines.extend(
         [
             "",
             "URL:",
             f'[link="{link_target}"]{escaped_url}[/link]',
             "",
-            "Dependencies:",
             *dependencies,
             "",
-            "Constrains:",
             *constrains,
             "",
-            "Files:",
-            " - placeholder: coming soon",
+            *file_lines,
         ]
     )
     return "\n".join(lines)
