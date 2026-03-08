@@ -2,18 +2,20 @@
 name = "pixi-browse"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "osx-64", "linux-64", "win-64"]
+preview = ["pixi-build"]
 
 [tasks]
 postinstall = "pip install --no-build-isolation --no-deps --disable-pip-version-check -e ."
 demo = "vhs .github/assets/demo.tape"
 
 [dependencies]
-python = ">=3.13"
+python = ">=3.14"
 pip = "*"
 setuptools = ">=61"
 setuptools-scm = "*"
 textual = ">=7.5.0,<8"
-py-rattler = ">=0.22.0,<0.23"
+# py-rattler = ">=0.22.0,<0.23"
+py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "pixi-build", subdirectory = "py-rattler" }
 typer = ">=0.23.1,<0.24"
 vhs = "*"
 
@@ -47,11 +49,11 @@ typos = "*"
 pre-commit-install = "pre-commit install"
 pre-commit-run = "pre-commit run -a"
 
-[feature.py313.dependencies]
-python = "3.13.*"
+[feature.py314.dependencies]
+python = "3.14.*"
 
 [environments]
 default = ["test"]
-py313 = ["py313", "test"]
+py313 = ["py314", "test"]
 build = ["build"]
 lint = { features = ["lint"], no-default-feature = true }
