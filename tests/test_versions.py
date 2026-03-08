@@ -427,14 +427,19 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     app._update_download_indicator()
 
-    assert main_panel.styles.border_subtitle_align == "left"
+    assert main_panel.styles.border_subtitle_align == "right"
     assert isinstance(main_panel.border_title, Text)
     assert main_panel.border_title.plain == "channel conda-forge"
     assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "download"
+    assert main_panel.border_subtitle.plain == "download  ? Help"
     assert any(
         str(span.style) == "bold red"
         and main_panel.border_subtitle.plain[span.start : span.end] == "d"
+        for span in main_panel.border_subtitle.spans
+    )
+    assert any(
+        str(span.style) == "bold red"
+        and main_panel.border_subtitle.plain[span.start : span.end] == "?"
         for span in main_panel.border_subtitle.spans
     )
 
@@ -463,8 +468,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
 
     assert isinstance(main_panel.border_title, Text)
     assert main_panel.border_title.plain == "channel conda-forge"
-    assert main_panel.styles.border_subtitle_align == "left"
-    assert main_panel.border_subtitle == ""
+    assert main_panel.styles.border_subtitle_align == "right"
+    assert isinstance(main_panel.border_subtitle, Text)
+    assert main_panel.border_subtitle.plain == "? Help"
 
 
 def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) -> None:

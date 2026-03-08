@@ -1168,6 +1168,11 @@ class CondaMetadataTui(App[None]):
         indicator.stylize("bold red", 0, 1)
         return indicator
 
+    def _help_indicator_text(self) -> Text:
+        indicator = Text("? Help", style="dim")
+        indicator.stylize("bold red", 0, 1)
+        return indicator
+
     def _set_download_indicator(self, value: str | None) -> None:
         self._download_indicator_override = value
         self._update_download_indicator()
@@ -1176,11 +1181,15 @@ class CondaMetadataTui(App[None]):
         main_panel = self.query_one("#main-panel")
         main_panel.styles.border_title_align = "left"
         main_panel.border_title = self._channel_indicator_text()
-        main_panel.styles.border_subtitle_align = "left"
+        main_panel.styles.border_subtitle_align = "right"
         if self._mode == "versions":
-            main_panel.border_subtitle = self._download_indicator_text()
+            main_panel.border_subtitle = Text.assemble(
+                self._download_indicator_text(),
+                "  ",
+                self._help_indicator_text(),
+            )
         else:
-            main_panel.border_subtitle = ""
+            main_panel.border_subtitle = self._help_indicator_text()
 
     def _selected_platforms_text(self) -> str:
         return ", ".join(
