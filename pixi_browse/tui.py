@@ -16,7 +16,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
 
@@ -38,6 +38,37 @@ from pixi_browse.repodata import (
     query_package_records,
 )
 from pixi_browse.search import fuzzy_score
+
+
+class MainPanel(VerticalScroll):
+    can_focus = True
+
+    def on_key(self, event: Key) -> None:
+        page_height = max(1, self.size.height - 2)
+
+        if event.key in {"up", "k"}:
+            self.scroll_to(y=self.scroll_y - 1, animate=False)
+            event.stop()
+            return
+        if event.key in {"down", "j"}:
+            self.scroll_to(y=self.scroll_y + 1, animate=False)
+            event.stop()
+            return
+        if event.key == "pageup":
+            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "pagedown":
+            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "home":
+            self.scroll_to(y=0, animate=False)
+            event.stop()
+            return
+        if event.key == "end":
+            self.scroll_end(animate=False)
+            event.stop()
 
 
 class CondaMetadataTui(App[None]):
@@ -102,7 +133,7 @@ class CondaMetadataTui(App[None]):
                 yield Static("Packages", id="sidebar-title")
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
-            with Vertical(id="main-panel"):
+            with MainPanel(id="main-panel"):
                 yield Static(
                     "Main panel placeholder.\n\nSelect a package in the sidebar.",
                     id="main-placeholder",
@@ -557,10 +588,26 @@ class CondaMetadataTui(App[None]):
         return format_detail_row(label, value)
 
     def _main_panel_content_width(self) -> int:
-        main_panel = self.query_one("#main-panel", Vertical)
+        main_panel = self.query_one("#main-panel")
         if main_panel.size.width <= 0:
             return 90
         return max(50, main_panel.size.width - 6)
+
+    def _focus_main_panel(self) -> None:
+        self.query_one("#main-panel", MainPanel).focus()
+
+    def _focus_sidebar(self) -> None:
+        self.query_one("#sidebar-list", OptionList).focus()
+
+    def _main_panel_is_focused(self) -> bool:
+        return self.focused is self.query_one("#main-panel", MainPanel)
+
+    def _reset_main_panel_scroll(self) -> None:
+        self.query_one("#main-panel", MainPanel).scroll_to(y=0, animate=False)
+
+    def _scroll_main_panel(self, delta: float) -> None:
+        main_panel = self.query_one("#main-panel", MainPanel)
+        main_panel.scroll_to(y=main_panel.scroll_y + delta, animate=False)
 
     def _format_record_value(self, value: Any) -> str:
         return format_record_value(value)
@@ -655,6 +702,7 @@ class CondaMetadataTui(App[None]):
 
         self._version_details_cache[preview_key] = rendered
         self.query_one("#main-placeholder", Static).update(rendered)
+        self._reset_main_panel_scroll()
         self._previewed_version_key = preview_key
 
     def _request_selected_version_preview(
@@ -780,6 +828,7 @@ class CondaMetadataTui(App[None]):
         self.query_one("#main-placeholder", Static).update(
             self._render_package_preview(package_name, records)
         )
+        self._reset_main_panel_scroll()
         self._previewed_package = package_name
 
     async def _load_and_render_package_preview(self, package_name: str) -> None:
@@ -852,6 +901,7 @@ class CondaMetadataTui(App[None]):
             highlighted = package_list.highlighted
             if highlighted is not None:
                 self._request_package_preview(self._visible_package_names[highlighted])
+        self._focus_sidebar()
 
     async def _open_versions(self, package_name: str) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -968,7 +1018,7 @@ class CondaMetadataTui(App[None]):
         self._update_download_indicator()
 
     def _update_download_indicator(self) -> None:
-        main_panel = self.query_one("#main-panel", Vertical)
+        main_panel = self.query_one("#main-panel")
         main_panel.styles.border_title_align = "left"
         main_panel.border_title = self._channel_indicator_text()
         main_panel.styles.border_subtitle_align = "left"
@@ -1137,9 +1187,12 @@ class CondaMetadataTui(App[None]):
             self._set_channel_edit_mode(False, reset_draft=True)
             return
 
+        if self._main_panel_is_focused():
+            self._focus_sidebar()
+            return
+
         if self._mode in {"versions", "platforms"}:
             self._back_to_packages()
-            self.query_one("#sidebar-list", OptionList).focus()
             return
 
         if self._filter_mode:
@@ -1173,6 +1226,32 @@ class CondaMetadataTui(App[None]):
                 return
 
             return
+
+        if self._main_panel_is_focused():
+            if event.key in {"up", "k"}:
+                self._scroll_main_panel(-1)
+                event.stop()
+                return
+            if event.key in {"down", "j"}:
+                self._scroll_main_panel(1)
+                event.stop()
+                return
+            if event.key == "pageup":
+                self._scroll_main_panel(-10)
+                event.stop()
+                return
+            if event.key == "pagedown":
+                self._scroll_main_panel(10)
+                event.stop()
+                return
+            if event.key == "home":
+                self.query_one("#main-panel", MainPanel).scroll_to(y=0, animate=False)
+                event.stop()
+                return
+            if event.key == "end":
+                self.query_one("#main-panel", MainPanel).scroll_end(animate=False)
+                event.stop()
+                return
 
         if self._mode == "platforms" and event.key == "a":
             if not self._available_platform_names:
@@ -1395,3 +1474,4 @@ class CondaMetadataTui(App[None]):
         version = row.entry
         package_name = self._selected_package or "<unknown>"
         self._request_selected_version_preview(package_name, version)
+        self._focus_main_panel()

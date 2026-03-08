@@ -37,9 +37,15 @@ Screen {
 
 #main-panel {
     width: 2fr;
+    height: 1fr;
     border: round $primary;
     margin-right: 1;
     padding: 1 2;
+    scrollbar-size-vertical: 1;
+}
+
+#main-panel:focus {
+    border: round $accent;
 }
 
 #main-placeholder {

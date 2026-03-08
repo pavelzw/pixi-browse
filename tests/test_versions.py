@@ -168,6 +168,53 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
     assert app._selected_platform_names == expected
 
 
+def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+
+    class _FakeOptionList:
+        highlighted = 0
+        scroll_y = 0.0
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#sidebar-list"
+        return _FakeOptionList()
+
+    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+        assert package_name == "demo"
+        return [
+            _Record(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            )
+        ]
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_get_package_records", _fake_get_package_records)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_update_versions_status", lambda: None)
+    monkeypatch.setattr(app, "_render_version_options", lambda: None)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main-panel"))
+
+    asyncio.run(app._open_versions("demo"))
+
+    assert focused == []
+
+
+def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    app.action_escape()
+
+    assert focused == ["sidebar"]
+
+
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(
     monkeypatch,
 ) -> None:
