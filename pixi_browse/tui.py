@@ -42,9 +42,28 @@ from pixi_browse.search import fuzzy_score
 
 class MainPanel(VerticalScroll):
     can_focus = True
+    _vim_g_pending = False
 
     def on_key(self, event: Key) -> None:
         page_height = max(1, self.size.height - 2)
+        character = event.character
+
+        if character == "g":
+            if self._vim_g_pending:
+                self.scroll_to(y=0, animate=False)
+                self._vim_g_pending = False
+            else:
+                self._vim_g_pending = True
+            event.stop()
+            return
+
+        if character == "G":
+            self.scroll_end(animate=False)
+            self._vim_g_pending = False
+            event.stop()
+            return
+
+        self._vim_g_pending = False
 
         if event.key in {"up", "k"}:
             self.scroll_to(y=self.scroll_y - 1, animate=False)
@@ -62,12 +81,24 @@ class MainPanel(VerticalScroll):
             self.scroll_to(y=self.scroll_y + page_height, animate=False)
             event.stop()
             return
+        if event.key == "ctrl+u":
+            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "ctrl+d":
+            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            event.stop()
+            return
         if event.key == "home":
             self.scroll_to(y=0, animate=False)
             event.stop()
             return
         if event.key == "end":
             self.scroll_end(animate=False)
+            event.stop()
+            return
+        if character == "h":
+            self.app.query_one("#sidebar-list", OptionList).focus()
             event.stop()
 
 
@@ -126,6 +157,7 @@ class CondaMetadataTui(App[None]):
         self._download_in_progress = False
         self._last_package_highlight: int | None = None
         self._last_package_scroll_y = 0.0
+        self._sidebar_vim_g_pending = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -599,6 +631,9 @@ class CondaMetadataTui(App[None]):
     def _focus_sidebar(self) -> None:
         self.query_one("#sidebar-list", OptionList).focus()
 
+    def _sidebar_is_focused(self) -> bool:
+        return self.focused is self.query_one("#sidebar-list", OptionList)
+
     def _main_panel_is_focused(self) -> bool:
         return self.focused is self.query_one("#main-panel", MainPanel)
 
@@ -608,6 +643,45 @@ class CondaMetadataTui(App[None]):
     def _scroll_main_panel(self, delta: float) -> None:
         main_panel = self.query_one("#main-panel", MainPanel)
         main_panel.scroll_to(y=main_panel.scroll_y + delta, animate=False)
+
+    def _sidebar_option_count(self) -> int:
+        if self._mode == "packages":
+            return len(self._visible_package_names)
+        if self._mode == "versions":
+            return len(self._version_rows)
+        if self._mode == "platforms":
+            return len(self._available_platform_names)
+        return 0
+
+    def _set_sidebar_highlight(self, index: int) -> None:
+        option_count = self._sidebar_option_count()
+        if option_count <= 0:
+            return
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.highlighted = max(0, min(index, option_count - 1))
+
+    def _move_sidebar_highlight(self, delta: int) -> None:
+        option_count = self._sidebar_option_count()
+        if option_count <= 0:
+            return
+        package_list = self.query_one("#sidebar-list", OptionList)
+        current = package_list.highlighted
+        if current is None:
+            current = 0
+        self._set_sidebar_highlight(current + delta)
+
+    def _page_sidebar(self, direction: int) -> None:
+        page_size = max(1, self.query_one("#sidebar-list", OptionList).size.height - 2)
+        self._move_sidebar_highlight(direction * page_size)
+
+    def _jump_sidebar_first(self) -> None:
+        self._set_sidebar_highlight(0)
+
+    def _jump_sidebar_last(self) -> None:
+        self._set_sidebar_highlight(self._sidebar_option_count() - 1)
+
+    def _reset_sidebar_vim_pending(self) -> None:
+        self._sidebar_vim_g_pending = False
 
     def _format_record_value(self, value: Any) -> str:
         return format_record_value(value)
@@ -1200,6 +1274,7 @@ class CondaMetadataTui(App[None]):
 
     def on_key(self, event: Key) -> None:
         if self._channel_edit_mode:
+            self._reset_sidebar_vim_pending()
             # These keys are handled by explicit bindings to avoid duplicate input.
             if event.key in {"f", "p", "c", "slash", "q"}:
                 return
@@ -1227,31 +1302,49 @@ class CondaMetadataTui(App[None]):
 
             return
 
-        if self._main_panel_is_focused():
-            if event.key in {"up", "k"}:
-                self._scroll_main_panel(-1)
+        if self._sidebar_is_focused() and not (
+            self._mode == "packages" and self._filter_mode
+        ):
+            if event.character == "j":
+                self._reset_sidebar_vim_pending()
+                self._move_sidebar_highlight(1)
                 event.stop()
                 return
-            if event.key in {"down", "j"}:
-                self._scroll_main_panel(1)
+            if event.character == "k":
+                self._reset_sidebar_vim_pending()
+                self._move_sidebar_highlight(-1)
                 event.stop()
                 return
-            if event.key == "pageup":
-                self._scroll_main_panel(-10)
+            if event.character == "l":
+                self._reset_sidebar_vim_pending()
+                self._focus_main_panel()
                 event.stop()
                 return
-            if event.key == "pagedown":
-                self._scroll_main_panel(10)
+            if event.key == "ctrl+d":
+                self._reset_sidebar_vim_pending()
+                self._page_sidebar(1)
                 event.stop()
                 return
-            if event.key == "home":
-                self.query_one("#main-panel", MainPanel).scroll_to(y=0, animate=False)
+            if event.key == "ctrl+u":
+                self._reset_sidebar_vim_pending()
+                self._page_sidebar(-1)
                 event.stop()
                 return
-            if event.key == "end":
-                self.query_one("#main-panel", MainPanel).scroll_end(animate=False)
+            if event.character == "g":
+                if self._sidebar_vim_g_pending:
+                    self._jump_sidebar_first()
+                    self._reset_sidebar_vim_pending()
+                else:
+                    self._sidebar_vim_g_pending = True
                 event.stop()
                 return
+            if event.character == "G":
+                self._reset_sidebar_vim_pending()
+                self._jump_sidebar_last()
+                event.stop()
+                return
+
+        self._reset_sidebar_vim_pending()
 
         if self._mode == "platforms" and event.key == "a":
             if not self._available_platform_names:

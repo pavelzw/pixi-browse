@@ -59,6 +59,16 @@ class _DetailedRecord:
     name: str = "demo"
 
 
+class _FakeKeyEvent:
+    def __init__(self, key: str, character: str | None = None) -> None:
+        self.key = key
+        self.character = character
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
     app = CondaMetadataTui()
     version = Version("1.2.3")
@@ -255,6 +265,50 @@ def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
     app.action_escape()
 
     assert focused == ["sidebar"]
+
+
+def test_on_key_l_focuses_main_panel_from_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("l", "l")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_gg_jumps_sidebar_to_first(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    jumped: list[str] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_jump_sidebar_first", lambda: jumped.append("first"))
+
+    first_g = _FakeKeyEvent("g", "g")
+    second_g = _FakeKeyEvent("g", "g")
+    app.on_key(first_g)  # type: ignore[arg-type]
+    app.on_key(second_g)  # type: ignore[arg-type]
+
+    assert jumped == ["first"]
+    assert first_g.stopped is True
+    assert second_g.stopped is True
+
+
+def test_on_key_ctrl_d_pages_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    page_calls: list[int] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(
+        app, "_page_sidebar", lambda direction: page_calls.append(direction)
+    )
+
+    event = _FakeKeyEvent("ctrl+d")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert page_calls == [1]
+    assert event.stopped is True
 
 
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(
