@@ -192,9 +192,7 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
-        self._version_about_urls_cache: dict[
-            VersionPreviewKey, dict[str, list[str]]
-        ] = {}
+        self._version_about_urls_cache: dict[VersionPreviewKey, dict[str, Any]] = {}
         self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
         self._version_details_cache: dict[VersionPreviewKey, str] = {}
         self._previewed_version_key: VersionPreviewKey | None = None
@@ -502,7 +500,7 @@ class CondaMetadataTui(App[None]):
                 for package_name, records in self._package_records_cache.items()
             },
             "version_about_urls_cache": {
-                preview_key: {name: list(urls) for name, urls in about_urls.items()}
+                preview_key: dict(about_urls)
                 for preview_key, about_urls in self._version_about_urls_cache.items()
             },
             "version_paths_cache": {
@@ -825,16 +823,31 @@ class CondaMetadataTui(App[None]):
 
     async def _get_about_urls(
         self, preview_key: VersionPreviewKey, url: str
-    ) -> dict[str, list[str]]:
+    ) -> dict[str, Any]:
         cached = self._version_about_urls_cache.get(preview_key)
         if cached is not None:
             return cached
 
         about_json = await AboutJson.from_remote_url(self._package_client, url)
+        extra = about_json.extra if isinstance(about_json.extra, dict) else {}
+        recipe_maintainers = extra.get("recipe-maintainers", [])
+        if isinstance(recipe_maintainers, str):
+            recipe_maintainers = [recipe_maintainers]
+        elif not isinstance(recipe_maintainers, list):
+            recipe_maintainers = []
         about_urls = {
             "repository": list(about_json.dev_url),
             "documentation": list(about_json.doc_url),
             "homepage": list(about_json.home),
+            "recipe_maintainers": [
+                str(maintainer)
+                for maintainer in recipe_maintainers
+                if isinstance(maintainer, str)
+            ],
+            "provenance_remote_url": (
+                str(extra.get("remote_url")) if extra.get("remote_url") else None
+            ),
+            "provenance_sha": str(extra.get("sha")) if extra.get("sha") else None,
         }
         self._version_about_urls_cache[preview_key] = about_urls
         return about_urls
@@ -849,6 +862,9 @@ class CondaMetadataTui(App[None]):
         repository_urls: list[str] | None = None,
         documentation_urls: list[str] | None = None,
         homepage_urls: list[str] | None = None,
+        recipe_maintainers: list[str] | None = None,
+        provenance_remote_url: str | None = None,
+        provenance_sha: str | None = None,
     ) -> str:
         return render_selected_version_details(
             package_name,
@@ -859,6 +875,9 @@ class CondaMetadataTui(App[None]):
             repository_urls=repository_urls,
             documentation_urls=documentation_urls,
             homepage_urls=homepage_urls,
+            recipe_maintainers=recipe_maintainers,
+            provenance_remote_url=provenance_remote_url,
+            provenance_sha=provenance_sha,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -875,10 +894,13 @@ class CondaMetadataTui(App[None]):
         else:
             package_paths: list[str] | None = None
             package_paths_error: str | None = None
-            about_urls: dict[str, list[str]] = {
+            about_urls: dict[str, Any] = {
                 "repository": [],
                 "documentation": [],
                 "homepage": [],
+                "recipe_maintainers": [],
+                "provenance_remote_url": None,
+                "provenance_sha": None,
             }
             try:
                 package_paths = await self._get_package_paths(
@@ -899,6 +921,9 @@ class CondaMetadataTui(App[None]):
                 repository_urls=about_urls["repository"],
                 documentation_urls=about_urls["documentation"],
                 homepage_urls=about_urls["homepage"],
+                recipe_maintainers=about_urls["recipe_maintainers"],
+                provenance_remote_url=about_urls["provenance_remote_url"],
+                provenance_sha=about_urls["provenance_sha"],
             )
 
         self._version_details_cache[preview_key] = rendered

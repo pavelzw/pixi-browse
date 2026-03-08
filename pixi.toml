@@ -15,7 +15,7 @@ setuptools = ">=61"
 setuptools-scm = "*"
 textual = ">=7.5.0,<8"
 # py-rattler = ">=0.22.0,<0.23"
-py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "pixi-build", subdirectory = "py-rattler" }
+py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "aboutjson-pixi-build", subdirectory = "py-rattler" }
 typer = ">=0.23.1,<0.24"
 vhs = "*"
 

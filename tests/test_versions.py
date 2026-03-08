@@ -10,8 +10,11 @@ from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
 from pixi_browse.rendering import (
+    format_clickable_github_handle,
+    format_clickable_github_handle_list,
     format_clickable_url,
     format_clickable_url_list,
+    format_provenance,
     render_package_preview,
     render_selected_version_details,
 )
@@ -140,6 +143,9 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
         homepage_urls=["https://example.com/demo"],
+        recipe_maintainers=["@pavelzw", "xhochy"],
+        provenance_remote_url="https://github.com/conda-forge/polars-feedstock.git",
+        provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
     )
 
     assert (
@@ -156,6 +162,18 @@ def test_render_selected_version_details_includes_about_urls() -> None:
     )
     assert (
         "Homepage: [@click=app.open_external_url('https://example.com/demo')]"
+        in rendered
+    )
+    assert (
+        "Recipe maintainers: "
+        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
+        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
+        in rendered
+    )
+    assert (
+        "Provenance: "
+        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
+        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
         in rendered
     )
     assert "https://github.com/example/demo" in rendered
@@ -186,6 +204,41 @@ def test_format_clickable_url_list_compacts_urls_to_single_line() -> None:
         "Repository: "
         "[@click=app.open_external_url('https://example.com/one')]https://example.com/one[/], "
         "[@click=app.open_external_url('https://example.com/two')]https://example.com/two[/]"
+    ]
+
+
+def test_format_clickable_github_handle_uses_github_profile() -> None:
+    rendered = format_clickable_github_handle("@pavelzw")
+
+    assert (
+        rendered
+        == "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]"
+    )
+
+
+def test_format_clickable_github_handle_list_compacts_handles_to_single_line() -> None:
+    rendered = format_clickable_github_handle_list(
+        "Recipe maintainers:",
+        ["@pavelzw", "xhochy"],
+    )
+
+    assert rendered == [
+        "Recipe maintainers: "
+        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
+        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
+    ]
+
+
+def test_format_provenance_uses_github_commit_link() -> None:
+    rendered = format_provenance(
+        "https://github.com/conda-forge/polars-feedstock.git",
+        "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+    )
+
+    assert rendered == [
+        "Provenance: "
+        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
+        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
     ]
 
 
@@ -274,6 +327,11 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         dev_url = ["https://github.com/example/demo"]
         doc_url = ["https://docs.example.com/demo"]
         home = ["https://example.com/demo"]
+        extra = {
+            "recipe-maintainers": ["@pavelzw", "xhochy"],
+            "remote_url": "https://github.com/conda-forge/polars-feedstock.git",
+            "sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        }
 
     async def _fake_from_remote_url(client: object, url: str) -> _FakeAboutJson:
         del client
@@ -293,6 +351,9 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         "repository": ["https://github.com/example/demo"],
         "documentation": ["https://docs.example.com/demo"],
         "homepage": ["https://example.com/demo"],
+        "recipe_maintainers": ["@pavelzw", "xhochy"],
+        "provenance_remote_url": "https://github.com/conda-forge/polars-feedstock.git",
+        "provenance_sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
     }
     assert cached_about_urls == about_urls
     assert calls == [url]

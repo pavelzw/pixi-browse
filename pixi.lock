@@ -165,7 +165,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-build-1.2.2.post1-pyhff2d567_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: hb0f4dca_0
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
@@ -333,7 +333,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-build-1.2.2.post1-pyhff2d567_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h0dc7051_0
       - conda: https://conda.anaconda.org/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
@@ -488,7 +488,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-build-1.2.2.post1-pyhff2d567_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h60d57d3_0
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
@@ -615,7 +615,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/pywin32-ctypes-0.2.3-py314h86ab7b2_3.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h9490d1a_0
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-2.32.3-pyhd8ed1ab_1.conda
@@ -801,7 +801,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/python-librt-0.8.1-py314h0f05182_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: hb0f4dca_0
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -949,7 +949,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/python-librt-0.8.1-py314h0b69929_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h0dc7051_0
       - conda: https://conda.anaconda.org/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -1085,7 +1085,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-librt-0.8.1-py314ha14b1ff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h60d57d3_0
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -1192,7 +1192,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/python-librt-0.8.1-py314hc5dbbe4_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h9490d1a_0
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/sdl2-2.32.56-h5112557_0.conda
@@ -1609,7 +1609,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/python-librt-0.8.1-py314h0f05182_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: hb0f4dca_0
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -1757,7 +1757,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/python-librt-0.8.1-py314h0b69929_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h0dc7051_0
       - conda: https://conda.anaconda.org/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -1893,7 +1893,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-librt-0.8.1-py314ha14b1ff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h60d57d3_0
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
@@ -2000,7 +2000,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.14.3-h4df99d1_101.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/python-librt-0.8.1-py314hc5dbbe4_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
-      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
         build: h9490d1a_0
       - conda: https://conda.anaconda.org/conda-forge/noarch/rich-14.3.2-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/sdl2-2.32.56-h5112557_0.conda
@@ -7370,7 +7370,7 @@ packages:
   license_family: LGPL
   size: 764231
   timestamp: 1742507189208
-- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
   name: py-rattler
   version: 0.23.0
   build: h0dc7051_0
@@ -7384,7 +7384,7 @@ packages:
   - __osx >=10.13
   channel: null
   license: BSD-3-Clause
-- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
   name: py-rattler
   version: 0.23.0
   build: h60d57d3_0
@@ -7396,7 +7396,7 @@ packages:
   - python_abi 3.14.* *_cp314
   channel: null
   license: BSD-3-Clause
-- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
   name: py-rattler
   version: 0.23.0
   build: h9490d1a_0
@@ -7408,7 +7408,7 @@ packages:
   - python_abi 3.14.* *_cp314
   channel: null
   license: BSD-3-Clause
-- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=pixi-build#bfbce3465cbe9dfb30d6ea01485952626036a43c
+- conda: git+https://github.com/pavelzw/rattler?subdirectory=py-rattler&branch=aboutjson-pixi-build#078cf62ab2f3437011e4ffb94356ade326c98956
   name: py-rattler
   version: 0.23.0
   build: hb0f4dca_0
