@@ -414,14 +414,23 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
 def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     app = CondaMetadataTui()
     focused: list[str] = []
+    title_updates: list[str] = []
 
     class _FakeOptionList:
         highlighted = 0
         scroll_y = 0.0
 
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            title_updates.append(value)
+
+    option_list = _FakeOptionList()
+
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        assert selector == "#sidebar-list"
-        return _FakeOptionList()
+        if selector == "#sidebar-list":
+            return option_list
+        assert selector == "#sidebar-title"
+        return _FakeStatic()
 
     async def _fake_get_package_records(package_name: str) -> list[_Record]:
         assert package_name == "demo"
@@ -445,6 +454,7 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     asyncio.run(app._open_versions("demo"))
 
     assert focused == []
+    assert title_updates == ["Versions: demo"]
 
 
 def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
@@ -1013,6 +1023,6 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     destination = (tmp_path / entry.file_name).resolve()
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
-    assert f"Downloading {entry.file_name}..." in main_panel.subtitle_history
-    assert "download" in main_panel.subtitle_history
+    assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history
+    assert "download  ? Help" in main_panel.subtitle_history
     assert notifications == [f"Downloaded successfully to {destination}"]
