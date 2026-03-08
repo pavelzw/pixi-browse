@@ -10,6 +10,8 @@ from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
 from pixi_browse.rendering import (
+    format_clickable_url,
+    format_clickable_url_list,
     render_package_preview,
     render_selected_version_details,
 )
@@ -122,6 +124,71 @@ def test_render_selected_version_details_includes_package_paths() -> None:
     assert "placeholder: coming soon" not in rendered
 
 
+def test_render_selected_version_details_includes_about_urls() -> None:
+    record = _DetailedRecord(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    rendered = render_selected_version_details(
+        "demo",
+        record,
+        content_width=90,
+        repository_urls=["https://github.com/example/demo"],
+        documentation_urls=["https://docs.example.com/demo"],
+        homepage_urls=["https://example.com/demo"],
+    )
+
+    assert (
+        "URL: [@click=app.open_external_url('https://example.invalid/demo-1.2.3-py313h123_0.conda')]"
+        in rendered
+    )
+    assert (
+        "Repository: [@click=app.open_external_url('https://github.com/example/demo')]"
+        in rendered
+    )
+    assert (
+        "Documentation: [@click=app.open_external_url('https://docs.example.com/demo')]"
+        in rendered
+    )
+    assert (
+        "Homepage: [@click=app.open_external_url('https://example.com/demo')]"
+        in rendered
+    )
+    assert "https://github.com/example/demo" in rendered
+    assert "https://docs.example.com/demo" in rendered
+    assert "https://example.com/demo" in rendered
+    assert "@click=app.open_external_url(" in rendered
+
+
+def test_format_clickable_url_uses_textual_click_action() -> None:
+    rendered = format_clickable_url("https://example.com/demo")
+
+    assert (
+        rendered
+        == "[@click=app.open_external_url('https://example.com/demo')]https://example.com/demo[/]"
+    )
+
+
+def test_format_clickable_url_list_compacts_urls_to_single_line() -> None:
+    rendered = format_clickable_url_list(
+        "Repository:",
+        [
+            "https://example.com/one",
+            "https://example.com/two",
+        ],
+    )
+
+    assert rendered == [
+        "Repository: "
+        "[@click=app.open_external_url('https://example.com/one')]https://example.com/one[/], "
+        "[@click=app.open_external_url('https://example.com/two')]https://example.com/two[/]"
+    ]
+
+
 def test_render_package_preview_shows_version_selector_preview() -> None:
     records = [
         _DetailedRecord(
@@ -195,6 +262,39 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
         "lib/python3.13/site-packages/demo.py",
     ]
     assert cached_paths == paths
+    assert calls == [url]
+
+
+def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
+    calls: list[str] = []
+
+    class _FakeAboutJson:
+        dev_url = ["https://github.com/example/demo"]
+        doc_url = ["https://docs.example.com/demo"]
+        home = ["https://example.com/demo"]
+
+    async def _fake_from_remote_url(client: object, url: str) -> _FakeAboutJson:
+        del client
+        calls.append(url)
+        return _FakeAboutJson()
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.AboutJson.from_remote_url",
+        _fake_from_remote_url,
+    )
+
+    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+    cached_about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+
+    assert about_urls == {
+        "repository": ["https://github.com/example/demo"],
+        "documentation": ["https://docs.example.com/demo"],
+        "homepage": ["https://example.com/demo"],
+    }
+    assert cached_about_urls == about_urls
     assert calls == [url]
 
 
@@ -333,6 +433,21 @@ def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
 
     assert len(pushed) == 1
     assert isinstance(pushed[0], HelpScreen)
+
+
+def test_action_open_external_url_uses_webbrowser(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[str] = []
+
+    def _fake_open(url: str) -> bool:
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr("webbrowser.open", _fake_open)
+
+    app.action_open_external_url("https://example.com/demo")
+
+    assert opened == ["https://example.com/demo"]
 
 
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(

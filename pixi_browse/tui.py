@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
@@ -8,7 +9,7 @@ from typing import Any
 
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
-from rattler.package import PathsJson
+from rattler.package import AboutJson, PathsJson
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
@@ -191,6 +192,9 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
+        self._version_about_urls_cache: dict[
+            VersionPreviewKey, dict[str, list[str]]
+        ] = {}
         self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
         self._version_details_cache: dict[VersionPreviewKey, str] = {}
         self._previewed_version_key: VersionPreviewKey | None = None
@@ -436,6 +440,7 @@ class CondaMetadataTui(App[None]):
 
     def _clear_record_caches(self) -> None:
         self._package_records_cache.clear()
+        self._version_about_urls_cache.clear()
         self._version_paths_cache.clear()
         self._version_details_cache.clear()
 
@@ -496,6 +501,10 @@ class CondaMetadataTui(App[None]):
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
+            "version_about_urls_cache": {
+                preview_key: {name: list(urls) for name, urls in about_urls.items()}
+                for preview_key, about_urls in self._version_about_urls_cache.items()
+            },
             "version_paths_cache": {
                 preview_key: list(paths)
                 for preview_key, paths in self._version_paths_cache.items()
@@ -525,6 +534,7 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = snapshot["all_package_names"]
         self._visible_package_names = snapshot["visible_package_names"]
         self._package_records_cache = snapshot["package_records_cache"]
+        self._version_about_urls_cache = snapshot["version_about_urls_cache"]
         self._version_paths_cache = snapshot["version_paths_cache"]
         self._version_details_cache = snapshot["version_details_cache"]
         self._last_package_highlight = snapshot["last_package_highlight"]
@@ -811,6 +821,22 @@ class CondaMetadataTui(App[None]):
         self._version_paths_cache[preview_key] = paths
         return paths
 
+    async def _get_about_urls(
+        self, preview_key: VersionPreviewKey, url: str
+    ) -> dict[str, list[str]]:
+        cached = self._version_about_urls_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        about_json = await AboutJson.from_remote_url(self._package_client, url)
+        about_urls = {
+            "repository": list(about_json.dev_url),
+            "documentation": list(about_json.doc_url),
+            "homepage": list(about_json.home),
+        }
+        self._version_about_urls_cache[preview_key] = about_urls
+        return about_urls
+
     def _render_selected_version_details(
         self,
         package_name: str,
@@ -818,6 +844,9 @@ class CondaMetadataTui(App[None]):
         *,
         package_paths: list[str] | None = None,
         package_paths_error: str | None = None,
+        repository_urls: list[str] | None = None,
+        documentation_urls: list[str] | None = None,
+        homepage_urls: list[str] | None = None,
     ) -> str:
         return render_selected_version_details(
             package_name,
@@ -825,6 +854,9 @@ class CondaMetadataTui(App[None]):
             content_width=self._main_panel_content_width(),
             package_paths=package_paths,
             package_paths_error=package_paths_error,
+            repository_urls=repository_urls,
+            documentation_urls=documentation_urls,
+            homepage_urls=homepage_urls,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -841,18 +873,30 @@ class CondaMetadataTui(App[None]):
         else:
             package_paths: list[str] | None = None
             package_paths_error: str | None = None
+            about_urls: dict[str, list[str]] = {
+                "repository": [],
+                "documentation": [],
+                "homepage": [],
+            }
             try:
                 package_paths = await self._get_package_paths(
                     preview_key, str(record.url)
                 )
             except Exception as exc:
                 package_paths_error = str(exc)
+            try:
+                about_urls = await self._get_about_urls(preview_key, str(record.url))
+            except Exception:
+                pass
 
             rendered = self._render_selected_version_details(
                 package_name,
                 record,
                 package_paths=package_paths,
                 package_paths_error=package_paths_error,
+                repository_urls=about_urls["repository"],
+                documentation_urls=about_urls["documentation"],
+                homepage_urls=about_urls["homepage"],
             )
 
         self._version_details_cache[preview_key] = rendered
@@ -1338,6 +1382,9 @@ class CondaMetadataTui(App[None]):
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text()))
+
+    def action_open_external_url(self, url: str) -> None:
+        webbrowser.open(url)
 
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:

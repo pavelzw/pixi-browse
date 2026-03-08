@@ -12,6 +12,16 @@ def format_detail_row(label: str, value: str) -> str:
     return f"{label:<20}{value}"
 
 
+def format_clickable_url(url: str) -> str:
+    return f"[@click=app.open_external_url({url!r})]{escape(url)}[/]"
+
+
+def format_clickable_url_list(label: str, urls: Sequence[str] | None) -> list[str]:
+    if not urls:
+        return []
+    return [f"{label} " + ", ".join(format_clickable_url(url) for url in urls)]
+
+
 def format_record_value(value: Any) -> str:
     if value is None:
         return "not available"
@@ -130,6 +140,9 @@ def render_selected_version_details(
     content_width: int,
     package_paths: Sequence[str] | None = None,
     package_paths_error: str | None = None,
+    repository_urls: Sequence[str] | None = None,
+    documentation_urls: Sequence[str] | None = None,
+    homepage_urls: Sequence[str] | None = None,
 ) -> str:
     name_value = (
         record.name.source if hasattr(record.name, "source") else str(record.name)
@@ -180,8 +193,6 @@ def render_selected_version_details(
         else ["Constrains: none"]
     )
     url = str(record.url)
-    escaped_url = escape(url)
-    link_target = escaped_url.replace('"', '\\"')
 
     lines = [
         f"# {escape(package_name)} {escape(str(record.version))}",
@@ -189,6 +200,11 @@ def render_selected_version_details(
         "Repodata metadata:",
     ]
     lines.extend(render_kv_box(table_rows, content_width))
+    repository_lines = format_clickable_url_list("Repository:", repository_urls)
+    documentation_lines = format_clickable_url_list(
+        "Documentation:", documentation_urls
+    )
+    homepage_lines = format_clickable_url_list("Homepage:", homepage_urls)
     if package_paths_error is not None:
         file_lines = [
             "Files:",
@@ -205,8 +221,10 @@ def render_selected_version_details(
     lines.extend(
         [
             "",
-            "URL:",
-            f'[link="{link_target}"]{escaped_url}[/link]',
+            f"URL: {format_clickable_url(url)}",
+            *([""] + repository_lines if repository_lines else []),
+            *([""] + documentation_lines if documentation_lines else []),
+            *([""] + homepage_lines if homepage_lines else []),
             "",
             *dependencies,
             "",
