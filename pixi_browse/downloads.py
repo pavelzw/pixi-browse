@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import shutil
-import urllib.request
 from pathlib import Path
 
+from rattler.networking import Client
+from rattler.package_streaming import download
 
-def download_url_to_path(
-    url: str, destination: Path, *, timeout_seconds: float
-) -> None:
-    with (
-        urllib.request.urlopen(  # noqa: S310
-            url,
-            timeout=timeout_seconds,
-        ) as response,
-        destination.open("wb") as handle,
-    ):
-        shutil.copyfileobj(response, handle)
+
+async def download_url_to_path(client: Client, url: str, destination: Path) -> None:
+    await download(client, url, destination)

@@ -155,7 +155,6 @@ class HelpScreen(ModalScreen[None]):
 class CondaMetadataTui(App[None]):
     CSS_PATH = "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
-    DOWNLOAD_TIMEOUT_SECONDS = 60.0
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
         Binding("f", "filter_key_f", "Filter"),
@@ -999,11 +998,8 @@ class CondaMetadataTui(App[None]):
             exit_on_error=False,
         )
 
-    @staticmethod
-    def _download_url_to_path(
-        url: str, destination: Path, *, timeout_seconds: float
-    ) -> None:
-        download_url_to_path(url, destination, timeout_seconds=timeout_seconds)
+    async def _download_url_to_path(self, url: str, destination: Path) -> None:
+        await download_url_to_path(self._client, url, destination)
 
     async def _download_selected_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -1024,12 +1020,7 @@ class CondaMetadataTui(App[None]):
 
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
-            await asyncio.to_thread(
-                self._download_url_to_path,
-                url,
-                temporary_destination,
-                timeout_seconds=self.DOWNLOAD_TIMEOUT_SECONDS,
-            )
+            await self._download_url_to_path(url, temporary_destination)
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:

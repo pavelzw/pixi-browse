@@ -1,5 +1,5 @@
 import asyncio
-import io
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -1041,27 +1041,31 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
-def test_download_url_to_path_uses_timeout(tmp_path, monkeypatch) -> None:
+def test_download_url_to_path_uses_shared_client(tmp_path, monkeypatch) -> None:
     app = CondaMetadataTui()
     destination = tmp_path / "artifact.conda"
     captured: dict[str, object] = {}
 
-    def _fake_urlopen(url: str, timeout: float) -> io.BytesIO:
+    async def _fake_download(client: object, url: str, path: object) -> None:
+        captured["client"] = client
         captured["url"] = url
-        captured["timeout"] = timeout
-        return io.BytesIO(b"artifact-bytes")
+        captured["path"] = path
+        assert hasattr(path, "write_bytes")
+        path.write_bytes(b"artifact-bytes")
 
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr("pixi_browse.downloads.download", _fake_download)
 
-    app._download_url_to_path(
-        "https://example.invalid/artifact.conda",
-        destination,
-        timeout_seconds=12.5,
+    asyncio.run(
+        app._download_url_to_path(
+            "https://example.invalid/artifact.conda",
+            destination,
+        )
     )
 
     assert captured == {
+        "client": app._client,
         "url": "https://example.invalid/artifact.conda",
-        "timeout": 12.5,
+        "path": destination,
     }
     assert destination.read_bytes() == b"artifact-bytes"
 
@@ -1138,6 +1142,13 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     monkeypatch.setattr(
         app, "_get_record_for_version_entry", _fake_get_record_for_version_entry
+    )
+    monkeypatch.setattr(
+        app,
+        "_download_url_to_path",
+        lambda url, destination: asyncio.sleep(
+            0, result=shutil.copyfile(source_file, destination)
+        ),
     )
     monkeypatch.setattr(app, "notify", _fake_notify)
 
