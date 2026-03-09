@@ -79,13 +79,17 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     shared_client = object()
     gateway_calls: list[object] = []
 
+    def _fake_create_gateway(*, client: object | None = None) -> object:
+        gateway_calls.append(client)
+        return object()
+
     monkeypatch.setattr(
         "pixi_browse.tui.Client.default_client",
         lambda: shared_client,
     )
     monkeypatch.setattr(
         "pixi_browse.tui.create_gateway",
-        lambda *, client=None: gateway_calls.append(client) or object(),
+        _fake_create_gateway,
     )
 
     app = CondaMetadataTui()
