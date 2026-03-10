@@ -57,36 +57,36 @@ pixi-browse --version
 
 ### CLI Options
 
-| Option | Description |
-|---|---|
-| `-c`, `--channel` | Channel to load at startup (default: `conda-forge`) |
-| `-p`, `--platform` | Platforms to include (repeat for multiple) |
-| `--version` | Show version and exit |
-| `--help` | Show help and exit |
+| Option             | Description                                         |
+| ------------------ | --------------------------------------------------- |
+| `-c`, `--channel`  | Channel to load at startup (default: `conda-forge`) |
+| `-p`, `--platform` | Platforms to include (repeat for multiple)          |
+| `--version`        | Show version and exit                               |
+| `--help`           | Show help and exit                                  |
 
 ## Keybindings
 
 ### Navigation
 
-| Key | Action |
-|---|---|
-| `j` / `k` | Move selection or scroll |
-| `h` / `l` | Focus left / right pane |
-| `gg` / `G` | Jump to top / bottom |
-| `Ctrl+u` / `Ctrl+d` | Page up / down |
-| `Enter` | Open / select |
-| `Esc` | Back or close current overlay |
+| Key                 | Action                        |
+| ------------------- | ----------------------------- |
+| `j` / `k`           | Move selection or scroll      |
+| `h` / `l`           | Focus left / right pane       |
+| `gg` / `G`          | Jump to top / bottom          |
+| `Ctrl+u` / `Ctrl+d` | Page up / down                |
+| `Enter`             | Open / select                 |
+| `Esc`               | Back or close current overlay |
 
 ### App
 
-| Key | Action |
-|---|---|
-| `?` | Show help |
-| `/` or `f` | Start package filter |
-| `p` | Open platform selector |
-| `c` | Edit channel |
-| `d` | Download selected artifact (in versions view) |
-| `q` | Quit |
+| Key        | Action                                        |
+| ---------- | --------------------------------------------- |
+| `?`        | Show help                                     |
+| `/` or `f` | Start package filter                          |
+| `p`        | Open platform selector                        |
+| `c`        | Edit channel                                  |
+| `d`        | Download selected artifact (in versions view) |
+| `q`        | Quit                                          |
 
 ## Development
 
