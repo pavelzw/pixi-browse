@@ -12,10 +12,10 @@ python = ">=3.13"
 pip = "*"
 setuptools = ">=61"
 setuptools-scm = "*"
-textual = ">=7.5.0,<8"
+textual = ">=8.0.2,<9"
 pyyaml = ">=6.0.3,<7"
 py-rattler = ">=0.23.1,<0.24"
-typer = ">=0.23.1,<0.24"
+typer = ">=0.24.0,<0.25"
 
 [feature.test.dependencies]
 pytest = ">=6"
