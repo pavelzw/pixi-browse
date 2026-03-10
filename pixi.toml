@@ -15,7 +15,7 @@ setuptools = ">=61"
 setuptools-scm = "*"
 textual = ">=7.5.0,<8"
 pyyaml = ">=6.0.3,<7"
-py-rattler = { path = "/Users/pavel/projects/prefix-dev/rattler/py-rattler" }
+py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "pixi-build-download", subdirectory = "py-rattler" }
 # py-rattler = ">=0.23.0,<0.24"
 typer = ">=0.23.1,<0.24"
 
