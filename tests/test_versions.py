@@ -1041,37 +1041,6 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
-def test_download_url_to_path_uses_shared_client(tmp_path, monkeypatch) -> None:
-    app = CondaMetadataTui()
-    destination = tmp_path / "artifact.conda"
-    captured: dict[str, object] = {}
-
-    async def _fake_download_to_path(client: object, url: str, path: object) -> None:
-        captured["client"] = client
-        captured["url"] = url
-        captured["path"] = path
-        assert hasattr(path, "write_bytes")
-        path.write_bytes(b"artifact-bytes")
-
-    monkeypatch.setattr(
-        "pixi_browse.downloads.package_download_to_path", _fake_download_to_path
-    )
-
-    asyncio.run(
-        app._download_url_to_path(
-            "https://example.invalid/artifact.conda",
-            destination,
-        )
-    )
-
-    assert captured == {
-        "client": app._client,
-        "url": "https://example.invalid/artifact.conda",
-        "path": destination,
-    }
-    assert destination.read_bytes() == b"artifact-bytes"
-
-
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     tmp_path, monkeypatch
 ) -> None:
@@ -1121,6 +1090,7 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     main_panel = _FakeMainPanel()
     status = _FakeStatus()
     notifications: list[str] = []
+    captured_downloads: list[tuple[object, str, object]] = []
 
     def _fake_query_one(
         selector: str, _widget_type: object = None
@@ -1146,10 +1116,13 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
         app, "_get_record_for_version_entry", _fake_get_record_for_version_entry
     )
     monkeypatch.setattr(
-        app,
-        "_download_url_to_path",
-        lambda url, destination: asyncio.sleep(
-            0, result=shutil.copyfile(source_file, destination)
+        "pixi_browse.tui.package_download_to_path",
+        lambda client, url, destination: asyncio.sleep(  # type: ignore[arg-type]
+            0,
+            result=(
+                captured_downloads.append((client, url, destination)),
+                shutil.copyfile(source_file, destination),
+            ),
         ),
     )
     monkeypatch.setattr(app, "notify", _fake_notify)
@@ -1157,6 +1130,7 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     asyncio.run(app._download_selected_version_entry("demo", entry))
 
     destination = (tmp_path / entry.file_name).resolve()
+    assert captured_downloads == [(app._client, source_file.resolve().as_uri(), destination.with_name(f"{destination.name}.part"))]
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
     assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history

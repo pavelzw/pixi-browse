@@ -11,7 +11,10 @@ import yaml
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson
-from rattler.package_streaming import fetch_raw_package_file_from_url
+from rattler.package_streaming import (
+    download_to_path as package_download_to_path,
+    fetch_raw_package_file_from_url,
+)
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
@@ -24,7 +27,6 @@ from textual.events import Key, Paste, Resize
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 
-from pixi_browse.downloads import download_url_to_path
 from pixi_browse.models import VersionEntry, VersionPreviewKey, VersionRow, ViewMode
 from pixi_browse.platform_utils import platform_sort_key
 from pixi_browse.rendering import (
@@ -998,9 +1000,6 @@ class CondaMetadataTui(App[None]):
             exit_on_error=False,
         )
 
-    async def _download_url_to_path(self, url: str, destination: Path) -> None:
-        await download_url_to_path(self._client, url, destination)
-
     async def _download_selected_version_entry(
         self, package_name: str, entry: VersionEntry
     ) -> None:
@@ -1020,7 +1019,7 @@ class CondaMetadataTui(App[None]):
 
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
-            await self._download_url_to_path(url, temporary_destination)
+            await package_download_to_path(self._client, url, temporary_destination)
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:
