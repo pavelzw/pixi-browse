@@ -6,19 +6,19 @@ Set Shell "bash"
 Set FontSize 18
 Set Width 1920
 Set Height 1080
+Set Padding 0
 
 Hide
 Type "pixi shell" Enter
 Sleep 5s
 Type "clear" Enter
 Sleep 1s
-Show
-
 Type "pixi-browse"
-Sleep 1s
 Enter
 Sleep 3s
+Show
 
+Sleep 3s
 Type@250ms "/py-rattler"
 Sleep 3s
 Enter
