@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
@@ -13,6 +12,8 @@ from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson
 from rattler.package_streaming import (
     download_to_path as package_download_to_path,
+)
+from rattler.package_streaming import (
     fetch_raw_package_file_from_url,
 )
 from rattler.platform import Platform

@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -1115,22 +1116,32 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     monkeypatch.setattr(
         app, "_get_record_for_version_entry", _fake_get_record_for_version_entry
     )
+
+    def _fake_download(
+        client: object, url: str, destination: object
+    ) -> Coroutine[object, object, str]:
+        captured_downloads.append((client, url, destination))
+        return asyncio.sleep(
+            0,
+            result=str(shutil.copyfile(source_file, str(destination))),
+        )
+
     monkeypatch.setattr(
         "pixi_browse.tui.package_download_to_path",
-        lambda client, url, destination: asyncio.sleep(  # type: ignore[arg-type]
-            0,
-            result=(
-                captured_downloads.append((client, url, destination)),
-                shutil.copyfile(source_file, destination),
-            ),
-        ),
+        _fake_download,
     )
     monkeypatch.setattr(app, "notify", _fake_notify)
 
     asyncio.run(app._download_selected_version_entry("demo", entry))
 
     destination = (tmp_path / entry.file_name).resolve()
-    assert captured_downloads == [(app._client, source_file.resolve().as_uri(), destination.with_name(f"{destination.name}.part"))]
+    assert captured_downloads == [
+        (
+            app._client,
+            source_file.resolve().as_uri(),
+            destination.with_name(f"{destination.name}.part"),
+        )
+    ]
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
     assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history
