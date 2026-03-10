@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-import asyncio
+import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import yaml
 from rattler.exceptions import GatewayError
+from rattler.networking import Client
+from rattler.package import AboutJson, PathsJson
+from rattler.package_streaming import (
+    download_to_path as package_download_to_path,
+)
+from rattler.package_streaming import (
+    fetch_raw_package_file_from_url,
+)
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
@@ -14,11 +23,11 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key, Paste, Resize
+from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 
-from pixi_browse.downloads import download_url_to_path
 from pixi_browse.models import VersionEntry, VersionPreviewKey, VersionRow, ViewMode
 from pixi_browse.platform_utils import platform_sort_key
 from pixi_browse.rendering import (
@@ -38,11 +47,119 @@ from pixi_browse.repodata import (
 from pixi_browse.search import fuzzy_score
 
 
+class MainPanel(VerticalScroll):
+    can_focus = True
+    _vim_g_pending = False
+
+    def on_key(self, event: Key) -> None:
+        page_height = max(1, self.size.height - 2)
+        character = event.character
+
+        if character == "g":
+            if self._vim_g_pending:
+                self.scroll_to(y=0, animate=False)
+                self._vim_g_pending = False
+            else:
+                self._vim_g_pending = True
+            event.stop()
+            return
+
+        if character == "G":
+            self.scroll_end(animate=False)
+            self._vim_g_pending = False
+            event.stop()
+            return
+
+        self._vim_g_pending = False
+
+        if event.key in {"up", "k"}:
+            self.scroll_to(y=self.scroll_y - 1, animate=False)
+            event.stop()
+            return
+        if event.key in {"down", "j"}:
+            self.scroll_to(y=self.scroll_y + 1, animate=False)
+            event.stop()
+            return
+        if event.key == "pageup":
+            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "pagedown":
+            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "ctrl+u":
+            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "ctrl+d":
+            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            event.stop()
+            return
+        if event.key == "home":
+            self.scroll_to(y=0, animate=False)
+            event.stop()
+            return
+        if event.key == "end":
+            self.scroll_end(animate=False)
+            event.stop()
+            return
+        if character == "h":
+            self.app.query_one("#sidebar-list", OptionList).focus()
+            event.stop()
+
+
+class HelpScreen(ModalScreen[None]):
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #help-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        max-height: 90%;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #help-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #help-body {
+        color: $text;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+        Binding("question_mark", "dismiss", show=False),
+    ]
+
+    def __init__(self, help_text: str) -> None:
+        super().__init__()
+        self._help_text = help_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-dialog"):
+            yield Static("Keybinds", id="help-title")
+            yield Static(self._help_text, id="help-body")
+
+    async def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(result)
+
+
 class CondaMetadataTui(App[None]):
     CSS_PATH = "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
-    DOWNLOAD_TIMEOUT_SECONDS = 60.0
     BINDINGS = [
+        Binding("question_mark", "show_help", "Help", show=False),
         Binding("f", "filter_key_f", "Filter"),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
@@ -62,7 +179,8 @@ class CondaMetadataTui(App[None]):
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
         self.theme = "rose-pine"
-        self._gateway: Gateway = create_gateway()
+        self._client = Client.default_client()
+        self._gateway: Gateway = create_gateway(client=self._client)
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -78,6 +196,8 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
+        self._version_about_urls_cache: dict[VersionPreviewKey, dict[str, Any]] = {}
+        self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
         self._version_details_cache: dict[VersionPreviewKey, str] = {}
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
@@ -91,6 +211,7 @@ class CondaMetadataTui(App[None]):
         self._download_in_progress = False
         self._last_package_highlight: int | None = None
         self._last_package_scroll_y = 0.0
+        self._sidebar_vim_g_pending = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -98,7 +219,7 @@ class CondaMetadataTui(App[None]):
                 yield Static("Packages", id="sidebar-title")
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
-            with Vertical(id="main-panel"):
+            with MainPanel(id="main-panel"):
                 yield Static(
                     "Main panel placeholder.\n\nSelect a package in the sidebar.",
                     id="main-placeholder",
@@ -321,6 +442,8 @@ class CondaMetadataTui(App[None]):
 
     def _clear_record_caches(self) -> None:
         self._package_records_cache.clear()
+        self._version_about_urls_cache.clear()
+        self._version_paths_cache.clear()
         self._version_details_cache.clear()
 
     def _reset_preview_state(self) -> None:
@@ -380,6 +503,14 @@ class CondaMetadataTui(App[None]):
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
+            "version_about_urls_cache": {
+                preview_key: dict(about_urls)
+                for preview_key, about_urls in self._version_about_urls_cache.items()
+            },
+            "version_paths_cache": {
+                preview_key: list(paths)
+                for preview_key, paths in self._version_paths_cache.items()
+            },
             "version_details_cache": dict(self._version_details_cache),
             "last_package_highlight": self._last_package_highlight,
             "last_package_scroll_y": self._last_package_scroll_y,
@@ -405,6 +536,8 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = snapshot["all_package_names"]
         self._visible_package_names = snapshot["visible_package_names"]
         self._package_records_cache = snapshot["package_records_cache"]
+        self._version_about_urls_cache = snapshot["version_about_urls_cache"]
+        self._version_paths_cache = snapshot["version_paths_cache"]
         self._version_details_cache = snapshot["version_details_cache"]
         self._last_package_highlight = snapshot["last_package_highlight"]
         self._last_package_scroll_y = snapshot["last_package_scroll_y"]
@@ -547,10 +680,107 @@ class CondaMetadataTui(App[None]):
         return format_detail_row(label, value)
 
     def _main_panel_content_width(self) -> int:
-        main_panel = self.query_one("#main-panel", Vertical)
+        main_panel = self.query_one("#main-panel")
         if main_panel.size.width <= 0:
             return 90
         return max(50, main_panel.size.width - 6)
+
+    def _focus_main_panel(self) -> None:
+        self.query_one("#main-panel", MainPanel).focus()
+
+    def _focus_sidebar(self) -> None:
+        self.query_one("#sidebar-list", OptionList).focus()
+
+    def _sidebar_is_focused(self) -> bool:
+        return self.focused is self.query_one("#sidebar-list", OptionList)
+
+    def _main_panel_is_focused(self) -> bool:
+        return self.focused is self.query_one("#main-panel", MainPanel)
+
+    def _reset_main_panel_scroll(self) -> None:
+        self.query_one("#main-panel", MainPanel).scroll_home(
+            animate=False,
+            immediate=True,
+            x_axis=False,
+        )
+
+    def _scroll_main_panel(self, delta: float) -> None:
+        main_panel = self.query_one("#main-panel", MainPanel)
+        main_panel.scroll_to(y=main_panel.scroll_y + delta, animate=False)
+
+    def _sidebar_option_count(self) -> int:
+        if self._mode == "packages":
+            return len(self._visible_package_names)
+        if self._mode == "versions":
+            return len(self._version_rows)
+        if self._mode == "platforms":
+            return len(self._available_platform_names)
+        return 0
+
+    def _set_sidebar_highlight(self, index: int) -> None:
+        option_count = self._sidebar_option_count()
+        if option_count <= 0:
+            return
+        package_list = self.query_one("#sidebar-list", OptionList)
+        highlighted = max(0, min(index, option_count - 1))
+        package_list.highlighted = highlighted
+        self._update_main_panel_for_sidebar_highlight(highlighted)
+
+    def _move_sidebar_highlight(self, delta: int) -> None:
+        option_count = self._sidebar_option_count()
+        if option_count <= 0:
+            return
+        package_list = self.query_one("#sidebar-list", OptionList)
+        current = package_list.highlighted
+        if current is None:
+            current = 0
+        self._set_sidebar_highlight(current + delta)
+
+    def _page_sidebar(self, direction: int) -> None:
+        page_size = max(1, self.query_one("#sidebar-list", OptionList).size.height - 2)
+        self._move_sidebar_highlight(direction * page_size)
+
+    def _jump_sidebar_first(self) -> None:
+        self._set_sidebar_highlight(0)
+
+    def _jump_sidebar_last(self) -> None:
+        self._set_sidebar_highlight(self._sidebar_option_count() - 1)
+
+    def _reset_sidebar_vim_pending(self) -> None:
+        self._sidebar_vim_g_pending = False
+
+    @staticmethod
+    def _format_help_section(
+        title: str, rows: list[tuple[str, str]], *, key_width: int = 18
+    ) -> list[str]:
+        lines = [title]
+        lines.extend(f"  {key:<{key_width}}{description}" for key, description in rows)
+        return lines
+
+    def _help_text(self) -> str:
+        navigation = self._format_help_section(
+            "Navigation",
+            [
+                ("j / k", "Move selection or scroll"),
+                ("h / l", "Focus left / right pane"),
+                ("gg / G", "Jump to top / bottom"),
+                ("Ctrl+u / Ctrl+d", "Page up / down"),
+                ("Enter", "Open / select"),
+                ("Esc", "Back or close current overlay"),
+            ],
+        )
+        app = self._format_help_section(
+            "App",
+            [
+                ("?", "Show this help"),
+                ("/ or f", "Start package filter"),
+                ("p", "Open platform selector"),
+                ("c", "Edit channel"),
+                ("d", "Download selected artifact in versions view"),
+                ("q", "Quit"),
+            ],
+        )
+        return "\n".join([*navigation, "", *app])
 
     def _format_record_value(self, value: Any) -> str:
         return format_record_value(value)
@@ -560,6 +790,22 @@ class CondaMetadataTui(App[None]):
 
     def _render_kv_box(self, rows: list[tuple[str, str]], width: int) -> list[str]:
         return render_kv_box(rows, width)
+
+    @staticmethod
+    def _extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
+        data = yaml.safe_load(rendered_recipe_text)
+        if not isinstance(data, dict):
+            return None
+
+        system_tools = data.get("system_tools")
+        if not isinstance(system_tools, dict):
+            return None
+
+        rattler_build_version = system_tools.get("rattler-build")
+        if rattler_build_version is None:
+            return None
+
+        return str(rattler_build_version)
 
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -587,11 +833,89 @@ class CondaMetadataTui(App[None]):
             entry.file_name,
         )
 
-    def _render_selected_version_details(self, package_name: str, record: Any) -> str:
+    async def _get_package_paths(
+        self, preview_key: VersionPreviewKey, url: str
+    ) -> list[str]:
+        cached = self._version_paths_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        paths_json = await PathsJson.from_remote_url(self._client, url)
+        paths = [str(path.relative_path) for path in paths_json.paths]
+        self._version_paths_cache[preview_key] = paths
+        return paths
+
+    async def _get_about_urls(
+        self, preview_key: VersionPreviewKey, url: str
+    ) -> dict[str, Any]:
+        cached = self._version_about_urls_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        about_json = await AboutJson.from_remote_url(self._client, url)
+        extra = about_json.extra if isinstance(about_json.extra, dict) else {}
+        recipe_maintainers = extra.get("recipe-maintainers", [])
+        if isinstance(recipe_maintainers, str):
+            recipe_maintainers = [recipe_maintainers]
+        elif not isinstance(recipe_maintainers, list):
+            recipe_maintainers = []
+        about_urls = {
+            "repository": list(about_json.dev_url),
+            "documentation": list(about_json.doc_url),
+            "homepage": list(about_json.home),
+            "recipe_maintainers": [
+                str(maintainer)
+                for maintainer in recipe_maintainers
+                if isinstance(maintainer, str)
+            ],
+            "provenance_remote_url": (
+                str(extra.get("remote_url")) if extra.get("remote_url") else None
+            ),
+            "provenance_sha": str(extra.get("sha")) if extra.get("sha") else None,
+            "rattler_build_version": None,
+        }
+        try:
+            rendered_recipe_bytes = await fetch_raw_package_file_from_url(
+                self._client,
+                url,
+                "info/recipe/rendered_recipe.yaml",
+            )
+            about_urls["rattler_build_version"] = self._extract_rattler_build_version(
+                rendered_recipe_bytes.decode("utf-8", errors="replace")
+            )
+        except Exception:
+            pass
+        self._version_about_urls_cache[preview_key] = about_urls
+        return about_urls
+
+    def _render_selected_version_details(
+        self,
+        package_name: str,
+        record: Any,
+        *,
+        package_paths: list[str] | None = None,
+        package_paths_error: str | None = None,
+        repository_urls: list[str] | None = None,
+        documentation_urls: list[str] | None = None,
+        homepage_urls: list[str] | None = None,
+        recipe_maintainers: list[str] | None = None,
+        provenance_remote_url: str | None = None,
+        provenance_sha: str | None = None,
+        rattler_build_version: str | None = None,
+    ) -> str:
         return render_selected_version_details(
             package_name,
             record,
             content_width=self._main_panel_content_width(),
+            package_paths=package_paths,
+            package_paths_error=package_paths_error,
+            repository_urls=repository_urls,
+            documentation_urls=documentation_urls,
+            homepage_urls=homepage_urls,
+            recipe_maintainers=recipe_maintainers,
+            provenance_remote_url=provenance_remote_url,
+            provenance_sha=provenance_sha,
+            rattler_build_version=rattler_build_version,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -606,10 +930,45 @@ class CondaMetadataTui(App[None]):
         if record is None:
             rendered = "No matching repodata record found for selected version."
         else:
-            rendered = self._render_selected_version_details(package_name, record)
+            package_paths: list[str] | None = None
+            package_paths_error: str | None = None
+            about_urls: dict[str, Any] = {
+                "repository": [],
+                "documentation": [],
+                "homepage": [],
+                "recipe_maintainers": [],
+                "provenance_remote_url": None,
+                "provenance_sha": None,
+                "rattler_build_version": None,
+            }
+            try:
+                package_paths = await self._get_package_paths(
+                    preview_key, str(record.url)
+                )
+            except Exception as exc:
+                package_paths_error = str(exc)
+            try:
+                about_urls = await self._get_about_urls(preview_key, str(record.url))
+            except Exception:
+                pass
+
+            rendered = self._render_selected_version_details(
+                package_name,
+                record,
+                package_paths=package_paths,
+                package_paths_error=package_paths_error,
+                repository_urls=about_urls["repository"],
+                documentation_urls=about_urls["documentation"],
+                homepage_urls=about_urls["homepage"],
+                recipe_maintainers=about_urls["recipe_maintainers"],
+                provenance_remote_url=about_urls["provenance_remote_url"],
+                provenance_sha=about_urls["provenance_sha"],
+                rattler_build_version=about_urls["rattler_build_version"],
+            )
 
         self._version_details_cache[preview_key] = rendered
         self.query_one("#main-placeholder", Static).update(rendered)
+        self._reset_main_panel_scroll()
         self._previewed_version_key = preview_key
 
     def _request_selected_version_preview(
@@ -624,6 +983,7 @@ class CondaMetadataTui(App[None]):
         cached = self._version_details_cache.get(preview_key)
         if cached is not None:
             self.query_one("#main-placeholder", Static).update(cached)
+            self._reset_main_panel_scroll()
             self._previewed_version_key = preview_key
             return
 
@@ -631,6 +991,7 @@ class CondaMetadataTui(App[None]):
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
             "Loading repodata for selected version..."
         )
+        self._reset_main_panel_scroll()
         self.run_worker(
             self._load_and_render_selected_version_preview(
                 package_name, entry, preview_key
@@ -639,12 +1000,6 @@ class CondaMetadataTui(App[None]):
             exclusive=True,
             exit_on_error=False,
         )
-
-    @staticmethod
-    def _download_url_to_path(
-        url: str, destination: Path, *, timeout_seconds: float
-    ) -> None:
-        download_url_to_path(url, destination, timeout_seconds=timeout_seconds)
 
     async def _download_selected_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -665,12 +1020,7 @@ class CondaMetadataTui(App[None]):
 
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
-            await asyncio.to_thread(
-                self._download_url_to_path,
-                url,
-                temporary_destination,
-                timeout_seconds=self.DOWNLOAD_TIMEOUT_SECONDS,
-            )
+            await package_download_to_path(self._client, url, temporary_destination)
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:
@@ -735,6 +1085,7 @@ class CondaMetadataTui(App[None]):
         self.query_one("#main-placeholder", Static).update(
             self._render_package_preview(package_name, records)
         )
+        self._reset_main_panel_scroll()
         self._previewed_package = package_name
 
     async def _load_and_render_package_preview(self, package_name: str) -> None:
@@ -807,6 +1158,7 @@ class CondaMetadataTui(App[None]):
             highlighted = package_list.highlighted
             if highlighted is not None:
                 self._request_package_preview(self._visible_package_names[highlighted])
+        self._focus_sidebar()
 
     async def _open_versions(self, package_name: str) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -918,19 +1270,28 @@ class CondaMetadataTui(App[None]):
         indicator.stylize("bold red", 0, 1)
         return indicator
 
+    def _help_indicator_text(self) -> Text:
+        indicator = Text("? Help", style="dim")
+        indicator.stylize("bold red", 0, 1)
+        return indicator
+
     def _set_download_indicator(self, value: str | None) -> None:
         self._download_indicator_override = value
         self._update_download_indicator()
 
     def _update_download_indicator(self) -> None:
-        main_panel = self.query_one("#main-panel", Vertical)
+        main_panel = self.query_one("#main-panel")
         main_panel.styles.border_title_align = "left"
         main_panel.border_title = self._channel_indicator_text()
-        main_panel.styles.border_subtitle_align = "left"
+        main_panel.styles.border_subtitle_align = "right"
         if self._mode == "versions":
-            main_panel.border_subtitle = self._download_indicator_text()
+            main_panel.border_subtitle = Text.assemble(
+                self._download_indicator_text(),
+                "  ",
+                self._help_indicator_text(),
+            )
         else:
-            main_panel.border_subtitle = ""
+            main_panel.border_subtitle = self._help_indicator_text()
 
     def _selected_platforms_text(self) -> str:
         return ", ".join(
@@ -1077,6 +1438,12 @@ class CondaMetadataTui(App[None]):
         self._channel_draft = ""
         self._update_filter_indicator()
 
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen(self._help_text()))
+
+    def action_open_external_url(self, url: str) -> None:
+        webbrowser.open(url)
+
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:
             self._append_channel_char("q")
@@ -1092,9 +1459,12 @@ class CondaMetadataTui(App[None]):
             self._set_channel_edit_mode(False, reset_draft=True)
             return
 
+        if self._main_panel_is_focused():
+            self._focus_sidebar()
+            return
+
         if self._mode in {"versions", "platforms"}:
             self._back_to_packages()
-            self.query_one("#sidebar-list", OptionList).focus()
             return
 
         if self._filter_mode:
@@ -1102,6 +1472,7 @@ class CondaMetadataTui(App[None]):
 
     def on_key(self, event: Key) -> None:
         if self._channel_edit_mode:
+            self._reset_sidebar_vim_pending()
             # These keys are handled by explicit bindings to avoid duplicate input.
             if event.key in {"f", "p", "c", "slash", "q"}:
                 return
@@ -1128,6 +1499,50 @@ class CondaMetadataTui(App[None]):
                 return
 
             return
+
+        if self._sidebar_is_focused() and not (
+            self._mode == "packages" and self._filter_mode
+        ):
+            if event.character == "j":
+                self._reset_sidebar_vim_pending()
+                self._move_sidebar_highlight(1)
+                event.stop()
+                return
+            if event.character == "k":
+                self._reset_sidebar_vim_pending()
+                self._move_sidebar_highlight(-1)
+                event.stop()
+                return
+            if event.character == "l":
+                self._reset_sidebar_vim_pending()
+                self._focus_main_panel()
+                event.stop()
+                return
+            if event.key == "ctrl+d":
+                self._reset_sidebar_vim_pending()
+                self._page_sidebar(1)
+                event.stop()
+                return
+            if event.key == "ctrl+u":
+                self._reset_sidebar_vim_pending()
+                self._page_sidebar(-1)
+                event.stop()
+                return
+            if event.character == "g":
+                if self._sidebar_vim_g_pending:
+                    self._jump_sidebar_first()
+                    self._reset_sidebar_vim_pending()
+                else:
+                    self._sidebar_vim_g_pending = True
+                event.stop()
+                return
+            if event.character == "G":
+                self._reset_sidebar_vim_pending()
+                self._jump_sidebar_last()
+                event.stop()
+                return
+
+        self._reset_sidebar_vim_pending()
 
         if self._mode == "platforms" and event.key == "a":
             if not self._available_platform_names:
@@ -1264,29 +1679,19 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_version_key = None
         self._request_selected_version_preview(package_name, row.entry)
 
-    def on_option_list_option_highlighted(
-        self, event: OptionList.OptionHighlighted
-    ) -> None:
-        if event.option_list.id != "sidebar-list":
-            return
+    def _update_main_panel_for_sidebar_highlight(self, option_index: int) -> None:
         if self._mode == "packages":
-            if not self._visible_package_names:
+            if option_index < 0 or option_index >= len(self._visible_package_names):
                 return
-            if event.option_index < 0 or event.option_index >= len(
-                self._visible_package_names
-            ):
-                return
-            self._request_package_preview(
-                self._visible_package_names[event.option_index]
-            )
+            self._request_package_preview(self._visible_package_names[option_index])
             return
 
         if self._mode != "versions":
             return
-        if event.option_index < 0 or event.option_index >= len(self._version_rows):
+        if option_index < 0 or option_index >= len(self._version_rows):
             return
 
-        row = self._version_rows[event.option_index]
+        row = self._version_rows[option_index]
         package_name = self._selected_package
         if package_name is None:
             return
@@ -1295,16 +1700,28 @@ class CondaMetadataTui(App[None]):
             self._request_selected_version_preview(package_name, row.entry)
             return
         if row.kind == "section" and row.subdir is not None:
+            self._previewed_version_key = None
+            self._pending_preview_version_key = None
             self.query_one("#main-placeholder", Static).update(
                 f"# {escape(package_name)}\n\n"
                 f"Platform section: {escape(row.subdir)}\n"
                 "Press Enter to collapse or expand."
             )
+            self._reset_main_panel_scroll()
             return
         if row.kind == "back":
+            self._previewed_version_key = None
+            self._pending_preview_version_key = None
             cached = self._package_records_cache.get(package_name)
             if cached is not None:
                 self._update_main_panel_for_package(package_name, cached)
+
+    def on_option_list_option_highlighted(
+        self, event: OptionList.OptionHighlighted
+    ) -> None:
+        if event.option_list.id != "sidebar-list":
+            return
+        self._update_main_panel_for_sidebar_highlight(event.option_index)
 
     async def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
@@ -1350,3 +1767,4 @@ class CondaMetadataTui(App[None]):
         version = row.entry
         package_name = self._selected_package or "<unknown>"
         self._request_selected_version_preview(package_name, version)
+        self._focus_main_panel()

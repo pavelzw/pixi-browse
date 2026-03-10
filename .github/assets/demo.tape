@@ -3,32 +3,39 @@ Output .github/assets/demo.gif
 
 Set Theme "rose-pine-moon"
 Set Shell "bash"
-Set FontSize 28
+Set FontSize 18
 Set Width 1920
 Set Height 1080
 
 Hide
 Type "pixi shell" Enter
 Sleep 5s
-Type "pixi run postinstall" Enter
-Sleep 5s
 Type "clear" Enter
 Sleep 1s
 Show
 
-Type@150ms "pixi-browse" Sleep 1s Enter
+Type "pixi-browse"
+Sleep 1s
+Enter
 Sleep 3s
 
-Type@150ms "/polars" Sleep 1s Enter
+Type@250ms "/py-rattler"
+Sleep 3s
+Enter
 Sleep 3s
 
-Down@500ms 4 Enter
-Sleep 2s
-Type "d"
+Down@250ms 4
+Sleep 1s
+Enter
 Sleep 3s
+Down@250ms 20
+# escape right view
+Escape
+Sleep 1s
 
 Type "c"
-Type@150ms "bioconda" Enter
+Sleep 1s
+Type@250ms "bioconda" Enter
 Sleep 3s
 
 Down@500ms 5 Enter

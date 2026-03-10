@@ -1,6 +1,8 @@
 import asyncio
-import io
+import shutil
+from collections.abc import Coroutine
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from rattler.platform import Platform
 from rattler.version import Version
@@ -8,6 +10,16 @@ from rich.text import Text
 from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
+from pixi_browse.rendering import (
+    format_clickable_github_handle,
+    format_clickable_github_handle_list,
+    format_clickable_url,
+    format_clickable_url_list,
+    format_provenance,
+    render_package_preview,
+    render_selected_version_details,
+)
+from pixi_browse.tui import HelpScreen
 
 
 @dataclass(frozen=True)
@@ -22,6 +34,69 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+@dataclass(frozen=True)
+class _DetailedRecord:
+    version: Version
+    build: str
+    build_number: int
+    subdir: str
+    file_name: str
+    channel: str = "conda-forge"
+    size: int = 2048
+    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+    license: str = "BSD-3-Clause"
+    license_family: str = "BSD"
+    arch: str = "x86_64"
+    platform: str = "linux"
+    noarch: str | None = None
+    features: str | None = None
+    track_features: str | None = None
+    python_site_packages_path: str | None = None
+    md5: bytes = bytes.fromhex("00112233445566778899aabbccddeeff")
+    sha256: bytes = bytes.fromhex(
+        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    )
+    legacy_bz2_md5: bytes | None = None
+    legacy_bz2_size: int | None = None
+    depends: list[str] | None = None
+    constrains: list[str] | None = None
+    url: str = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    name: str = "demo"
+
+
+class _FakeKeyEvent:
+    def __init__(self, key: str, character: str | None = None) -> None:
+        self.key = key
+        self.character = character
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) -> None:
+    shared_client = object()
+    gateway_calls: list[object] = []
+
+    def _fake_create_gateway(*, client: object | None = None) -> object:
+        gateway_calls.append(client)
+        return object()
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.Client.default_client",
+        lambda: shared_client,
+    )
+    monkeypatch.setattr(
+        "pixi_browse.tui.create_gateway",
+        _fake_create_gateway,
+    )
+
+    app = CondaMetadataTui()
+
+    assert app._client is shared_client
+    assert gateway_calls == [shared_client]
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
@@ -53,6 +128,290 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
+def test_render_selected_version_details_includes_package_paths() -> None:
+    record = _DetailedRecord(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+        depends=["python >=3.13"],
+    )
+
+    rendered = render_selected_version_details(
+        "demo",
+        record,
+        content_width=90,
+        package_paths=["bin/demo", "lib/python3.13/site-packages/demo.py"],
+    )
+
+    assert "Files:" in rendered
+    assert " - bin/demo" in rendered
+    assert " - lib/python3.13/site-packages/demo.py" in rendered
+    assert "placeholder: coming soon" not in rendered
+
+
+def test_render_selected_version_details_includes_about_urls() -> None:
+    record = _DetailedRecord(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    rendered = render_selected_version_details(
+        "demo",
+        record,
+        content_width=90,
+        repository_urls=["https://github.com/example/demo"],
+        documentation_urls=["https://docs.example.com/demo"],
+        homepage_urls=["https://example.com/demo"],
+        recipe_maintainers=["@pavelzw", "xhochy"],
+        provenance_remote_url="https://github.com/conda-forge/polars-feedstock.git",
+        provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        rattler_build_version="0.38.0",
+    )
+
+    assert (
+        "URL: [@click=app.open_external_url('https://example.invalid/demo-1.2.3-py313h123_0.conda')]"
+        in rendered
+    )
+    assert (
+        "Repository: [@click=app.open_external_url('https://github.com/example/demo')]"
+        in rendered
+    )
+    assert (
+        "Documentation: [@click=app.open_external_url('https://docs.example.com/demo')]"
+        in rendered
+    )
+    assert (
+        "Homepage: [@click=app.open_external_url('https://example.com/demo')]"
+        in rendered
+    )
+    assert (
+        "Recipe maintainers: "
+        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
+        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
+        in rendered
+    )
+    assert (
+        "Provenance: "
+        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
+        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
+        in rendered
+    )
+    assert "Built with rattler-build 0.38.0" in rendered
+    assert "https://github.com/example/demo" in rendered
+    assert "https://docs.example.com/demo" in rendered
+    assert "https://example.com/demo" in rendered
+    assert "@click=app.open_external_url(" in rendered
+
+
+def test_format_clickable_url_uses_textual_click_action() -> None:
+    rendered = format_clickable_url("https://example.com/demo")
+
+    assert (
+        rendered
+        == "[@click=app.open_external_url('https://example.com/demo')]https://example.com/demo[/]"
+    )
+
+
+def test_format_clickable_url_list_compacts_urls_to_single_line() -> None:
+    rendered = format_clickable_url_list(
+        "Repository:",
+        [
+            "https://example.com/one",
+            "https://example.com/two",
+        ],
+    )
+
+    assert rendered == [
+        "Repository: "
+        "[@click=app.open_external_url('https://example.com/one')]https://example.com/one[/], "
+        "[@click=app.open_external_url('https://example.com/two')]https://example.com/two[/]"
+    ]
+
+
+def test_format_clickable_github_handle_uses_github_profile() -> None:
+    rendered = format_clickable_github_handle("@pavelzw")
+
+    assert (
+        rendered
+        == "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]"
+    )
+
+
+def test_format_clickable_github_handle_list_compacts_handles_to_single_line() -> None:
+    rendered = format_clickable_github_handle_list(
+        "Recipe maintainers:",
+        ["@pavelzw", "xhochy"],
+    )
+
+    assert rendered == [
+        "Recipe maintainers: "
+        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
+        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
+    ]
+
+
+def test_format_provenance_uses_github_commit_link() -> None:
+    rendered = format_provenance(
+        "https://github.com/conda-forge/polars-feedstock.git",
+        "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+    )
+
+    assert rendered == [
+        "Provenance: "
+        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
+        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
+    ]
+
+
+def test_render_package_preview_shows_version_selector_preview() -> None:
+    records = [
+        _DetailedRecord(
+            version=Version("1.2.3"),
+            build="py313h123_1",
+            build_number=1,
+            subdir="linux-64",
+            file_name="demo-1.2.3-py313h123_1.conda",
+        ),
+        _DetailedRecord(
+            version=Version("1.2.2"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.2-py313h123_0.conda",
+        ),
+    ]
+
+    rendered = render_package_preview(
+        "demo",
+        records,
+        record_sort_key=lambda record: (
+            record.version,
+            record.build,
+            record.subdir,
+            record.build_number,
+        ),
+    )
+
+    assert "Version selector preview" in rendered
+    assert "Press Enter to open the version list." in rendered
+    assert "▾ linux-64 (1)" in rendered
+    assert "▾ noarch (1)" in rendered
+    assert "1.2.3" in rendered
+    assert "py313h123_1" in rendered
+    assert "URL" not in rendered
+    assert "Dependencies" not in rendered
+
+
+def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
+    calls: list[str] = []
+
+    class _FakePathEntry:
+        def __init__(self, relative_path: str) -> None:
+            self.relative_path = relative_path
+
+    class _FakePathsJson:
+        paths = [
+            _FakePathEntry("bin/demo"),
+            _FakePathEntry("lib/python3.13/site-packages/demo.py"),
+        ]
+
+    async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
+        del client
+        calls.append(url)
+        return _FakePathsJson()
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.PathsJson.from_remote_url",
+        _fake_from_remote_url,
+    )
+
+    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    paths = asyncio.run(app._get_package_paths(preview_key, url))
+    cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
+
+    assert paths == [
+        "bin/demo",
+        "lib/python3.13/site-packages/demo.py",
+    ]
+    assert cached_paths == paths
+    assert calls == [url]
+
+
+def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
+    calls: list[str] = []
+
+    class _FakeAboutJson:
+        dev_url = ["https://github.com/example/demo"]
+        doc_url = ["https://docs.example.com/demo"]
+        home = ["https://example.com/demo"]
+        extra = {
+            "recipe-maintainers": ["@pavelzw", "xhochy"],
+            "remote_url": "https://github.com/conda-forge/polars-feedstock.git",
+            "sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        }
+
+    async def _fake_from_remote_url(client: object, url: str) -> _FakeAboutJson:
+        del client
+        calls.append(url)
+        return _FakeAboutJson()
+
+    async def _fake_fetch_raw_package_file_from_url(
+        client: object, url: str, path: str
+    ) -> bytes:
+        del client
+        assert url == "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+        assert path == "info/recipe/rendered_recipe.yaml"
+        return b"system_tools:\n  rattler-build: 0.38.0\n"
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.AboutJson.from_remote_url",
+        _fake_from_remote_url,
+    )
+    monkeypatch.setattr(
+        "pixi_browse.tui.fetch_raw_package_file_from_url",
+        _fake_fetch_raw_package_file_from_url,
+    )
+
+    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+    cached_about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+
+    assert about_urls == {
+        "repository": ["https://github.com/example/demo"],
+        "documentation": ["https://docs.example.com/demo"],
+        "homepage": ["https://example.com/demo"],
+        "recipe_maintainers": ["@pavelzw", "xhochy"],
+        "provenance_remote_url": "https://github.com/conda-forge/polars-feedstock.git",
+        "provenance_sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        "rattler_build_version": "0.38.0",
+    }
+    assert cached_about_urls == about_urls
+    assert calls == [url]
+
+
+def test_extract_rattler_build_version_from_rendered_recipe() -> None:
+    rendered_recipe = """
+context:
+  some-value: true
+system_tools:
+  rattler-build: 0.38.0
+  micromamba: 2.3.2
+package:
+  name: demo
+"""
+
+    assert CondaMetadataTui._extract_rattler_build_version(rendered_recipe) == "0.38.0"
+
+
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
     app = CondaMetadataTui(default_platforms={Platform("linux-64"), Platform("osx-64")})
     app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
@@ -74,6 +433,337 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
         expected.add(current_platform)
 
     assert app._selected_platform_names == expected
+
+
+def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    title_updates: list[str] = []
+
+    class _FakeOptionList:
+        highlighted = 0
+        scroll_y = 0.0
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            title_updates.append(value)
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#sidebar-list":
+            return option_list
+        assert selector == "#sidebar-title"
+        return _FakeStatic()
+
+    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+        assert package_name == "demo"
+        return [
+            _Record(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            )
+        ]
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_get_package_records", _fake_get_package_records)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_update_versions_status", lambda: None)
+    monkeypatch.setattr(app, "_render_version_options", lambda: None)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main-panel"))
+
+    asyncio.run(app._open_versions("demo"))
+
+    assert focused == []
+    assert title_updates == ["Versions: demo"]
+
+
+def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    app.action_escape()
+
+    assert focused == ["sidebar"]
+
+
+def test_on_key_l_focuses_main_panel_from_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("l", "l")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_gg_jumps_sidebar_to_first(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    jumped: list[str] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_jump_sidebar_first", lambda: jumped.append("first"))
+
+    first_g = _FakeKeyEvent("g", "g")
+    second_g = _FakeKeyEvent("g", "g")
+    app.on_key(first_g)  # type: ignore[arg-type]
+    app.on_key(second_g)  # type: ignore[arg-type]
+
+    assert jumped == ["first"]
+    assert first_g.stopped is True
+    assert second_g.stopped is True
+
+
+def test_on_key_ctrl_d_pages_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    page_calls: list[int] = []
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(
+        app, "_page_sidebar", lambda direction: page_calls.append(direction)
+    )
+
+    event = _FakeKeyEvent("ctrl+d")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert page_calls == [1]
+    assert event.stopped is True
+
+
+def test_set_sidebar_highlight_updates_version_preview(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._mode = "versions"
+    app._selected_package = "polars"
+    app._version_rows = [
+        VersionRow(kind="section", subdir="osx-arm64"),
+        VersionRow(kind="entry", subdir="osx-arm64", entry=entry),
+    ]
+
+    class _FakeOptionList:
+        highlighted: int | None = None
+
+    option_list = _FakeOptionList()
+    preview_calls: list[tuple[str, VersionEntry]] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version_entry: preview_calls.append(
+            (package_name, version_entry)
+        ),
+    )
+
+    app._set_sidebar_highlight(1)
+
+    assert option_list.highlighted == 1
+    assert preview_calls == [("polars", entry)]
+
+
+def test_section_highlight_clears_preview_state_for_same_entry_revisit(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._mode = "versions"
+    app._selected_package = "polars"
+    app._version_rows = [
+        VersionRow(kind="section", subdir="osx-arm64"),
+        VersionRow(kind="entry", subdir="osx-arm64", entry=entry),
+    ]
+    app._previewed_version_key = (
+        "polars",
+        "1.33.1",
+        "u64_idx_habc1234_1",
+        1,
+        "osx-arm64",
+        "polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    updates: list[str] = []
+
+    class _FakeOptionList:
+        highlighted: int | None = None
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#sidebar-list":
+            return option_list
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    reset_calls: list[str] = []
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
+
+    app._set_sidebar_highlight(0)
+
+    assert app._previewed_version_key is None
+    assert app._pending_preview_version_key is None
+    assert updates[-1].startswith("# polars\n\nPlatform section: osx-arm64")
+    assert reset_calls == ["reset"]
+
+
+def test_request_selected_version_preview_resets_scroll_for_cached_details(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.1"),
+        build="u64_idx_habc1234_1",
+        build_number=1,
+        subdir="osx-arm64",
+        file_name="polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    preview_key = (
+        "polars",
+        "1.33.1",
+        "u64_idx_habc1234_1",
+        1,
+        "osx-arm64",
+        "polars-1.33.1-u64_idx_habc1234_1.conda",
+    )
+    app._version_details_cache = {preview_key: "cached preview"}
+    updates: list[str] = []
+    reset_calls: list[str] = []
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
+
+    app._request_selected_version_preview("polars", entry)
+
+    assert updates == ["cached preview"]
+    assert reset_calls == ["reset"]
+    assert app._previewed_version_key == preview_key
+
+
+def test_request_selected_version_preview_resets_scroll_for_uncached_details(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.33.2"),
+        build="u64_idx_habc1234_2",
+        build_number=2,
+        subdir="osx-arm64",
+        file_name="polars-1.33.2-u64_idx_habc1234_2.conda",
+    )
+    updates: list[str] = []
+    reset_calls: list[str] = []
+    worker_calls: list[dict[str, object]] = []
+
+    class _FakeStatic:
+        def update(self, value: str) -> None:
+            updates.append(value)
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#main-placeholder"
+        return _FakeStatic()
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app,
+        "_reset_main_panel_scroll",
+        lambda: reset_calls.append("reset"),
+    )
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._request_selected_version_preview("polars", entry)
+
+    assert updates == ["# polars 1.33.2\n\nLoading repodata for selected version..."]
+    assert reset_calls == ["reset"]
+    assert worker_calls == [
+        {
+            "group": "version-preview",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_help_text_includes_expected_keybinds() -> None:
+    app = CondaMetadataTui()
+
+    help_text = app._help_text()
+
+    assert "?                 Show this help" in help_text
+    assert "j / k             Move selection or scroll" in help_text
+    assert "h / l             Focus left / right pane" in help_text
+    assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
+
+
+def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    pushed: list[HelpScreen] = []
+
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
+
+    app.action_show_help()
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], HelpScreen)
+
+
+def test_action_open_external_url_uses_webbrowser(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[str] = []
+
+    def _fake_open(url: str) -> bool:
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr("webbrowser.open", _fake_open)
+
+    app.action_open_external_url("https://example.com/demo")
+
+    assert opened == ["https://example.com/demo"]
 
 
 def test_rerender_visible_version_preview_invalidates_cache_on_resize(
@@ -168,14 +858,19 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     app._update_download_indicator()
 
-    assert main_panel.styles.border_subtitle_align == "left"
+    assert main_panel.styles.border_subtitle_align == "right"
     assert isinstance(main_panel.border_title, Text)
     assert main_panel.border_title.plain == "channel conda-forge"
     assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "download"
+    assert main_panel.border_subtitle.plain == "download  ? Help"
     assert any(
         str(span.style) == "bold red"
         and main_panel.border_subtitle.plain[span.start : span.end] == "d"
+        for span in main_panel.border_subtitle.spans
+    )
+    assert any(
+        str(span.style) == "bold red"
+        and main_panel.border_subtitle.plain[span.start : span.end] == "?"
         for span in main_panel.border_subtitle.spans
     )
 
@@ -204,8 +899,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
 
     assert isinstance(main_panel.border_title, Text)
     assert main_panel.border_title.plain == "channel conda-forge"
-    assert main_panel.styles.border_subtitle_align == "left"
-    assert main_panel.border_subtitle == ""
+    assert main_panel.styles.border_subtitle_align == "right"
+    assert isinstance(main_panel.border_subtitle, Text)
+    assert main_panel.border_subtitle.plain == "? Help"
 
 
 def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) -> None:
@@ -346,31 +1042,6 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
-def test_download_url_to_path_uses_timeout(tmp_path, monkeypatch) -> None:
-    app = CondaMetadataTui()
-    destination = tmp_path / "artifact.conda"
-    captured: dict[str, object] = {}
-
-    def _fake_urlopen(url: str, timeout: float) -> io.BytesIO:
-        captured["url"] = url
-        captured["timeout"] = timeout
-        return io.BytesIO(b"artifact-bytes")
-
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
-
-    app._download_url_to_path(
-        "https://example.invalid/artifact.conda",
-        destination,
-        timeout_seconds=12.5,
-    )
-
-    assert captured == {
-        "url": "https://example.invalid/artifact.conda",
-        "timeout": 12.5,
-    }
-    assert destination.read_bytes() == b"artifact-bytes"
-
-
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     tmp_path, monkeypatch
 ) -> None:
@@ -420,6 +1091,7 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     main_panel = _FakeMainPanel()
     status = _FakeStatus()
     notifications: list[str] = []
+    captured_downloads: list[tuple[object, str, object]] = []
 
     def _fake_query_one(
         selector: str, _widget_type: object = None
@@ -444,13 +1116,34 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     monkeypatch.setattr(
         app, "_get_record_for_version_entry", _fake_get_record_for_version_entry
     )
+
+    def _fake_download(
+        client: object, url: str, destination: object
+    ) -> Coroutine[object, object, str]:
+        captured_downloads.append((client, url, destination))
+        return asyncio.sleep(
+            0,
+            result=str(shutil.copyfile(source_file, str(destination))),
+        )
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.package_download_to_path",
+        _fake_download,
+    )
     monkeypatch.setattr(app, "notify", _fake_notify)
 
     asyncio.run(app._download_selected_version_entry("demo", entry))
 
     destination = (tmp_path / entry.file_name).resolve()
+    assert captured_downloads == [
+        (
+            app._client,
+            source_file.resolve().as_uri(),
+            destination.with_name(f"{destination.name}.part"),
+        )
+    ]
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
-    assert f"Downloading {entry.file_name}..." in main_panel.subtitle_history
-    assert "download" in main_panel.subtitle_history
+    assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history
+    assert "download  ? Help" in main_panel.subtitle_history
     assert notifications == [f"Downloaded successfully to {destination}"]

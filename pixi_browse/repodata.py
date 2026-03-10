@@ -5,18 +5,20 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from rattler.exceptions import GatewayError
+from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, SourceConfig
 
 from pixi_browse.platform_utils import platform_sort_key
 
 
-def create_gateway() -> Gateway:
+def create_gateway(*, client: Client | None = None) -> Gateway:
     return Gateway(
         default_config=SourceConfig(
             sharded_enabled=True,
             cache_action="cache-or-fetch",
         ),
+        client=client,
         show_progress=False,
     )
 

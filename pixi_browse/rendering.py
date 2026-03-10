@@ -2,14 +2,65 @@ from __future__ import annotations
 
 import textwrap
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 from rich.markup import escape
 
 
 def format_detail_row(label: str, value: str) -> str:
     return f"{label:<20}{value}"
+
+
+def format_clickable_url(url: str) -> str:
+    return format_clickable_link(escape(url), url)
+
+
+def format_clickable_link(label: str, url: str) -> str:
+    return f"[@click=app.open_external_url({url!r})]{label}[/]"
+
+
+def format_clickable_url_list(label: str, urls: Sequence[str] | None) -> list[str]:
+    if not urls:
+        return []
+    return [f"{label} " + ", ".join(format_clickable_url(url) for url in urls)]
+
+
+def format_clickable_github_handle(handle: str) -> str:
+    normalized = handle.lstrip("@")
+    return format_clickable_link(
+        f"@{escape(normalized)}",
+        f"https://github.com/{normalized}",
+    )
+
+
+def format_clickable_github_handle_list(
+    label: str, handles: Sequence[str] | None
+) -> list[str]:
+    if not handles:
+        return []
+    return [
+        f"{label} "
+        + ", ".join(format_clickable_github_handle(handle) for handle in handles)
+    ]
+
+
+def format_provenance(remote_url: str | None, sha: str | None) -> list[str]:
+    if not remote_url or not sha:
+        return []
+
+    parsed = urlparse(remote_url)
+    path_parts = [part for part in parsed.path.removesuffix(".git").split("/") if part]
+    if parsed.netloc == "github.com" and len(path_parts) >= 2:
+        slug = "/".join(path_parts[:2])
+        commit_url = f"https://github.com/{slug}/commit/{sha}"
+        label = f"{slug}@{sha}"
+    else:
+        commit_url = remote_url
+        label = f"{remote_url}@{sha}"
+
+    return [f"Provenance: {format_clickable_link(escape(label), commit_url)}"]
 
 
 def format_record_value(value: Any) -> str:
@@ -78,97 +129,47 @@ def render_package_preview(
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
 
-    latest = records[0]
-    latest_version = str(latest.version)
-    latest_version_records = [
-        record for record in records if str(record.version) == latest_version
-    ]
-    latest_extra_builds = max(0, len(latest_version_records) - 1)
-    latest_extra_text = (
-        f" (+ {latest_extra_builds} build{'s' if latest_extra_builds != 1 else ''})"
-        if latest_extra_builds
-        else ""
-    )
-
-    license_name = latest.license if latest.license is not None else "unknown"
-    size_text = format_byte_size(latest.size)
-    md5_text = latest.md5.hex() if latest.md5 is not None else "not available"
-    sha256_text = latest.sha256.hex() if latest.sha256 is not None else "not available"
-
-    grouped_by_version: dict[str, list[Any]] = defaultdict(list)
+    grouped_by_subdir: dict[str, list[Any]] = defaultdict(list)
     for record in records:
-        grouped_by_version[str(record.version)].append(record)
+        grouped_by_subdir[record.subdir].append(record)
 
-    for version_records in grouped_by_version.values():
-        version_records.sort(key=record_sort_key, reverse=True)
+    for subdir_records in grouped_by_subdir.values():
+        subdir_records.sort(
+            key=lambda record: (
+                *record_sort_key(record),
+                record.file_name,
+            ),
+            reverse=True,
+        )
 
-    sorted_versions = sorted(
-        grouped_by_version.items(),
-        key=lambda item: record_sort_key(item[1][0]),
-        reverse=True,
+    sorted_subdirs = sorted(
+        grouped_by_subdir,
+        key=lambda subdir: (subdir == "noarch", subdir),
     )
-    other_versions = [
-        (version, version_records)
-        for version, version_records in sorted_versions
-        if version != latest_version
-    ]
 
-    name_value = (
-        latest.name.source if hasattr(latest.name, "source") else str(latest.name)
-    )
-    artifact_line = f"{latest.file_name}{latest_extra_text}"
-    divider = "-" * max(44, len(artifact_line))
+    version_width = max(len(str(record.version)) for record in records)
+    build_width = max(len(record.build) for record in records)
 
     lines = [
-        f"# {package_name}",
+        f"# {escape(package_name)}",
         "",
-        artifact_line,
-        divider,
-        "",
-        format_detail_row("Name", name_value),
-        format_detail_row("Version", latest_version),
-        format_detail_row("Build", latest.build),
-        format_detail_row("Size", size_text),
-        format_detail_row("License", license_name),
-        format_detail_row("Subdir", latest.subdir),
-        format_detail_row("File Name", latest.file_name),
-        format_detail_row("URL", str(latest.url)),
-        format_detail_row("MD5", md5_text),
-        format_detail_row("SHA256", sha256_text),
-        "",
-        "Dependencies:",
+        f"Version selector preview ({len(records)} artifact{'s' if len(records) != 1 else ''}):",
+        "Press Enter to open the version list.",
     ]
 
-    if latest.depends:
-        lines.extend(f" - {dependency}" for dependency in latest.depends)
-    else:
-        lines.append(" - none")
-
-    lines.extend(
-        [
-            "",
-            "Run exports: not available in repodata",
-            "",
-            f"Other Versions ({len(other_versions)}):",
-        ]
-    )
-
-    if other_versions:
-        lines.append("Version    Build")
-        preview_count = 4
-        for version, version_records in other_versions[:preview_count]:
-            best = version_records[0]
-            extra_builds = max(0, len(version_records) - 1)
-            extra_text = (
-                f"  (+ {extra_builds} build{'s' if extra_builds != 1 else ''})"
-                if extra_builds
-                else ""
+    for subdir in sorted_subdirs:
+        subdir_records = grouped_by_subdir[subdir]
+        lines.extend(
+            [
+                "",
+                f"▾ {escape(subdir)} ({len(subdir_records)})",
+            ]
+        )
+        for record in subdir_records:
+            lines.append(
+                f"{escape(str(record.version)):<{version_width}} "
+                f"{escape(record.build):<{build_width}}"
             )
-            lines.append(f"{version:<10} {best.build}{extra_text}")
-
-        remaining = len(other_versions) - preview_count
-        if remaining > 0:
-            lines.append(f"... and {remaining} more")
 
     return "\n".join(lines)
 
@@ -178,6 +179,15 @@ def render_selected_version_details(
     record: Any,
     *,
     content_width: int,
+    package_paths: Sequence[str] | None = None,
+    package_paths_error: str | None = None,
+    repository_urls: Sequence[str] | None = None,
+    documentation_urls: Sequence[str] | None = None,
+    homepage_urls: Sequence[str] | None = None,
+    recipe_maintainers: Sequence[str] | None = None,
+    provenance_remote_url: str | None = None,
+    provenance_sha: str | None = None,
+    rattler_build_version: str | None = None,
 ) -> str:
     name_value = (
         record.name.source if hasattr(record.name, "source") else str(record.name)
@@ -209,17 +219,25 @@ def render_selected_version_details(
         ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
     ]
 
-    dependencies = [
-        f" - {escape(str(dependency))}"
-        for dependency in (record.depends if record.depends else [])
-    ] or [" - none"]
-    constrains = [
-        f" - {escape(str(constraint))}"
-        for constraint in (record.constrains if record.constrains else [])
-    ] or [" - none"]
+    dependencies = (
+        ["Dependencies:"]
+        + [
+            f" - {escape(str(dependency))}"
+            for dependency in (record.depends if record.depends else [])
+        ]
+        if record.depends
+        else ["Dependencies: none"]
+    )
+    constrains = (
+        ["Constrains:"]
+        + [
+            f" - {escape(str(constraint))}"
+            for constraint in (record.constrains if record.constrains else [])
+        ]
+        if record.constrains
+        else ["Constrains: none"]
+    )
     url = str(record.url)
-    escaped_url = escape(url)
-    link_target = escaped_url.replace('"', '\\"')
 
     lines = [
         f"# {escape(package_name)} {escape(str(record.version))}",
@@ -227,20 +245,49 @@ def render_selected_version_details(
         "Repodata metadata:",
     ]
     lines.extend(render_kv_box(table_rows, content_width))
+    repository_lines = format_clickable_url_list("Repository:", repository_urls)
+    documentation_lines = format_clickable_url_list(
+        "Documentation:", documentation_urls
+    )
+    homepage_lines = format_clickable_url_list("Homepage:", homepage_urls)
+    recipe_maintainer_lines = format_clickable_github_handle_list(
+        "Recipe maintainers:", recipe_maintainers
+    )
+    provenance_lines = format_provenance(provenance_remote_url, provenance_sha)
+    built_using_lines = (
+        [f"Built with rattler-build {escape(rattler_build_version)}"]
+        if rattler_build_version
+        else []
+    )
+    if package_paths_error is not None:
+        file_lines = [
+            "Files:",
+            f" - unavailable: {escape(package_paths_error)}",
+        ]
+    elif package_paths:
+        file_lines = [
+            "Files:",
+            *[f" - {escape(path)}" for path in package_paths],
+        ]
+    else:
+        file_lines = ["Files: none"]
+
     lines.extend(
         [
             "",
-            "URL:",
-            f'[link="{link_target}"]{escaped_url}[/link]',
+            f"URL: {format_clickable_url(url)}",
+            *([""] + repository_lines if repository_lines else []),
+            *([""] + documentation_lines if documentation_lines else []),
+            *([""] + homepage_lines if homepage_lines else []),
+            *([""] + recipe_maintainer_lines if recipe_maintainer_lines else []),
+            *([""] + provenance_lines if provenance_lines else []),
+            *([""] + built_using_lines if built_using_lines else []),
             "",
-            "Dependencies:",
             *dependencies,
             "",
-            "Constrains:",
             *constrains,
             "",
-            "Files:",
-            " - placeholder: coming soon",
+            *file_lines,
         ]
     )
     return "\n".join(lines)
