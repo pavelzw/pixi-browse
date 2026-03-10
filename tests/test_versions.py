@@ -1046,14 +1046,16 @@ def test_download_url_to_path_uses_shared_client(tmp_path, monkeypatch) -> None:
     destination = tmp_path / "artifact.conda"
     captured: dict[str, object] = {}
 
-    async def _fake_download(client: object, url: str, path: object) -> None:
+    async def _fake_download_to_path(client: object, url: str, path: object) -> None:
         captured["client"] = client
         captured["url"] = url
         captured["path"] = path
         assert hasattr(path, "write_bytes")
         path.write_bytes(b"artifact-bytes")
 
-    monkeypatch.setattr("pixi_browse.downloads.download", _fake_download)
+    monkeypatch.setattr(
+        "pixi_browse.downloads.package_download_to_path", _fake_download_to_path
+    )
 
     asyncio.run(
         app._download_url_to_path(
