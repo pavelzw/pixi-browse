@@ -400,7 +400,7 @@ class CondaMetadataTui(App[None]):
     def _update_versions_status(self) -> None:
         self.query_one("#status", Static).update(
             f"{len(self._current_versions):,} entries across "
-            f"{len(self._version_subdirs)} platform(s). Enter toggles section."
+            f"{len(self._version_subdirs)} platform{'s' if len(self._version_subdirs) > 1 else ''}."
         )
 
     def _render_platform_options(self) -> None:
