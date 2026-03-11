@@ -1312,7 +1312,9 @@ class CondaMetadataTui(App[None]):
         selected_count = len(selected)
 
         message = Text()
-        message.append(f"{selected_count} platforms selected. Press Enter to apply.\n")
+        message.append(
+            f"{selected_count} platforms selected. Press Space to select/deselect a platform. Press Enter to apply.\n"
+        )
         if selected == all_platforms:
             message.append("Select def")
             message.append("a", style="bold red")
