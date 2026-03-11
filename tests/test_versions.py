@@ -832,7 +832,7 @@ def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
 
     assert len(updates) == 1
     assert updates == [
-        "1 entries across 1 platforms.",
+        "1 entries across 1 platform.",
     ]
 
 
