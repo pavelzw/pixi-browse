@@ -2,7 +2,8 @@ from __future__ import annotations
 
 
 def fuzzy_score(query: str, candidate: str) -> int | None:
-    """Score a candidate using subsequence matching; higher scores are better."""
+    """Score a candidate using subsequence matching; higher scores are
+    better."""
     query = query.casefold().strip()
     candidate = candidate.casefold()
     if not query:

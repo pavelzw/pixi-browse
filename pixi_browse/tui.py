@@ -1191,7 +1191,8 @@ class CondaMetadataTui(App[None]):
         self._previewed_package = package_name
 
     def _build_version_entries(self, records: list[Any]) -> list[VersionEntry]:
-        """Build version entries while preserving distinct artifacts per build."""
+        """Build version entries while preserving distinct artifacts per
+        build."""
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
         for record in records:
             key = (
