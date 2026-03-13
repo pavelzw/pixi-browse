@@ -8,9 +8,18 @@ from urllib.parse import urlparse
 
 from rich.markup import escape
 
+from pixi_browse.models import VersionDetailsData
+
 
 def format_detail_row(label: str, value: str) -> str:
     return f"{label:<20}{value}"
+
+
+def format_detail_rows(rows: Sequence[tuple[str, str]]) -> list[str]:
+    if not rows:
+        return []
+    label_width = max(len(label) for label, _ in rows)
+    return [f"{label:<{label_width}}  {value}" for label, value in rows]
 
 
 def format_clickable_url(url: str) -> str:
@@ -172,6 +181,146 @@ def render_package_preview(
             )
 
     return "\n".join(lines)
+
+
+def _format_run_exports_lines(run_exports: Any) -> list[str]:
+    if run_exports is None:
+        return []
+    if isinstance(run_exports, list):
+        return [escape(str(item)) for item in run_exports]
+    if isinstance(run_exports, dict):
+        lines: list[str] = []
+        for key, value in run_exports.items():
+            if value in (None, [], {}):
+                continue
+            if isinstance(value, list):
+                lines.extend(
+                    f"{escape(str(key))}: {escape(str(item))}" for item in value
+                )
+                continue
+            lines.append(f"{escape(str(key))}: {escape(str(value))}")
+        return lines
+    return [escape(str(run_exports))]
+
+
+def build_version_details_data(
+    package_name: str,
+    record: Any,
+    *,
+    package_paths: Sequence[str] | None = None,
+    package_paths_error: str | None = None,
+    repository_urls: Sequence[str] | None = None,
+    documentation_urls: Sequence[str] | None = None,
+    homepage_urls: Sequence[str] | None = None,
+    recipe_maintainers: Sequence[str] | None = None,
+    provenance_remote_url: str | None = None,
+    provenance_sha: str | None = None,
+    rattler_build_version: str | None = None,
+    run_exports: Any = None,
+) -> VersionDetailsData:
+    name_value = (
+        record.name.source if hasattr(record.name, "source") else str(record.name)
+    )
+    metadata_rows: list[tuple[str, str]] = [
+        ("Package", escape(package_name)),
+        ("Name", escape(name_value)),
+        ("Version", format_record_value(record.version)),
+        ("Build", format_record_value(record.build)),
+        ("Build Number", format_record_value(record.build_number)),
+        ("Subdir", format_record_value(record.subdir)),
+        ("File Name", format_record_value(record.file_name)),
+        ("Channel", format_record_value(record.channel)),
+        ("Size", format_byte_size(record.size)),
+        ("Timestamp", format_record_value(record.timestamp)),
+        ("License", format_record_value(record.license)),
+        ("License Family", format_record_value(record.license_family)),
+        ("Arch", format_record_value(record.arch)),
+        ("Platform", format_record_value(record.platform)),
+        ("NoArch", format_record_value(record.noarch)),
+        ("Features", format_record_value(record.features)),
+        ("Track Features", format_record_value(record.track_features)),
+        (
+            "Python Site-Packages",
+            format_record_value(record.python_site_packages_path),
+        ),
+        ("MD5", format_record_value(record.md5)),
+        ("SHA256", format_record_value(record.sha256)),
+        ("Legacy .tar.bz2 MD5", format_record_value(record.legacy_bz2_md5)),
+        ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
+        ("Package URL", format_clickable_url(str(record.url))),
+    ]
+    if repository_urls:
+        metadata_rows.append(
+            (
+                "Repository",
+                ", ".join(format_clickable_url(url) for url in repository_urls),
+            )
+        )
+    if documentation_urls:
+        metadata_rows.append(
+            (
+                "Documentation",
+                ", ".join(format_clickable_url(url) for url in documentation_urls),
+            )
+        )
+    if homepage_urls:
+        metadata_rows.append(
+            (
+                "Homepage",
+                ", ".join(format_clickable_url(url) for url in homepage_urls),
+            )
+        )
+    if recipe_maintainers:
+        metadata_rows.append(
+            (
+                "Recipe maintainers",
+                ", ".join(
+                    format_clickable_github_handle(handle)
+                    for handle in recipe_maintainers
+                ),
+            )
+        )
+    provenance_lines = format_provenance(provenance_remote_url, provenance_sha)
+    if provenance_lines:
+        metadata_rows.append(("Provenance", provenance_lines[0].split(": ", 1)[1]))
+
+    if rattler_build_version:
+        metadata_rows.append(
+            (
+                "Built with",
+                f"rattler-build {escape(rattler_build_version)}",
+            )
+        )
+    metadata_lines = format_detail_rows(metadata_rows)
+
+    if package_paths_error is not None:
+        file_lines = [f"Unavailable: {escape(package_paths_error)}"]
+    elif package_paths:
+        file_lines = [escape(path) for path in package_paths]
+    else:
+        file_lines = ["No files listed."]
+
+    dependencies = (
+        tuple(escape(str(dependency)) for dependency in record.depends)
+        if record.depends
+        else ("No dependencies.",)
+    )
+    constraints = (
+        tuple(escape(str(constraint)) for constraint in record.constrains)
+        if record.constrains
+        else ("No constraints.",)
+    )
+    run_export_lines = tuple(_format_run_exports_lines(run_exports)) or (
+        "No run exports.",
+    )
+
+    return VersionDetailsData(
+        metadata_lines=tuple(metadata_lines),
+        dependencies=dependencies,
+        constraints=constraints,
+        run_exports=run_export_lines,
+        files=tuple(file_lines),
+    )
 
 
 def render_selected_version_details(

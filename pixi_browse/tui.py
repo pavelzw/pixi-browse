@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from rattler.exceptions import GatewayError
@@ -20,23 +21,31 @@ from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from rattler.version import Version
 from rich.markup import escape
+from rich.style import Style
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Key, Paste, Resize
+from textual.events import Click, Key, Paste, Resize
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 
-from pixi_browse.models import VersionEntry, VersionPreviewKey, VersionRow, ViewMode
+from pixi_browse.models import (
+    DependencyTab,
+    VersionDetailsData,
+    VersionEntry,
+    VersionPreviewKey,
+    VersionRow,
+    ViewMode,
+)
 from pixi_browse.platform_utils import platform_sort_key
 from pixi_browse.rendering import (
+    build_version_details_data,
     format_byte_size,
     format_detail_row,
     format_record_value,
     render_kv_box,
     render_package_preview,
-    render_selected_version_details,
 )
 from pixi_browse.repodata import (
     create_gateway,
@@ -46,18 +55,385 @@ from pixi_browse.repodata import (
 )
 from pixi_browse.search import fuzzy_score
 
+DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
+    "dependencies",
+    "constraints",
+    "run_exports",
+)
+ACTIVE_SECTION_TITLE_STYLE = Style(color="#f6c5d5", bold=True)
+INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
+ACTIVE_TAB_STYLE = Style(color="#f6c5d5", bold=True)
+INACTIVE_SELECTED_TAB_STYLE = Style(color="#f6c5d5", bold=False)
+INACTIVE_TAB_STYLE = Style(color="white", bold=False)
+TAB_HINT_STYLE = Style(color="#908caa", bold=False)
 
-class MainPanel(VerticalScroll):
+
+class DetailSection(Vertical):
+    def __init__(self, title: str, index: int, *, show_tabs: bool = False) -> None:
+        super().__init__(classes="detail-section")
+        self._index = index
+        del title, show_tabs
+        self.auto_links = False
+        self.styles.border_title_align = "left"
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id=f"detail-scroll-{self._index}", classes="detail-scroll"):
+            yield Static(id=f"detail-body-{self._index}", classes="detail-body")
+
+    def on_click(self, event: Click) -> None:
+        style = event.style
+        meta = style.meta if style is not None else None
+        click_meta = meta.get("@click") if meta is not None else None
+        if click_meta is not None:
+            action_name, args = click_meta
+            if action_name == "app.select_dependency_tab":
+                app = cast("CondaMetadataTui", self.app)
+                app.action_select_dependency_tab(*args)
+                event.stop()
+                return
+        self.app.query_one(
+            "#version-details-view", VersionDetailsView
+        ).activate_section(
+            self._index,
+            focus_main_panel=True,
+        )
+        event.stop()
+
+    def update_header(self, title: str | Text) -> None:
+        self.border_title = title
+
+    def update_body(self, body: str | Text) -> None:
+        self.query_one(f"#detail-body-{self._index}", Static).update(body)
+
+    def set_active(self, active: bool) -> None:
+        self.set_class(active, "-active")
+        self.set_class(not active, "-collapsed")
+
+    def scroll_body_home(self) -> None:
+        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_home(
+            animate=False,
+            immediate=True,
+            x_axis=False,
+        )
+
+    def scroll_body_end(self) -> None:
+        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_end(
+            animate=False
+        )
+
+    def scroll_body_by(self, delta: float) -> None:
+        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
+
+    def page_step(self) -> int:
+        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        return max(1, scroll.size.height)
+
+
+class VersionDetailsView(Vertical):
+    def __init__(self) -> None:
+        super().__init__(id="version-details-view")
+        self._details: VersionDetailsData | None = None
+        self._active_section = 0
+        self._dependency_tab_index = 0
+
+    def compose(self) -> ComposeResult:
+        yield DetailSection("Metadata", 0)
+        yield DetailSection("Dependencies", 1, show_tabs=True)
+        yield DetailSection("Files", 2)
+
+    def set_details(self, details: VersionDetailsData) -> None:
+        self._details = details
+        self.display = True
+        self._refresh_sections()
+
+    def set_active_section(self, index: int) -> None:
+        self._active_section = max(0, min(index, 2))
+        self._apply_section_state()
+
+    def activate_section(self, index: int, *, focus_main_panel: bool = False) -> None:
+        self.set_active_section(index)
+        if focus_main_panel:
+            self.app.query_one("#main-panel", MainPanel).focus()
+
+    def cycle_active_section(self, direction: int) -> None:
+        self._active_section = (self._active_section + direction) % 3
+        self._apply_section_state()
+
+    def cycle_dependency_tab(self, direction: int) -> None:
+        self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
+            DEPENDENCY_TABS
+        )
+        self._refresh_dependency_section()
+
+    def set_dependency_tab(self, tab: DependencyTab) -> None:
+        self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
+        self._refresh_dependency_section()
+
+    def scroll_home_active(self) -> None:
+        self._section(self._active_section).scroll_body_home()
+
+    def scroll_end_active(self) -> None:
+        self._section(self._active_section).scroll_body_end()
+
+    def scroll_active(self, delta: float) -> None:
+        self._section(self._active_section).scroll_body_by(delta)
+
+    def active_page_step(self) -> int:
+        return self._section(self._active_section).page_step()
+
+    def dependency_section_is_active(self) -> bool:
+        return self._active_section == 1
+
+    def _section(self, index: int) -> DetailSection:
+        return list(self.query(DetailSection))[index]
+
+    def _active_dependency_tab(self) -> DependencyTab:
+        return DEPENDENCY_TABS[self._dependency_tab_index]
+
+    def _apply_section_state(self) -> None:
+        for index, section in enumerate(self.query(DetailSection)):
+            section.set_active(index == self._active_section)
+        if self._details is None:
+            return
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(1).update_header(self._render_dependency_header())
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+
+    def _refresh_sections(self) -> None:
+        if self._details is None:
+            return
+
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(0).update_body("\n".join(self._details.metadata_lines))
+
+        self._refresh_dependency_section()
+
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+        self._section(2).update_body("\n".join(self._details.files))
+
+        self._apply_section_state()
+
+    def _refresh_dependency_section(self) -> None:
+        if self._details is None:
+            return
+
+        dependency_section = self._section(1)
+        dependency_section.update_header(self._render_dependency_header())
+        dependency_section.update_body(
+            "\n".join(self._dependency_lines(self._active_dependency_tab()))
+        )
+
+    def _dependency_lines(self, tab: DependencyTab) -> tuple[str, ...]:
+        assert self._details is not None
+        if tab == "dependencies":
+            return self._details.dependencies
+        if tab == "constraints":
+            return self._details.constraints
+        return self._details.run_exports
+
+    def _render_dependency_tabs(self) -> Text:
+        labels = {
+            "dependencies": "Dependencies",
+            "constraints": "Constraints",
+            "run_exports": "Run exports",
+        }
+        tab_text = Text()
+        for index, tab in enumerate(DEPENDENCY_TABS):
+            if index:
+                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
+            tab_text.append_text(
+                self._render_clickable_dependency_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_dependency_tab(),
+                    pane_active=self._active_section == 1,
+                )
+            )
+        return tab_text
+
+    def _render_section_header(self, index: int, label: str) -> Text:
+        style = (
+            ACTIVE_SECTION_TITLE_STYLE
+            if index == self._active_section
+            else INACTIVE_SECTION_TITLE_STYLE
+        )
+        return Text(f"[{index + 1}] {label}", style=style)
+
+    def _render_dependency_header(self) -> Text:
+        header = self._render_section_header(1, "")
+        header.append_text(self._render_dependency_tabs())
+        if self._active_section == 1:
+            header.append("  [ / ]", style=TAB_HINT_STYLE)
+        return header
+
+    @staticmethod
+    def _render_clickable_dependency_tab(
+        tab: DependencyTab, label: str, *, active: bool, pane_active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(
+            Style(
+                meta={
+                    "@click": (
+                        "app.select_dependency_tab",
+                        (tab,),
+                    )
+                }
+            )
+        )
+        return text
+
+
+class MainPanel(Vertical):
     can_focus = True
     _vim_g_pending = False
 
+    @staticmethod
+    def _page_step(height: int) -> int:
+        return max(1, height)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="main-placeholder-scroll"):
+            yield Static(
+                "Main panel placeholder.\n\nSelect a package in the sidebar.",
+                id="main-placeholder",
+            )
+        yield VersionDetailsView()
+
+    def on_mount(self) -> None:
+        self.show_placeholder(
+            "Main panel placeholder.\n\nSelect a package in the sidebar."
+        )
+
+    def show_placeholder(self, content: str | Text) -> None:
+        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
+        placeholder.display = True
+        self.query_one("#main-placeholder", Static).update(content)
+        self.query_one("#version-details-view", VersionDetailsView).display = False
+
+    def show_version_details(self, details: VersionDetailsData) -> None:
+        self.query_one("#main-placeholder-scroll", VerticalScroll).display = False
+        version_details = self.query_one("#version-details-view", VersionDetailsView)
+        version_details.set_details(details)
+        version_details.display = True
+
+    def set_active_section(self, index: int) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).set_active_section(
+            index
+        )
+
+    def cycle_dependency_tab(self, direction: int) -> None:
+        self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).cycle_dependency_tab(direction)
+
+    def dependency_section_is_active(self) -> bool:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).dependency_section_is_active()
+
+    def set_dependency_tab(self, tab: DependencyTab) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
+            tab
+        )
+
+    def cycle_active_section(self, direction: int) -> None:
+        self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).cycle_active_section(direction)
+
+    def reset_scroll(self) -> None:
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).scroll_home_active()
+            return
+        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_home(
+            animate=False,
+            immediate=True,
+            x_axis=False,
+        )
+
+    def scroll_main(self, delta: float) -> None:
+        if self._showing_version_details():
+            self.query_one("#version-details-view", VersionDetailsView).scroll_active(
+                delta
+            )
+            return
+        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
+        placeholder.scroll_to(y=placeholder.scroll_y + delta, animate=False)
+
+    def scroll_home_main(self) -> None:
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).scroll_home_active()
+            return
+        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_to(
+            y=0,
+            animate=False,
+        )
+
+    def scroll_end_main(self) -> None:
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).scroll_end_active()
+            return
+        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_end(
+            animate=False
+        )
+
+    def _showing_version_details(self) -> bool:
+        return self.query_one("#version-details-view", VersionDetailsView).display
+
+    def current_page_step(self) -> int:
+        if self._showing_version_details():
+            return self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).active_page_step()
+
+        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
+        return self._page_step(placeholder.size.height)
+
     def on_key(self, event: Key) -> None:
-        page_height = max(1, self.size.height - 2)
+        page_height = self.current_page_step()
         character = event.character
+
+        if self._showing_version_details():
+            dependency_section_is_active = self.dependency_section_is_active()
+            if event.key == "tab":
+                self.cycle_active_section(1)
+                event.stop()
+                return
+            if event.key in {"shift+tab", "backtab"}:
+                self.cycle_active_section(-1)
+                event.stop()
+                return
+            if character in {"1", "2", "3"}:
+                self.set_active_section(int(character) - 1)
+                event.stop()
+                return
+            if character == "[" and dependency_section_is_active:
+                self.cycle_dependency_tab(-1)
+                event.stop()
+                return
+            if character == "]" and dependency_section_is_active:
+                self.cycle_dependency_tab(1)
+                event.stop()
+                return
 
         if character == "g":
             if self._vim_g_pending:
-                self.scroll_to(y=0, animate=False)
+                self.scroll_home_main()
                 self._vim_g_pending = False
             else:
                 self._vim_g_pending = True
@@ -65,7 +441,7 @@ class MainPanel(VerticalScroll):
             return
 
         if character == "G":
-            self.scroll_end(animate=False)
+            self.scroll_end_main()
             self._vim_g_pending = False
             event.stop()
             return
@@ -73,35 +449,35 @@ class MainPanel(VerticalScroll):
         self._vim_g_pending = False
 
         if event.key in {"up", "k"}:
-            self.scroll_to(y=self.scroll_y - 1, animate=False)
+            self.scroll_main(-1)
             event.stop()
             return
         if event.key in {"down", "j"}:
-            self.scroll_to(y=self.scroll_y + 1, animate=False)
+            self.scroll_main(1)
             event.stop()
             return
         if event.key == "pageup":
-            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            self.scroll_main(-page_height)
             event.stop()
             return
         if event.key == "pagedown":
-            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            self.scroll_main(page_height)
             event.stop()
             return
         if event.key == "ctrl+u":
-            self.scroll_to(y=self.scroll_y - page_height, animate=False)
+            self.scroll_main(-page_height)
             event.stop()
             return
         if event.key == "ctrl+d":
-            self.scroll_to(y=self.scroll_y + page_height, animate=False)
+            self.scroll_main(page_height)
             event.stop()
             return
         if event.key == "home":
-            self.scroll_to(y=0, animate=False)
+            self.scroll_home_main()
             event.stop()
             return
         if event.key == "end":
-            self.scroll_end(animate=False)
+            self.scroll_end_main()
             event.stop()
             return
         if character == "h":
@@ -198,7 +574,7 @@ class CondaMetadataTui(App[None]):
         self._version_rows: list[VersionRow] = []
         self._version_about_urls_cache: dict[VersionPreviewKey, dict[str, Any]] = {}
         self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
-        self._version_details_cache: dict[VersionPreviewKey, str] = {}
+        self._version_details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
         self._selected_package: str | None = None
@@ -219,11 +595,7 @@ class CondaMetadataTui(App[None]):
                 yield Static("Packages", id="sidebar-title")
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
-            with MainPanel(id="main-panel"):
-                yield Static(
-                    "Main panel placeholder.\n\nSelect a package in the sidebar.",
-                    id="main-placeholder",
-                )
+            yield MainPanel(id="main-panel")
 
     async def on_mount(self) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -606,9 +978,7 @@ class CondaMetadataTui(App[None]):
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = True
         self.query_one("#sidebar-title", Static).update("Packages")
-        self.query_one("#main-placeholder", Static).update(
-            f"# {escape(channel_name)}\n\nLoading repodata..."
-        )
+        self._show_main_placeholder(f"# {escape(channel_name)}\n\nLoading repodata...")
         self._update_filter_indicator()
 
         loaded = await self._load_packages()
@@ -685,6 +1055,24 @@ class CondaMetadataTui(App[None]):
             return 90
         return max(50, main_panel.size.width - 6)
 
+    def _show_main_placeholder(self, content: str | Text) -> None:
+        self.query_one("#main-panel", MainPanel).show_placeholder(content)
+
+    def _show_version_details(self, details: VersionDetailsData) -> None:
+        self.query_one("#main-panel", MainPanel).show_version_details(details)
+
+    def _set_active_main_section(self, index: int) -> None:
+        self.query_one("#main-panel", MainPanel).set_active_section(index)
+
+    def _cycle_active_main_section(self, direction: int) -> None:
+        self.query_one("#main-panel", MainPanel).cycle_active_section(direction)
+
+    def _set_main_dependency_tab(self, tab: DependencyTab) -> None:
+        self.query_one("#main-panel", MainPanel).set_dependency_tab(tab)
+
+    def _cycle_main_dependency_tab(self, direction: int) -> None:
+        self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
+
     def _focus_main_panel(self) -> None:
         self.query_one("#main-panel", MainPanel).focus()
 
@@ -698,15 +1086,10 @@ class CondaMetadataTui(App[None]):
         return self.focused is self.query_one("#main-panel", MainPanel)
 
     def _reset_main_panel_scroll(self) -> None:
-        self.query_one("#main-panel", MainPanel).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
-        )
+        self.query_one("#main-panel", MainPanel).reset_scroll()
 
     def _scroll_main_panel(self, delta: float) -> None:
-        main_panel = self.query_one("#main-panel", MainPanel)
-        main_panel.scroll_to(y=main_panel.scroll_y + delta, animate=False)
+        self.query_one("#main-panel", MainPanel).scroll_main(delta)
 
     def _sidebar_option_count(self) -> int:
         if self._mode == "packages":
@@ -737,7 +1120,10 @@ class CondaMetadataTui(App[None]):
         self._set_sidebar_highlight(current + delta)
 
     def _page_sidebar(self, direction: int) -> None:
-        page_size = max(1, self.query_one("#sidebar-list", OptionList).size.height - 2)
+        page_size = max(
+            1,
+            (self.query_one("#sidebar-list", OptionList).size.height - 2) // 2,
+        )
         self._move_sidebar_highlight(direction * page_size)
 
     def _jump_sidebar_first(self) -> None:
@@ -763,6 +1149,9 @@ class CondaMetadataTui(App[None]):
             [
                 ("j / k", "Move selection or scroll"),
                 ("h / l", "Focus left / right pane"),
+                ("1 / 2 / 3", "Focus metadata, deps, or files"),
+                ("Tab / Shift+Tab", "Cycle focused section"),
+                ("[ / ]", "Cycle dependency tabs"),
                 ("gg / G", "Jump to top / bottom"),
                 ("Ctrl+u / Ctrl+d", "Page up / down"),
                 ("Enter", "Open / select"),
@@ -888,7 +1277,15 @@ class CondaMetadataTui(App[None]):
         self._version_about_urls_cache[preview_key] = about_urls
         return about_urls
 
-    def _render_selected_version_details(
+    async def _get_run_exports(self, url: str) -> Any:
+        run_exports_bytes = await fetch_raw_package_file_from_url(
+            self._client,
+            url,
+            "info/run_exports.json",
+        )
+        return json.loads(run_exports_bytes.decode("utf-8", errors="replace"))
+
+    def _build_selected_version_details(
         self,
         package_name: str,
         record: Any,
@@ -902,11 +1299,11 @@ class CondaMetadataTui(App[None]):
         provenance_remote_url: str | None = None,
         provenance_sha: str | None = None,
         rattler_build_version: str | None = None,
-    ) -> str:
-        return render_selected_version_details(
+        run_exports: Any = None,
+    ) -> VersionDetailsData:
+        return build_version_details_data(
             package_name,
             record,
-            content_width=self._main_panel_content_width(),
             package_paths=package_paths,
             package_paths_error=package_paths_error,
             repository_urls=repository_urls,
@@ -916,6 +1313,7 @@ class CondaMetadataTui(App[None]):
             provenance_remote_url=provenance_remote_url,
             provenance_sha=provenance_sha,
             rattler_build_version=rattler_build_version,
+            run_exports=run_exports,
         )
 
     async def _load_and_render_selected_version_preview(
@@ -928,7 +1326,11 @@ class CondaMetadataTui(App[None]):
             return
 
         if record is None:
-            rendered = "No matching repodata record found for selected version."
+            self._show_main_placeholder(
+                "No matching repodata record found for selected version."
+            )
+            self._previewed_version_key = None
+            return
         else:
             package_paths: list[str] | None = None
             package_paths_error: str | None = None
@@ -941,6 +1343,7 @@ class CondaMetadataTui(App[None]):
                 "provenance_sha": None,
                 "rattler_build_version": None,
             }
+            run_exports: Any = None
             try:
                 package_paths = await self._get_package_paths(
                     preview_key, str(record.url)
@@ -951,8 +1354,12 @@ class CondaMetadataTui(App[None]):
                 about_urls = await self._get_about_urls(preview_key, str(record.url))
             except Exception:
                 pass
+            try:
+                run_exports = await self._get_run_exports(str(record.url))
+            except Exception:
+                pass
 
-            rendered = self._render_selected_version_details(
+            rendered = self._build_selected_version_details(
                 package_name,
                 record,
                 package_paths=package_paths,
@@ -964,10 +1371,11 @@ class CondaMetadataTui(App[None]):
                 provenance_remote_url=about_urls["provenance_remote_url"],
                 provenance_sha=about_urls["provenance_sha"],
                 rattler_build_version=about_urls["rattler_build_version"],
+                run_exports=run_exports,
             )
 
         self._version_details_cache[preview_key] = rendered
-        self.query_one("#main-placeholder", Static).update(rendered)
+        self._show_version_details(rendered)
         self._reset_main_panel_scroll()
         self._previewed_version_key = preview_key
 
@@ -982,12 +1390,12 @@ class CondaMetadataTui(App[None]):
 
         cached = self._version_details_cache.get(preview_key)
         if cached is not None:
-            self.query_one("#main-placeholder", Static).update(cached)
+            self._show_version_details(cached)
             self._reset_main_panel_scroll()
             self._previewed_version_key = preview_key
             return
 
-        self.query_one("#main-placeholder", Static).update(
+        self._show_main_placeholder(
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
             "Loading repodata for selected version..."
         )
@@ -1082,9 +1490,7 @@ class CondaMetadataTui(App[None]):
     def _update_main_panel_for_package(
         self, package_name: str, records: list[Any]
     ) -> None:
-        self.query_one("#main-placeholder", Static).update(
-            self._render_package_preview(package_name, records)
-        )
+        self._show_main_placeholder(self._render_package_preview(package_name, records))
         self._reset_main_panel_scroll()
         self._previewed_package = package_name
 
@@ -1105,9 +1511,7 @@ class CondaMetadataTui(App[None]):
             self._update_main_panel_for_package(package_name, cached)
             return
 
-        self.query_one("#main-placeholder", Static).update(
-            f"# {package_name}\n\nLoading repodata..."
-        )
+        self._show_main_placeholder(f"# {package_name}\n\nLoading repodata...")
         self.run_worker(
             self._load_and_render_package_preview(package_name),
             group="package-preview",
@@ -1136,9 +1540,7 @@ class CondaMetadataTui(App[None]):
             self._request_package_preview(self._visible_package_names[0])
         else:
             self._pending_preview_package = None
-            self.query_one("#main-placeholder", Static).update(
-                "No packages match the current selection."
-            )
+            self._show_main_placeholder("No packages match the current selection.")
 
     def _back_to_packages(self) -> None:
         self._mode = "packages"
@@ -1447,6 +1849,15 @@ class CondaMetadataTui(App[None]):
     def action_open_external_url(self, url: str) -> None:
         webbrowser.open(url)
 
+    def action_select_dependency_tab(self, tab: str) -> None:
+        if self._mode != "versions":
+            return
+        if tab not in DEPENDENCY_TABS:
+            return
+        self._set_active_main_section(1)
+        self._set_main_dependency_tab(tab)  # type: ignore[arg-type]
+        self._focus_main_panel()
+
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:
             self._append_channel_char("q")
@@ -1546,6 +1957,44 @@ class CondaMetadataTui(App[None]):
                 return
 
         self._reset_sidebar_vim_pending()
+
+        if self._mode == "versions" and event.key == "tab":
+            self._cycle_active_main_section(1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if self._mode == "versions" and event.key in {"shift+tab", "backtab"}:
+            self._cycle_active_main_section(-1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if self._mode == "versions" and event.character in {"1", "2", "3"}:
+            self._set_active_main_section(int(event.character) - 1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and event.character == "["
+            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
+        ):
+            self._cycle_main_dependency_tab(-1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and event.character == "]"
+            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
+        ):
+            self._cycle_main_dependency_tab(1)
+            self._focus_main_panel()
+            event.stop()
+            return
 
         if self._mode == "platforms" and event.key == "a":
             if not self._available_platform_names:
@@ -1676,8 +2125,14 @@ class CondaMetadataTui(App[None]):
         if row.kind != "entry" or row.entry is None:
             return
 
-        # Version details include width-dependent formatting, so invalidate cache on resize.
-        self._version_details_cache.clear()
+        preview_key = self._version_preview_key(package_name, row.entry)
+        cached = self._version_details_cache.get(preview_key)
+        if cached is not None:
+            self._show_version_details(cached)
+            self._previewed_version_key = preview_key
+            self._pending_preview_version_key = preview_key
+            return
+
         self._previewed_version_key = None
         self._pending_preview_version_key = None
         self._request_selected_version_preview(package_name, row.entry)
@@ -1705,7 +2160,7 @@ class CondaMetadataTui(App[None]):
         if row.kind == "section" and row.subdir is not None:
             self._previewed_version_key = None
             self._pending_preview_version_key = None
-            self.query_one("#main-placeholder", Static).update(
+            self._show_main_placeholder(
                 f"# {escape(package_name)}\n\n"
                 f"Platform section: {escape(row.subdir)}\n"
                 "Press Enter to collapse or expand."

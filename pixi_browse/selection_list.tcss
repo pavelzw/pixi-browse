@@ -40,7 +40,7 @@ Screen {
     height: 1fr;
     border: round $primary;
     margin-right: 1;
-    padding: 1 2;
+    padding: 1;
     scrollbar-size-vertical: 1;
 }
 
@@ -48,6 +48,48 @@ Screen {
     border: round $accent;
 }
 
+#main-placeholder-scroll {
+    height: 1fr;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
 #main-placeholder {
     color: $text-muted;
+}
+
+#version-details-view {
+    height: 1fr;
+    display: none;
+}
+
+.detail-section {
+    height: 1fr;
+    border: round $surface;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+.detail-section:last-child {
+    margin-bottom: 0;
+}
+
+.detail-section.-active {
+    height: 4fr;
+    border: round $accent;
+}
+
+.detail-section.-collapsed {
+    height: 1fr;
+    border: round #524f67;
+}
+
+.detail-scroll {
+    height: 1fr;
+    padding: 0 1 1 1;
+    scrollbar-size-vertical: 1;
+}
+
+.detail-body {
+    width: 100%;
 }

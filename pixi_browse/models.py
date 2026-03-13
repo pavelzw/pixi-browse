@@ -8,6 +8,7 @@ from rattler.version import Version
 ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
+DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 
 
 @dataclass(frozen=True)
@@ -24,3 +25,12 @@ class VersionRow:
     kind: VersionRowKind
     subdir: str | None = None
     entry: VersionEntry | None = None
+
+
+@dataclass(frozen=True)
+class VersionDetailsData:
+    metadata_lines: tuple[str, ...]
+    dependencies: tuple[str, ...]
+    constraints: tuple[str, ...]
+    run_exports: tuple[str, ...]
+    files: tuple[str, ...]
