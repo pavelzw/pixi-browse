@@ -81,7 +81,7 @@ Screen {
 
 .detail-section.-collapsed {
     height: 1fr;
-    border: round #524f67;
+    border: round $border-blurred;
 }
 
 .detail-scroll {
