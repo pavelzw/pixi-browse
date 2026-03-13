@@ -4,13 +4,18 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.platform import Platform
+from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
+from rich.style import Style
 from rich.text import Text
 from textual.events import Paste
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
+from pixi_browse.models import VersionDetailsData
 from pixi_browse.rendering import (
+    build_version_details_data,
     format_clickable_github_handle,
     format_clickable_github_handle_list,
     format_clickable_url,
@@ -19,7 +24,13 @@ from pixi_browse.rendering import (
     render_package_preview,
     render_selected_version_details,
 )
-from pixi_browse.tui import HelpScreen
+from pixi_browse.tui import (
+    INACTIVE_SELECTED_TAB_STYLE,
+    DetailSection,
+    HelpScreen,
+    MainPanel,
+    VersionDetailsView,
+)
 
 
 @dataclass(frozen=True)
@@ -36,34 +47,67 @@ class _RecordWithUrl:
     url: str
 
 
-@dataclass(frozen=True)
-class _DetailedRecord:
-    version: Version
-    build: str
-    build_number: int
-    subdir: str
-    file_name: str
-    channel: str = "conda-forge"
-    size: int = 2048
-    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC)
-    license: str = "BSD-3-Clause"
-    license_family: str = "BSD"
-    arch: str = "x86_64"
-    platform: str = "linux"
-    noarch: str | None = None
-    features: str | None = None
-    track_features: str | None = None
-    python_site_packages_path: str | None = None
-    md5: bytes = bytes.fromhex("00112233445566778899aabbccddeeff")
-    sha256: bytes = bytes.fromhex(
+def _make_repo_data_record(
+    *,
+    name: str = "demo",
+    version: str = "1.2.3",
+    build: str = "py313h123_0",
+    build_number: int = 0,
+    subdir: str = "noarch",
+    file_name: str | None = None,
+    channel: str = "https://conda.anaconda.org/conda-forge/",
+    size: int = 2048,
+    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC),
+    license: str = "BSD-3-Clause",
+    license_family: str = "BSD",
+    arch: str | None = "x86_64",
+    platform: str | None = "linux",
+    noarch: NoArchLiteral | None = None,
+    features: str | None = None,
+    track_features: list[str] | None = None,
+    python_site_packages_path: str | None = None,
+    md5: bytes | None = bytes.fromhex("00112233445566778899aabbccddeeff"),
+    sha256: bytes | None = bytes.fromhex(
         "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    ),
+    legacy_bz2_md5: bytes | None = None,
+    legacy_bz2_size: int | None = None,
+    depends: list[str] | None = None,
+    constrains: list[str] | None = None,
+    url: str | None = None,
+) -> RepoDataRecord:
+    resolved_file_name = file_name or f"{name}-{version}-{build}.conda"
+    record = RepoDataRecord(
+        package_record=PackageRecord(
+            name=name,
+            version=version,
+            build=build,
+            build_number=build_number,
+            subdir=subdir,
+            arch=arch,
+            platform=platform,
+            noarch=noarch,
+            depends=depends,
+            constrains=constrains,
+            sha256=sha256,
+            md5=md5,
+            size=size,
+            license=license,
+            license_family=license_family,
+            python_site_packages_path=python_site_packages_path,
+            legacy_bz2_md5=legacy_bz2_md5,
+            legacy_bz2_size=legacy_bz2_size,
+        ),
+        file_name=resolved_file_name,
+        url=url or f"https://example.invalid/{resolved_file_name}",
+        channel=channel,
     )
-    legacy_bz2_md5: bytes | None = None
-    legacy_bz2_size: int | None = None
-    depends: list[str] | None = None
-    constrains: list[str] | None = None
-    url: str = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    name: str = "demo"
+    record.timestamp = timestamp
+    if features is not None:
+        record.features = features
+    if track_features is not None:
+        record.track_features = track_features
+    return record
 
 
 class _FakeKeyEvent:
@@ -71,6 +115,15 @@ class _FakeKeyEvent:
         self.key = key
         self.character = character
         self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class _FakeClickEvent:
+    def __init__(self, style: Style | None = None) -> None:
+        self.stopped = False
+        self.style = style
 
     def stop(self) -> None:
         self.stopped = True
@@ -101,17 +154,16 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
     app = CondaMetadataTui()
-    version = Version("1.2.3")
     records = [
-        _Record(
-            version=version,
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",
             file_name="demo-1.2.3-py313h123_0.conda",
         ),
-        _Record(
-            version=version,
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",
@@ -129,8 +181,8 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
 
 
 def test_render_selected_version_details_includes_package_paths() -> None:
-    record = _DetailedRecord(
-        version=Version("1.2.3"),
+    record = _make_repo_data_record(
+        version="1.2.3",
         build="py313h123_0",
         build_number=0,
         subdir="noarch",
@@ -151,9 +203,67 @@ def test_render_selected_version_details_includes_package_paths() -> None:
     assert "placeholder: coming soon" not in rendered
 
 
+def test_build_version_details_data_aligns_metadata_rows() -> None:
+    record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    details = build_version_details_data(
+        "demo",
+        record,
+        repository_urls=["https://github.com/example/demo"],
+        documentation_urls=["https://docs.example.com/demo"],
+    )
+
+    assert "Package               demo" in details.metadata_lines
+    assert "Python Site-Packages  not available" in details.metadata_lines
+    assert any(
+        line.startswith("Repository            [@click=app.open_external_url(")
+        for line in details.metadata_lines
+    )
+    assert (
+        "Built with            rattler-build 0.47.0"
+        in build_version_details_data(
+            "demo",
+            record,
+            rattler_build_version="0.47.0",
+        ).metadata_lines
+    )
+
+
+def test_build_version_details_data_formats_run_exports_from_py_rattler() -> None:
+    record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    details = build_version_details_data(
+        "demo",
+        record,
+        run_exports=RunExportsJson(
+            weak=["python_abi 3.13.* *_cp313"],
+            strong=["libdemo >=1.2.3"],
+            noarch=["python"],
+        ),
+    )
+
+    assert details.run_exports == (
+        "weak: python_abi 3.13.* *_cp313",
+        "strong: libdemo >=1.2.3",
+        "noarch: python",
+    )
+
+
 def test_render_selected_version_details_includes_about_urls() -> None:
-    record = _DetailedRecord(
-        version=Version("1.2.3"),
+    record = _make_repo_data_record(
+        version="1.2.3",
         build="py313h123_0",
         build_number=0,
         subdir="noarch",
@@ -270,15 +380,15 @@ def test_format_provenance_uses_github_commit_link() -> None:
 
 def test_render_package_preview_shows_version_selector_preview() -> None:
     records = [
-        _DetailedRecord(
-            version=Version("1.2.3"),
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_1",
             build_number=1,
             subdir="linux-64",
             file_name="demo-1.2.3-py313h123_1.conda",
         ),
-        _DetailedRecord(
-            version=Version("1.2.2"),
+        _make_repo_data_record(
+            version="1.2.2",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",
@@ -536,6 +646,12 @@ def test_on_key_ctrl_d_pages_sidebar(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_page_step_uses_visible_height() -> None:
+    assert MainPanel._page_step(20) == 20
+    assert MainPanel._page_step(7) == 7
+    assert MainPanel._page_step(0) == 1
+
+
 def test_set_sidebar_highlight_updates_version_preview(monkeypatch) -> None:
     app = CondaMetadataTui()
     entry = VersionEntry(
@@ -607,19 +723,16 @@ def test_section_highlight_clears_preview_state_for_same_entry_revisit(
     class _FakeOptionList:
         highlighted: int | None = None
 
-    class _FakeStatic:
-        def update(self, value: str) -> None:
-            updates.append(value)
-
     option_list = _FakeOptionList()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        if selector == "#sidebar-list":
-            return option_list
-        assert selector == "#main-placeholder"
-        return _FakeStatic()
+        assert selector == "#sidebar-list"
+        return option_list
 
     monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app, "_show_main_placeholder", lambda value: updates.append(value)
+    )
     reset_calls: list[str] = []
     monkeypatch.setattr(
         app,
@@ -654,19 +767,19 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
         "osx-arm64",
         "polars-1.33.1-u64_idx_habc1234_1.conda",
     )
-    app._version_details_cache = {preview_key: "cached preview"}
-    updates: list[str] = []
+    cached_details = VersionDetailsData(
+        metadata_lines=("cached preview",),
+        dependencies=("dep",),
+        constraints=("constraint",),
+        run_exports=("run export",),
+        files=("file",),
+    )
+    app._version_details_cache = {preview_key: cached_details}
+    updates: list[VersionDetailsData] = []
     reset_calls: list[str] = []
-
-    class _FakeStatic:
-        def update(self, value: str) -> None:
-            updates.append(value)
-
-    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        assert selector == "#main-placeholder"
-        return _FakeStatic()
-
-    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app, "_show_version_details", lambda value: updates.append(value)
+    )
     monkeypatch.setattr(
         app,
         "_reset_main_panel_scroll",
@@ -675,7 +788,7 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
 
     app._request_selected_version_preview("polars", entry)
 
-    assert updates == ["cached preview"]
+    assert updates == [cached_details]
     assert reset_calls == ["reset"]
     assert app._previewed_version_key == preview_key
 
@@ -695,19 +808,13 @@ def test_request_selected_version_preview_resets_scroll_for_uncached_details(
     reset_calls: list[str] = []
     worker_calls: list[dict[str, object]] = []
 
-    class _FakeStatic:
-        def update(self, value: str) -> None:
-            updates.append(value)
-
-    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        assert selector == "#main-placeholder"
-        return _FakeStatic()
-
     def _fake_run_worker(coro: object, **kwargs: object) -> None:
         worker_calls.append(kwargs)
         coro.close()  # type: ignore[attr-defined]
 
-    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(
+        app, "_show_main_placeholder", lambda value: updates.append(value)
+    )
     monkeypatch.setattr(
         app,
         "_reset_main_panel_scroll",
@@ -736,6 +843,10 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "?                 Show this help" in help_text
     assert "j / k             Move selection or scroll" in help_text
     assert "h / l             Focus left / right pane" in help_text
+    assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
+    assert "Tab / Shift+Tab" in help_text
+    assert "Cycle focused section" in help_text
+    assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
 
 
@@ -766,7 +877,7 @@ def test_action_open_external_url_uses_webbrowser(monkeypatch) -> None:
     assert opened == ["https://example.com/demo"]
 
 
-def test_rerender_visible_version_preview_invalidates_cache_on_resize(
+def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached(
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
@@ -780,8 +891,15 @@ def test_rerender_visible_version_preview_invalidates_cache_on_resize(
     app._mode = "versions"
     app._selected_package = "demo"
     app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    stale_cached_details = VersionDetailsData(
+        metadata_lines=("cached",),
+        dependencies=("dep",),
+        constraints=("constraint",),
+        run_exports=("export",),
+        files=("file",),
+    )
     app._version_details_cache = {
-        ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): "cached"
+        ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
     }
 
     class _FakeOptionList:
@@ -801,8 +919,402 @@ def test_rerender_visible_version_preview_invalidates_cache_on_resize(
 
     app._rerender_visible_version_preview()
 
-    assert app._version_details_cache == {}
+    assert app._version_details_cache == {
+        ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
+    }
     assert preview_calls == [("demo", entry)]
+
+
+def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    preview_key = (
+        "demo",
+        "1.2.3",
+        "py313h123_0",
+        0,
+        "noarch",
+        "demo-1.2.3-py313h123_0.conda",
+    )
+    cached_details = VersionDetailsData(
+        metadata_lines=("cached",),
+        dependencies=("dep",),
+        constraints=("constraint",),
+        run_exports=("export",),
+        files=("file",),
+    )
+    app._mode = "versions"
+    app._selected_package = "demo"
+    app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    app._version_details_cache = {preview_key: cached_details}
+    shown: list[VersionDetailsData] = []
+
+    class _FakeOptionList:
+        highlighted = 0
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return _FakeOptionList()
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_show_version_details", lambda value: shown.append(value))
+
+    app._rerender_visible_version_preview()
+
+    assert shown == [cached_details]
+    assert app._previewed_version_key == preview_key
+    assert app._pending_preview_version_key == preview_key
+
+
+def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    selected_sections: list[int] = []
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: selected_sections.append(value)
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("2", "2")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert selected_sections == [1]
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    tab_directions: list[int] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_main_dependency_tab",
+        lambda value: tab_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("]", "]")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert tab_directions == [1]
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_dependency_header_tabs_are_clickable() -> None:
+    text = VersionDetailsView._render_clickable_dependency_tab(
+        "constraints",
+        "Constraints",
+        active=False,
+        pane_active=False,
+    )
+
+    assert text.plain == "Constraints"
+    assert any(
+        span.style.meta == {"@click": ("app.select_dependency_tab", ("constraints",))}
+        for span in text.spans
+        if isinstance(span.style, Style)
+    )
+    assert any(
+        span.style.bold is False
+        for span in text.spans
+        if isinstance(span.style, Style)
+        and span.style.meta
+        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+    )
+
+
+def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
+    text = VersionDetailsView._render_clickable_dependency_tab(
+        "constraints",
+        "Constraints",
+        active=True,
+        pane_active=False,
+    )
+
+    assert any(
+        span.style.bold is False
+        for span in text.spans
+        if isinstance(span.style, Style)
+        and span.style.meta
+        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+    )
+
+
+def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
+    view = VersionDetailsView()
+
+    view._active_section = 0
+    inactive_header = view._render_dependency_header()
+
+    view._active_section = 1
+    active_header = view._render_dependency_header()
+
+    assert "[ / ]" not in inactive_header.plain
+    assert "[ / ]" in active_header.plain
+
+
+def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
+    view = VersionDetailsView()
+    view._active_section = 0
+    view._dependency_tab_index = 1
+
+    header = view._render_dependency_header()
+
+    assert "Constraints" in header.plain
+    assert any(
+        span.style == INACTIVE_SELECTED_TAB_STYLE
+        and header.plain[span.start : span.end] == "Constraints"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+
+
+def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("]", "]")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert event.stopped is False
+
+
+def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == [1]
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("shift+tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == [-1]
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    sections: list[int] = []
+    tabs: list[str] = []
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+    monkeypatch.setattr(
+        app, "_set_main_dependency_tab", lambda value: tabs.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    app.action_select_dependency_tab("constraints")
+
+    assert sections == [1]
+    assert tabs == ["constraints"]
+    assert focused == ["main"]
+
+
+def test_activate_section_focuses_main_panel(monkeypatch) -> None:
+    view = VersionDetailsView()
+    active_sections: list[int] = []
+    focused: list[str] = []
+
+    class _FakeMainPanel:
+        def focus(self) -> None:
+            focused.append("main")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeMainPanel:
+            assert selector == "#main-panel"
+            return _FakeMainPanel()
+
+    monkeypatch.setattr(
+        VersionDetailsView,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+
+    view.activate_section(2, focus_main_panel=True)
+
+    assert active_sections == [2]
+    assert focused == ["main"]
+
+
+def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
+    view = VersionDetailsView()
+    active_sections: list[int] = []
+    tabs: list[str] = []
+    focused: list[str] = []
+
+    class _FakeMainPanel:
+        def focus(self) -> None:
+            focused.append("main")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeMainPanel:
+            assert selector == "#main-panel"
+            return _FakeMainPanel()
+
+    monkeypatch.setattr(
+        VersionDetailsView,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+    monkeypatch.setattr(view, "set_dependency_tab", lambda value: tabs.append(value))
+
+    view.select_dependency_tab("constraints", focus_main_panel=True)
+
+    assert active_sections == [1]
+    assert tabs == ["constraints"]
+    assert focused == ["main"]
+
+
+def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
+    section = DetailSection("Files", 2)
+    activated: list[tuple[int, bool]] = []
+
+    class _FakeView:
+        def activate_section(
+            self, index: int, *, focus_main_panel: bool = False
+        ) -> None:
+            activated.append((index, focus_main_panel))
+
+    class _FakeApp:
+        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
+            assert selector == "#version-details-view"
+            return _FakeView()
+
+    monkeypatch.setattr(
+        DetailSection,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+
+    event = _FakeClickEvent()
+    section.on_click(event)  # type: ignore[arg-type]
+
+    assert activated == [(2, True)]
+    assert event.stopped is True
+
+
+def test_clicking_dependency_tab_dispatches_without_hover_link_action(
+    monkeypatch,
+) -> None:
+    section = DetailSection("Dependencies", 1)
+    selected_tabs: list[tuple[str, bool]] = []
+
+    class _FakeView:
+        def select_dependency_tab(
+            self, tab: str, *, focus_main_panel: bool = False
+        ) -> None:
+            selected_tabs.append((tab, focus_main_panel))
+
+    class _FakeApp:
+        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
+            assert selector == "#version-details-view"
+            return _FakeView()
+
+    monkeypatch.setattr(
+        DetailSection,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+
+    event = _FakeClickEvent(
+        Style(
+            meta={
+                "@click": (
+                    "app.select_dependency_tab",
+                    ("constraints",),
+                )
+            }
+        )
+    )
+    section.on_click(event)  # type: ignore[arg-type]
+
+    assert selected_tabs == [("constraints", True)]
+    assert event.stopped is True
 
 
 def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:

@@ -28,7 +28,19 @@ Down@250ms 4
 Sleep 1s
 Enter
 Sleep 3s
-Down@250ms 20
+# scroll down a bit
+Down@250ms 5
+Sleep 2s
+# go to files pane
+Tab
+Sleep 1s
+Tab
+Sleep 2s
+# go down
+Ctrl+d
+Sleep 2s
+Ctrl+d
+Sleep 2s
 # escape right view
 Escape
 Sleep 1s

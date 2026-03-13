@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
-from typing import Any
 
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, SourceConfig
+from rattler.repo_data import Gateway, RepoDataRecord, SourceConfig
+from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
 
@@ -71,7 +71,7 @@ async def fetch_package_names(
     return platforms, sorted({name.normalized for name in names})
 
 
-def record_identity_key(record: Any) -> tuple[str, str, int, str, str]:
+def record_identity_key(record: RepoDataRecord) -> tuple[str, str, int, str, str]:
     return (
         str(record.version),
         record.build,
@@ -87,9 +87,11 @@ async def query_package_records(
     channel_name: str,
     platforms: list[Platform],
     package_name: str,
-    record_sort_key: Callable[[Any], tuple[Any, str, str, int]],
-) -> list[Any]:
-    unique_records: dict[tuple[str, str, int, str, str], Any] = {}
+    record_sort_key: Callable[
+        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+    ],
+) -> list[RepoDataRecord]:
+    unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
         sources=[channel_name],
         platforms=platforms,
