@@ -59,12 +59,12 @@ DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "constraints",
     "run_exports",
 )
-ACTIVE_SECTION_TITLE_STYLE = Style(color="#f6c5d5", bold=True)
-INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
-ACTIVE_TAB_STYLE = Style(color="#f6c5d5", bold=True)
-INACTIVE_SELECTED_TAB_STYLE = Style(color="#f6c5d5", bold=False)
-INACTIVE_TAB_STYLE = Style(color="white", bold=False)
-TAB_HINT_STYLE = Style(color="#908caa", bold=False)
+ACTIVE_SECTION_TITLE_STYLE = Style(color="bright_blue", bold=True)
+INACTIVE_SECTION_TITLE_STYLE = Style(dim=True)
+ACTIVE_TAB_STYLE = Style(color="bright_blue", bold=True)
+INACTIVE_SELECTED_TAB_STYLE = Style(color="blue", bold=False)
+INACTIVE_TAB_STYLE = Style(color="default", bold=False)
+TAB_HINT_STYLE = Style(color="default", dim=True)
 
 
 class DetailSection(Vertical):
@@ -565,7 +565,7 @@ class CondaMetadataTui(App[None]):
         super().__init__()
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
-        self.theme = "rose-pine"
+        self.theme = "textual-ansi"
         self._client = Client.default_client()
         self._gateway: Gateway = create_gateway(client=self._client)
         self._platforms: list[Platform] = []
@@ -1640,7 +1640,7 @@ class CondaMetadataTui(App[None]):
         indicator = Text()
         if self._filter_mode:
             indicator.append("f", style="bold red")
-            indicator.append(f" {self._search_query}_", style="bold white")
+            indicator.append(f" {self._search_query}_", style="bold")
         else:
             indicator.append("filter", style="dim")
             indicator.stylize("bold red", 0, 1)
@@ -1664,7 +1664,7 @@ class CondaMetadataTui(App[None]):
                 summary = "+".join(platform_names)
             else:
                 summary = f"{platform_names[0]}+{len(platform_names) - 1}"
-            indicator.append(f" {summary}", style="bold white")
+            indicator.append(f" {summary}", style="bold")
         return indicator
 
     def _channel_indicator_text(self) -> Text:
@@ -1672,9 +1672,9 @@ class CondaMetadataTui(App[None]):
         indicator.append("c", style="bold red")
         indicator.append("hannel", style="dim")
         if self._channel_edit_mode:
-            indicator.append(f" {self._channel_draft}_", style="bold white")
+            indicator.append(f" {self._channel_draft}_", style="bold")
         else:
-            indicator.append(f" {self._channel_name}", style="bold white")
+            indicator.append(f" {self._channel_name}", style="bold")
         return indicator
 
     def _download_indicator_text(self) -> Text:
