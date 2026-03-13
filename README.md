@@ -9,7 +9,8 @@
 An interactive terminal UI for browsing conda package metadata.
 Explore packages, versions, dependencies, and more from any conda channel — right from your terminal.
 
-![pixi-browse demo](.github/assets/demo.gif)
+![pixi-browse demo](.github/assets/demo-dark.gif#gh-dark-mode-only)
+![pixi-browse demo](.github/assets/demo-light.gif#gh-light-mode-only)
 
 ## Features
 

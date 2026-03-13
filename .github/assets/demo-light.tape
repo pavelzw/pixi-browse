@@ -1,7 +1,7 @@
-Output .github/assets/demo.mp4
-Output .github/assets/demo.gif
+Output .github/assets/demo-light.mp4
+Output .github/assets/demo-light.gif
 
-Set Theme "rose-pine-moon"
+Set Theme "rose-pine-dawn"
 Set Shell "bash"
 Set FontSize 18
 Set Width 1920
