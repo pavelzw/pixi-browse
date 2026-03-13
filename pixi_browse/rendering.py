@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
+from rattler.package import RunExportsJson
 from rattler.repo_data import RepoDataRecord
 from rattler.version import VersionWithSource
 from rich.markup import escape
@@ -187,24 +188,20 @@ def render_package_preview(
     return "\n".join(lines)
 
 
-def _format_run_exports_lines(run_exports: Any) -> list[str]:
+def _format_run_exports_lines(run_exports: RunExportsJson | None) -> list[str]:
     if run_exports is None:
         return []
-    if isinstance(run_exports, list):
-        return [escape(str(item)) for item in run_exports]
-    if isinstance(run_exports, dict):
-        lines: list[str] = []
-        for key, value in run_exports.items():
-            if value in (None, [], {}):
-                continue
-            if isinstance(value, list):
-                lines.extend(
-                    f"{escape(str(key))}: {escape(str(item))}" for item in value
-                )
-                continue
-            lines.append(f"{escape(str(key))}: {escape(str(value))}")
-        return lines
-    return [escape(str(run_exports))]
+    lines: list[str] = []
+    sections = (
+        ("weak", run_exports.weak),
+        ("strong", run_exports.strong),
+        ("noarch", run_exports.noarch),
+        ("weak_constrains", run_exports.weak_constrains),
+        ("strong_constrains", run_exports.strong_constrains),
+    )
+    for label, values in sections:
+        lines.extend(f"{label}: {escape(value)}" for value in values)
+    return lines
 
 
 def build_version_details_data(
@@ -220,7 +217,7 @@ def build_version_details_data(
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
-    run_exports: Any = None,
+    run_exports: RunExportsJson | None = None,
 ) -> VersionDetailsData:
     name_value = record.name.source
     metadata_rows: list[tuple[str, str]] = [

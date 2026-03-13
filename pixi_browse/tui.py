@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
@@ -10,7 +9,7 @@ from typing import Any, cast
 import yaml
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
-from rattler.package import AboutJson, PathsJson
+from rattler.package import AboutJson, PathsJson, RunExportsJson
 from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
@@ -1279,13 +1278,8 @@ class CondaMetadataTui(App[None]):
         self._version_about_urls_cache[preview_key] = about_urls
         return about_urls
 
-    async def _get_run_exports(self, url: str) -> Any:
-        run_exports_bytes = await fetch_raw_package_file_from_url(
-            self._client,
-            url,
-            "info/run_exports.json",
-        )
-        return json.loads(run_exports_bytes.decode("utf-8", errors="replace"))
+    async def _get_run_exports(self, url: str) -> RunExportsJson:
+        return await RunExportsJson.from_remote_url(self._client, url)
 
     def _build_selected_version_details(
         self,
@@ -1301,7 +1295,7 @@ class CondaMetadataTui(App[None]):
         provenance_remote_url: str | None = None,
         provenance_sha: str | None = None,
         rattler_build_version: str | None = None,
-        run_exports: Any = None,
+        run_exports: RunExportsJson | None = None,
     ) -> VersionDetailsData:
         return build_version_details_data(
             package_name,
@@ -1345,7 +1339,7 @@ class CondaMetadataTui(App[None]):
                 "provenance_sha": None,
                 "rattler_build_version": None,
             }
-            run_exports: Any = None
+            run_exports: RunExportsJson | None = None
             try:
                 package_paths = await self._get_package_paths(
                     preview_key, str(record.url)

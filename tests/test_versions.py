@@ -4,7 +4,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from rattler.package import NoArchLiteral
+from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
@@ -232,6 +232,32 @@ def test_build_version_details_data_aligns_metadata_rows() -> None:
             record,
             rattler_build_version="0.47.0",
         ).metadata_lines
+    )
+
+
+def test_build_version_details_data_formats_run_exports_from_py_rattler() -> None:
+    record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    details = build_version_details_data(
+        "demo",
+        record,
+        run_exports=RunExportsJson(
+            weak=["python_abi 3.13.* *_cp313"],
+            strong=["libdemo >=1.2.3"],
+            noarch=["python"],
+        ),
+    )
+
+    assert details.run_exports == (
+        "weak: python_abi 3.13.* *_cp313",
+        "strong: libdemo >=1.2.3",
+        "noarch: python",
     )
 
 
