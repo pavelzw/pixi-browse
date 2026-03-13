@@ -1214,6 +1214,42 @@ def test_activate_section_focuses_main_panel(monkeypatch) -> None:
     assert focused == ["main"]
 
 
+def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
+    view = VersionDetailsView()
+    active_sections: list[int] = []
+    tabs: list[str] = []
+    focused: list[str] = []
+
+    class _FakeMainPanel:
+        def focus(self) -> None:
+            focused.append("main")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeMainPanel:
+            assert selector == "#main-panel"
+            return _FakeMainPanel()
+
+    monkeypatch.setattr(
+        VersionDetailsView,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+    monkeypatch.setattr(view, "set_dependency_tab", lambda value: tabs.append(value))
+
+    view.select_dependency_tab("constraints", focus_main_panel=True)
+
+    assert active_sections == [1]
+    assert tabs == ["constraints"]
+    assert focused == ["main"]
+
+
 def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
     section = DetailSection("Files", 2)
     activated: list[tuple[int, bool]] = []
@@ -1246,11 +1282,18 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     monkeypatch,
 ) -> None:
     section = DetailSection("Dependencies", 1)
-    selected_tabs: list[str] = []
+    selected_tabs: list[tuple[str, bool]] = []
+
+    class _FakeView:
+        def select_dependency_tab(
+            self, tab: str, *, focus_main_panel: bool = False
+        ) -> None:
+            selected_tabs.append((tab, focus_main_panel))
 
     class _FakeApp:
-        def action_select_dependency_tab(self, tab: str) -> None:
-            selected_tabs.append(tab)
+        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
+            assert selector == "#version-details-view"
+            return _FakeView()
 
     monkeypatch.setattr(
         DetailSection,
@@ -1270,7 +1313,7 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == ["constraints"]
+    assert selected_tabs == [("constraints", True)]
     assert event.stopped is True
 
 

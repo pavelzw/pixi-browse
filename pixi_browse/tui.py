@@ -4,7 +4,7 @@ import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 from rattler.exceptions import GatewayError
@@ -86,8 +86,12 @@ class DetailSection(Vertical):
         if click_meta is not None:
             action_name, args = click_meta
             if action_name == "app.select_dependency_tab":
-                app = cast("CondaMetadataTui", self.app)
-                app.action_select_dependency_tab(*args)
+                self.app.query_one(
+                    "#version-details-view", VersionDetailsView
+                ).select_dependency_tab(
+                    *args,
+                    focus_main_panel=True,
+                )
                 event.stop()
                 return
         self.app.query_one(
@@ -168,6 +172,14 @@ class VersionDetailsView(Vertical):
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
         self._refresh_dependency_section()
+
+    def select_dependency_tab(
+        self, tab: DependencyTab, *, focus_main_panel: bool = False
+    ) -> None:
+        self.set_active_section(1)
+        self.set_dependency_tab(tab)
+        if focus_main_panel:
+            self.app.query_one("#main-panel", MainPanel).focus()
 
     def scroll_home_active(self) -> None:
         self._section(self._active_section).scroll_body_home()
