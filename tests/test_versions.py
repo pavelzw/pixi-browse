@@ -4,7 +4,9 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from rattler.package import NoArchLiteral
 from rattler.platform import Platform
+from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
 from rich.text import Text
@@ -45,34 +47,67 @@ class _RecordWithUrl:
     url: str
 
 
-@dataclass(frozen=True)
-class _DetailedRecord:
-    version: Version
-    build: str
-    build_number: int
-    subdir: str
-    file_name: str
-    channel: str = "conda-forge"
-    size: int = 2048
-    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC)
-    license: str = "BSD-3-Clause"
-    license_family: str = "BSD"
-    arch: str = "x86_64"
-    platform: str = "linux"
-    noarch: str | None = None
-    features: str | None = None
-    track_features: str | None = None
-    python_site_packages_path: str | None = None
-    md5: bytes = bytes.fromhex("00112233445566778899aabbccddeeff")
-    sha256: bytes = bytes.fromhex(
+def _make_repo_data_record(
+    *,
+    name: str = "demo",
+    version: str = "1.2.3",
+    build: str = "py313h123_0",
+    build_number: int = 0,
+    subdir: str = "noarch",
+    file_name: str | None = None,
+    channel: str = "https://conda.anaconda.org/conda-forge/",
+    size: int = 2048,
+    timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC),
+    license: str = "BSD-3-Clause",
+    license_family: str = "BSD",
+    arch: str | None = "x86_64",
+    platform: str | None = "linux",
+    noarch: NoArchLiteral | None = None,
+    features: str | None = None,
+    track_features: list[str] | None = None,
+    python_site_packages_path: str | None = None,
+    md5: bytes | None = bytes.fromhex("00112233445566778899aabbccddeeff"),
+    sha256: bytes | None = bytes.fromhex(
         "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    ),
+    legacy_bz2_md5: bytes | None = None,
+    legacy_bz2_size: int | None = None,
+    depends: list[str] | None = None,
+    constrains: list[str] | None = None,
+    url: str | None = None,
+) -> RepoDataRecord:
+    resolved_file_name = file_name or f"{name}-{version}-{build}.conda"
+    record = RepoDataRecord(
+        package_record=PackageRecord(
+            name=name,
+            version=version,
+            build=build,
+            build_number=build_number,
+            subdir=subdir,
+            arch=arch,
+            platform=platform,
+            noarch=noarch,
+            depends=depends,
+            constrains=constrains,
+            sha256=sha256,
+            md5=md5,
+            size=size,
+            license=license,
+            license_family=license_family,
+            python_site_packages_path=python_site_packages_path,
+            legacy_bz2_md5=legacy_bz2_md5,
+            legacy_bz2_size=legacy_bz2_size,
+        ),
+        file_name=resolved_file_name,
+        url=url or f"https://example.invalid/{resolved_file_name}",
+        channel=channel,
     )
-    legacy_bz2_md5: bytes | None = None
-    legacy_bz2_size: int | None = None
-    depends: list[str] | None = None
-    constrains: list[str] | None = None
-    url: str = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    name: str = "demo"
+    record.timestamp = timestamp
+    if features is not None:
+        record.features = features
+    if track_features is not None:
+        record.track_features = track_features
+    return record
 
 
 class _FakeKeyEvent:
@@ -119,17 +154,16 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
     app = CondaMetadataTui()
-    version = Version("1.2.3")
     records = [
-        _Record(
-            version=version,
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",
             file_name="demo-1.2.3-py313h123_0.conda",
         ),
-        _Record(
-            version=version,
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",
@@ -147,8 +181,8 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
 
 
 def test_render_selected_version_details_includes_package_paths() -> None:
-    record = _DetailedRecord(
-        version=Version("1.2.3"),
+    record = _make_repo_data_record(
+        version="1.2.3",
         build="py313h123_0",
         build_number=0,
         subdir="noarch",
@@ -170,8 +204,8 @@ def test_render_selected_version_details_includes_package_paths() -> None:
 
 
 def test_build_version_details_data_aligns_metadata_rows() -> None:
-    record = _DetailedRecord(
-        version=Version("1.2.3"),
+    record = _make_repo_data_record(
+        version="1.2.3",
         build="py313h123_0",
         build_number=0,
         subdir="noarch",
@@ -202,8 +236,8 @@ def test_build_version_details_data_aligns_metadata_rows() -> None:
 
 
 def test_render_selected_version_details_includes_about_urls() -> None:
-    record = _DetailedRecord(
-        version=Version("1.2.3"),
+    record = _make_repo_data_record(
+        version="1.2.3",
         build="py313h123_0",
         build_number=0,
         subdir="noarch",
@@ -320,15 +354,15 @@ def test_format_provenance_uses_github_commit_link() -> None:
 
 def test_render_package_preview_shows_version_selector_preview() -> None:
     records = [
-        _DetailedRecord(
-            version=Version("1.2.3"),
+        _make_repo_data_record(
+            version="1.2.3",
             build="py313h123_1",
             build_number=1,
             subdir="linux-64",
             file_name="demo-1.2.3-py313h123_1.conda",
         ),
-        _DetailedRecord(
-            version=Version("1.2.2"),
+        _make_repo_data_record(
+            version="1.2.2",
             build="py313h123_0",
             build_number=0,
             subdir="noarch",

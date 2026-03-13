@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
+from rattler.repo_data import RepoDataRecord
+from rattler.version import VersionWithSource
 from rich.markup import escape
 
 from pixi_browse.models import VersionDetailsData
@@ -131,14 +133,16 @@ def render_kv_box(rows: list[tuple[str, str]], width: int) -> list[str]:
 
 def render_package_preview(
     package_name: str,
-    records: list[Any],
+    records: list[RepoDataRecord],
     *,
-    record_sort_key: Callable[[Any], tuple[Any, str, str, int]],
+    record_sort_key: Callable[
+        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+    ],
 ) -> str:
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
 
-    grouped_by_subdir: dict[str, list[Any]] = defaultdict(list)
+    grouped_by_subdir: dict[str, list[RepoDataRecord]] = defaultdict(list)
     for record in records:
         grouped_by_subdir[record.subdir].append(record)
 
@@ -205,7 +209,7 @@ def _format_run_exports_lines(run_exports: Any) -> list[str]:
 
 def build_version_details_data(
     package_name: str,
-    record: Any,
+    record: RepoDataRecord,
     *,
     package_paths: Sequence[str] | None = None,
     package_paths_error: str | None = None,
@@ -218,9 +222,7 @@ def build_version_details_data(
     rattler_build_version: str | None = None,
     run_exports: Any = None,
 ) -> VersionDetailsData:
-    name_value = (
-        record.name.source if hasattr(record.name, "source") else str(record.name)
-    )
+    name_value = record.name.source
     metadata_rows: list[tuple[str, str]] = [
         ("Package", escape(package_name)),
         ("Name", escape(name_value)),
@@ -325,7 +327,7 @@ def build_version_details_data(
 
 def render_selected_version_details(
     package_name: str,
-    record: Any,
+    record: RepoDataRecord,
     *,
     content_width: int,
     package_paths: Sequence[str] | None = None,
@@ -338,9 +340,7 @@ def render_selected_version_details(
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
 ) -> str:
-    name_value = (
-        record.name.source if hasattr(record.name, "source") else str(record.name)
-    )
+    name_value = record.name.source
     table_rows: list[tuple[str, str]] = [
         ("Name", name_value),
         ("Version", format_record_value(record.version)),

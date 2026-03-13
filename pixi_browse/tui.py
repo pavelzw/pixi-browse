@@ -18,8 +18,8 @@ from rattler.package_streaming import (
     fetch_raw_package_file_from_url,
 )
 from rattler.platform import Platform
-from rattler.repo_data import Gateway
-from rattler.version import Version
+from rattler.repo_data import Gateway, RepoDataRecord
+from rattler.version import Version, VersionWithSource
 from rich.markup import escape
 from rich.style import Style
 from rich.text import Text
@@ -561,7 +561,7 @@ class CondaMetadataTui(App[None]):
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
         self._draft_selected_platform_names: set[Platform] | None = None
-        self._package_records_cache: dict[str, list[Any]] = {}
+        self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
         self._channel_name = channel_name
         self._mode: ViewMode = "packages"
         self._search_query = ""
@@ -1028,10 +1028,12 @@ class CondaMetadataTui(App[None]):
             f"{len(self._visible_package_names):,} packages in selection."
         )
 
-    def _record_sort_key(self, record: Any) -> tuple[Any, str, str, int]:
+    def _record_sort_key(
+        self, record: RepoDataRecord
+    ) -> tuple[VersionWithSource, str, str, int]:
         return (record.version, record.build, record.subdir, record.build_number)
 
-    async def _get_package_records(self, package_name: str) -> list[Any]:
+    async def _get_package_records(self, package_name: str) -> list[RepoDataRecord]:
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
             return cached
@@ -1198,7 +1200,7 @@ class CondaMetadataTui(App[None]):
 
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
-    ) -> Any | None:
+    ) -> RepoDataRecord | None:
         for record in await self._get_package_records(package_name):
             if (
                 record.version == entry.version
@@ -1288,7 +1290,7 @@ class CondaMetadataTui(App[None]):
     def _build_selected_version_details(
         self,
         package_name: str,
-        record: Any,
+        record: RepoDataRecord,
         *,
         package_paths: list[str] | None = None,
         package_paths_error: str | None = None,
@@ -1480,7 +1482,9 @@ class CondaMetadataTui(App[None]):
             self._download_in_progress = False
             raise
 
-    def _render_package_preview(self, package_name: str, records: list[Any]) -> str:
+    def _render_package_preview(
+        self, package_name: str, records: list[RepoDataRecord]
+    ) -> str:
         return render_package_preview(
             package_name,
             records,
@@ -1488,7 +1492,7 @@ class CondaMetadataTui(App[None]):
         )
 
     def _update_main_panel_for_package(
-        self, package_name: str, records: list[Any]
+        self, package_name: str, records: list[RepoDataRecord]
     ) -> None:
         self._show_main_placeholder(self._render_package_preview(package_name, records))
         self._reset_main_panel_scroll()
@@ -1592,7 +1596,9 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package = None
         self._previewed_package = package_name
 
-    def _build_version_entries(self, records: list[Any]) -> list[VersionEntry]:
+    def _build_version_entries(
+        self, records: list[RepoDataRecord]
+    ) -> list[VersionEntry]:
         """Build version entries while preserving distinct artifacts per
         build."""
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
