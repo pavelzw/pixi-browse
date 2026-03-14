@@ -48,7 +48,7 @@ uvx pixi-browse
 pixi-browse
 
 # Browse a different channel
-pixi-browse -c prefix.dev/conda-forge
+pixi-browse -c https://prefix.dev/conda-forge
 
 # Restrict to specific platforms
 pixi-browse -p linux-64 -p osx-arm64
