@@ -1255,8 +1255,7 @@ class CondaMetadataTui(App[None]):
             return cached
 
         about_json = await AboutJson.from_remote_url(self._client, url)
-        extra = about_json.extra if isinstance(about_json.extra, dict) else {}
-        recipe_maintainers = extra.get("recipe-maintainers", [])
+        recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
         if isinstance(recipe_maintainers, str):
             recipe_maintainers = [recipe_maintainers]
         elif not isinstance(recipe_maintainers, list):
@@ -1271,9 +1270,13 @@ class CondaMetadataTui(App[None]):
                 if isinstance(maintainer, str)
             ],
             "provenance_remote_url": (
-                str(extra.get("remote_url")) if extra.get("remote_url") else None
+                str(about_json.extra.get("remote_url"))
+                if about_json.extra.get("remote_url")
+                else None
             ),
-            "provenance_sha": str(extra.get("sha")) if extra.get("sha") else None,
+            "provenance_sha": str(about_json.extra.get("sha"))
+            if about_json.extra.get("sha")
+            else None,
             "rattler_build_version": None,
         }
         try:
