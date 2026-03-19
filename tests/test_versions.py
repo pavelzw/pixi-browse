@@ -260,6 +260,9 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         "strong: libdemo >=1.2.3",
         "noarch: python",
     )
+    assert details.dependency_count == 0
+    assert details.constraint_count == 0
+    assert details.run_export_count == 3
 
 
 def test_render_selected_version_details_includes_about_urls() -> None:
@@ -771,8 +774,11 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
     cached_details = VersionDetailsData(
         metadata_lines=("cached preview",),
         dependencies=("dep",),
+        dependency_count=1,
         constraints=("constraint",),
+        constraint_count=1,
         run_exports=("run export",),
+        run_export_count=1,
         files=("file",),
     )
     app._version_details_cache = {preview_key: cached_details}
@@ -895,8 +901,11 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
     stale_cached_details = VersionDetailsData(
         metadata_lines=("cached",),
         dependencies=("dep",),
+        dependency_count=1,
         constraints=("constraint",),
+        constraint_count=1,
         run_exports=("export",),
+        run_export_count=1,
         files=("file",),
     )
     app._version_details_cache = {
@@ -946,8 +955,11 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
     cached_details = VersionDetailsData(
         metadata_lines=("cached",),
         dependencies=("dep",),
+        dependency_count=1,
         constraints=("constraint",),
+        constraint_count=1,
         run_exports=("export",),
+        run_export_count=1,
         files=("file",),
     )
     app._mode = "versions"
@@ -1027,12 +1039,12 @@ def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
 def test_dependency_header_tabs_are_clickable() -> None:
     text = VersionDetailsView._render_clickable_dependency_tab(
         "constraints",
-        "Constraints",
+        "Constraints (1)",
         active=False,
         pane_active=False,
     )
 
-    assert text.plain == "Constraints"
+    assert text.plain == "Constraints (1)"
     assert any(
         span.style.meta == {"@click": ("app.select_dependency_tab", ("constraints",))}
         for span in text.spans
@@ -1050,7 +1062,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
 def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
     text = VersionDetailsView._render_clickable_dependency_tab(
         "constraints",
-        "Constraints",
+        "Constraints (1)",
         active=True,
         pane_active=False,
     )
@@ -1081,16 +1093,46 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
     view = VersionDetailsView()
     view._active_section = 0
     view._dependency_tab_index = 1
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("dep",),
+        dependency_count=1,
+        constraints=("constraint",),
+        constraint_count=1,
+        run_exports=("run export",),
+        run_export_count=1,
+        files=("file",),
+    )
 
     header = view._render_dependency_header()
 
-    assert "Constraints" in header.plain
+    assert "Constraints (1)" in header.plain
     assert any(
         span.style == INACTIVE_SELECTED_TAB_STYLE
-        and header.plain[span.start : span.end] == "Constraints"
+        and header.plain[span.start : span.end] == "Constraints (1)"
         for span in header.spans
         if isinstance(span.style, Style)
     )
+
+
+def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("No dependencies.",),
+        dependency_count=0,
+        constraints=("No constraints.",),
+        constraint_count=0,
+        run_exports=("No run exports.",),
+        run_export_count=0,
+        files=("file",),
+    )
+
+    header = view._render_dependency_header()
+
+    assert "Dependencies (0)" in header.plain
+    assert "Constraints (0)" in header.plain
+    assert "Run exports (0)" in header.plain
 
 
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(

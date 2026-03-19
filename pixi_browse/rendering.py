@@ -299,25 +299,30 @@ def build_version_details_data(
     else:
         file_lines = ["No files listed."]
 
+    dependency_count = len(record.depends or [])
     dependencies = (
         tuple(escape(str(dependency)) for dependency in record.depends)
         if record.depends
         else ("No dependencies.",)
     )
+    constraint_count = len(record.constrains or [])
     constraints = (
         tuple(escape(str(constraint)) for constraint in record.constrains)
         if record.constrains
         else ("No constraints.",)
     )
-    run_export_lines = tuple(_format_run_exports_lines(run_exports)) or (
-        "No run exports.",
-    )
+    raw_run_export_lines = tuple(_format_run_exports_lines(run_exports))
+    run_export_count = len(raw_run_export_lines)
+    run_export_lines = raw_run_export_lines or ("No run exports.",)
 
     return VersionDetailsData(
         metadata_lines=tuple(metadata_lines),
         dependencies=dependencies,
+        dependency_count=dependency_count,
         constraints=constraints,
+        constraint_count=constraint_count,
         run_exports=run_export_lines,
+        run_export_count=run_export_count,
         files=tuple(file_lines),
     )
 

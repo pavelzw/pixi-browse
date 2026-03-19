@@ -201,10 +201,23 @@ class VersionDetailsView(Vertical):
         return self._details.run_exports
 
     def _render_dependency_tabs(self) -> Text:
+        counts = (
+            {
+                "dependencies": self._details.dependency_count,
+                "constraints": self._details.constraint_count,
+                "run_exports": self._details.run_export_count,
+            }
+            if self._details is not None
+            else {
+                "dependencies": 0,
+                "constraints": 0,
+                "run_exports": 0,
+            }
+        )
         labels = {
-            "dependencies": "Dependencies",
-            "constraints": "Constraints",
-            "run_exports": "Run exports",
+            "dependencies": f"Dependencies ({counts['dependencies']})",
+            "constraints": f"Constraints ({counts['constraints']})",
+            "run_exports": f"Run exports ({counts['run_exports']})",
         }
         tab_text = Text()
         for index, tab in enumerate(DEPENDENCY_TABS):
