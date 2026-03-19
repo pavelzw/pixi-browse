@@ -31,9 +31,6 @@ class VersionRow:
 class VersionDetailsData:
     metadata_lines: tuple[str, ...]
     dependencies: tuple[str, ...]
-    dependency_count: int
     constraints: tuple[str, ...]
-    constraint_count: int
     run_exports: tuple[str, ...]
-    run_export_count: int
     files: tuple[str, ...]

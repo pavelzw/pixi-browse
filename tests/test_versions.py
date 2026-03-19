@@ -260,9 +260,9 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         "strong: libdemo >=1.2.3",
         "noarch: python",
     )
-    assert details.dependency_count == 0
-    assert details.constraint_count == 0
-    assert details.run_export_count == 3
+    assert details.dependencies == ()
+    assert details.constraints == ()
+    assert len(details.run_exports) == 3
 
 
 def test_render_selected_version_details_includes_about_urls() -> None:
@@ -774,11 +774,8 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
     cached_details = VersionDetailsData(
         metadata_lines=("cached preview",),
         dependencies=("dep",),
-        dependency_count=1,
         constraints=("constraint",),
-        constraint_count=1,
         run_exports=("run export",),
-        run_export_count=1,
         files=("file",),
     )
     app._version_details_cache = {preview_key: cached_details}
@@ -901,11 +898,8 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
     stale_cached_details = VersionDetailsData(
         metadata_lines=("cached",),
         dependencies=("dep",),
-        dependency_count=1,
         constraints=("constraint",),
-        constraint_count=1,
         run_exports=("export",),
-        run_export_count=1,
         files=("file",),
     )
     app._version_details_cache = {
@@ -955,11 +949,8 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
     cached_details = VersionDetailsData(
         metadata_lines=("cached",),
         dependencies=("dep",),
-        dependency_count=1,
         constraints=("constraint",),
-        constraint_count=1,
         run_exports=("export",),
-        run_export_count=1,
         files=("file",),
     )
     app._mode = "versions"
@@ -1096,11 +1087,8 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
     view._details = VersionDetailsData(
         metadata_lines=("meta",),
         dependencies=("dep",),
-        dependency_count=1,
         constraints=("constraint",),
-        constraint_count=1,
         run_exports=("run export",),
-        run_export_count=1,
         files=("file",),
     )
 
@@ -1119,12 +1107,9 @@ def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
     view = VersionDetailsView()
     view._details = VersionDetailsData(
         metadata_lines=("meta",),
-        dependencies=("No dependencies.",),
-        dependency_count=0,
-        constraints=("No constraints.",),
-        constraint_count=0,
-        run_exports=("No run exports.",),
-        run_export_count=0,
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
         files=("file",),
     )
 

@@ -195,17 +195,17 @@ class VersionDetailsView(Vertical):
     def _dependency_lines(self, tab: DependencyTab) -> tuple[str, ...]:
         assert self._details is not None
         if tab == "dependencies":
-            return self._details.dependencies
+            return self._details.dependencies or ("No dependencies.",)
         if tab == "constraints":
-            return self._details.constraints
-        return self._details.run_exports
+            return self._details.constraints or ("No constraints.",)
+        return self._details.run_exports or ("No run exports.",)
 
     def _render_dependency_tabs(self) -> Text:
         counts = (
             {
-                "dependencies": self._details.dependency_count,
-                "constraints": self._details.constraint_count,
-                "run_exports": self._details.run_export_count,
+                "dependencies": len(self._details.dependencies),
+                "constraints": len(self._details.constraints),
+                "run_exports": len(self._details.run_exports),
             }
             if self._details is not None
             else {
