@@ -1120,6 +1120,17 @@ def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
     assert "Run exports (0)" in header.plain
 
 
+def test_dependency_header_omits_counts_before_details_are_loaded() -> None:
+    view = VersionDetailsView()
+
+    header = view._render_dependency_header()
+
+    assert "Dependencies" in header.plain
+    assert "Constraints" in header.plain
+    assert "Run exports" in header.plain
+    assert "(0)" not in header.plain
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
