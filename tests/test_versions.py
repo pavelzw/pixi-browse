@@ -12,6 +12,7 @@ from rich.style import Style
 from rich.text import Text
 from textual.events import Paste
 
+from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
 from pixi_browse.models import VersionDetailsData
 from pixi_browse.rendering import (
@@ -864,6 +865,7 @@ def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
 
     assert len(pushed) == 1
     assert isinstance(pushed[0], HelpScreen)
+    assert pushed[0]._title_text() == f"pixi-browse v{__version__}"
 
 
 def test_action_open_external_url_uses_webbrowser(monkeypatch) -> None:

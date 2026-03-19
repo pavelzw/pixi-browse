@@ -493,13 +493,17 @@ class HelpScreen(ModalScreen[None]):
         Binding("question_mark", "dismiss", show=False),
     ]
 
-    def __init__(self, help_text: str) -> None:
+    def __init__(self, help_text: str, *, version: str) -> None:
         super().__init__()
         self._help_text = help_text
+        self._version = version
+
+    def _title_text(self) -> str:
+        return f"pixi-browse v{self._version}"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="help-dialog"):
-            yield Static("Keybinds", id="help-title")
+            yield Static(self._title_text(), id="help-title")
             yield Static(self._help_text, id="help-body")
 
     async def action_dismiss(self, result: None = None) -> None:
