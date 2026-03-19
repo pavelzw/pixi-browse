@@ -302,16 +302,14 @@ def build_version_details_data(
     dependencies = (
         tuple(escape(str(dependency)) for dependency in record.depends)
         if record.depends
-        else ("No dependencies.",)
+        else ()
     )
     constraints = (
         tuple(escape(str(constraint)) for constraint in record.constrains)
         if record.constrains
-        else ("No constraints.",)
+        else ()
     )
-    run_export_lines = tuple(_format_run_exports_lines(run_exports)) or (
-        "No run exports.",
-    )
+    run_export_lines = tuple(_format_run_exports_lines(run_exports))
 
     return VersionDetailsData(
         metadata_lines=tuple(metadata_lines),
