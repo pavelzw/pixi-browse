@@ -31,6 +31,7 @@ from pixi_browse.tui import (
     MainPanel,
     VersionDetailsView,
 )
+from pixi_browse.tui.state import AboutUrls
 
 
 @dataclass(frozen=True)
@@ -495,15 +496,15 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
     about_urls = asyncio.run(app._get_about_urls(preview_key, url))
     cached_about_urls = asyncio.run(app._get_about_urls(preview_key, url))
 
-    assert about_urls == {
-        "repository": ["https://github.com/example/demo"],
-        "documentation": ["https://docs.example.com/demo"],
-        "homepage": ["https://example.com/demo"],
-        "recipe_maintainers": ["@pavelzw", "xhochy"],
-        "provenance_remote_url": "https://github.com/conda-forge/polars-feedstock.git",
-        "provenance_sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
-        "rattler_build_version": "0.38.0",
-    }
+    assert about_urls == AboutUrls(
+        repository=("https://github.com/example/demo",),
+        documentation=("https://docs.example.com/demo",),
+        homepage=("https://example.com/demo",),
+        recipe_maintainers=("@pavelzw", "xhochy"),
+        provenance_remote_url="https://github.com/conda-forge/polars-feedstock.git",
+        provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
+        rattler_build_version="0.38.0",
+    )
     assert cached_about_urls == about_urls
     assert calls == [url]
 

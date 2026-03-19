@@ -4,29 +4,19 @@ import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import cast
 
-import yaml
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
-from rattler.package import AboutJson, PathsJson, RunExportsJson
-from rattler.package_streaming import (
-    download_to_path as package_download_to_path,
-)
-from rattler.package_streaming import (
-    fetch_raw_package_file_from_url,
-)
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
 from rattler.version import Version, VersionWithSource
 from rich.markup import escape
-from rich.style import Style
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Click, Key, Paste, Resize
-from textual.screen import ModalScreen
+from textual.containers import Horizontal, Vertical
+from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
 
 from pixi_browse.models import (
@@ -38,512 +28,21 @@ from pixi_browse.models import (
     ViewMode,
 )
 from pixi_browse.platform_utils import platform_sort_key
-from pixi_browse.rendering import (
-    build_version_details_data,
-    format_byte_size,
-    format_detail_row,
-    format_record_value,
-    render_kv_box,
-    render_package_preview,
-)
+from pixi_browse.rendering import render_package_preview
 from pixi_browse.repodata import (
-    create_gateway,
     discover_available_platforms,
     fetch_package_names,
     query_package_records,
 )
 from pixi_browse.search import fuzzy_score
 
-DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
-    "dependencies",
-    "constraints",
-    "run_exports",
-)
-ACTIVE_SECTION_TITLE_STYLE = Style(color="bright_blue", bold=True)
-INACTIVE_SECTION_TITLE_STYLE = Style(dim=True)
-ACTIVE_TAB_STYLE = Style(color="bright_blue", bold=True)
-INACTIVE_SELECTED_TAB_STYLE = Style(color="blue", bold=False)
-INACTIVE_TAB_STYLE = Style(color="default", bold=False)
-TAB_HINT_STYLE = Style(color="default", dim=True)
-
-
-class DetailSection(Vertical):
-    def __init__(self, title: str, index: int, *, show_tabs: bool = False) -> None:
-        super().__init__(classes="detail-section")
-        self._index = index
-        del title, show_tabs
-        self.auto_links = False
-        self.styles.border_title_align = "left"
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id=f"detail-scroll-{self._index}", classes="detail-scroll"):
-            yield Static(id=f"detail-body-{self._index}", classes="detail-body")
-
-    def on_click(self, event: Click) -> None:
-        style = event.style
-        meta = style.meta if style is not None else None
-        click_meta = meta.get("@click") if meta is not None else None
-        if click_meta is not None:
-            action_name, args = click_meta
-            if action_name == "app.select_dependency_tab":
-                self.app.query_one(
-                    "#version-details-view", VersionDetailsView
-                ).select_dependency_tab(
-                    *args,
-                    focus_main_panel=True,
-                )
-                event.stop()
-                return
-        self.app.query_one(
-            "#version-details-view", VersionDetailsView
-        ).activate_section(
-            self._index,
-            focus_main_panel=True,
-        )
-        event.stop()
-
-    def update_header(self, title: str | Text) -> None:
-        self.border_title = title
-
-    def update_body(self, body: str | Text) -> None:
-        self.query_one(f"#detail-body-{self._index}", Static).update(body)
-
-    def set_active(self, active: bool) -> None:
-        self.set_class(active, "-active")
-        self.set_class(not active, "-collapsed")
-
-    def scroll_body_home(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
-        )
-
-    def scroll_body_end(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_end(
-            animate=False
-        )
-
-    def scroll_body_by(self, delta: float) -> None:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
-        scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
-
-    def page_step(self) -> int:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
-        return max(1, scroll.size.height)
-
-
-class VersionDetailsView(Vertical):
-    def __init__(self) -> None:
-        super().__init__(id="version-details-view")
-        self._details: VersionDetailsData | None = None
-        self._active_section = 0
-        self._dependency_tab_index = 0
-
-    def compose(self) -> ComposeResult:
-        yield DetailSection("Metadata", 0)
-        yield DetailSection("Dependencies", 1, show_tabs=True)
-        yield DetailSection("Files", 2)
-
-    def set_details(self, details: VersionDetailsData) -> None:
-        self._details = details
-        self.display = True
-        self._refresh_sections()
-
-    def set_active_section(self, index: int) -> None:
-        self._active_section = max(0, min(index, 2))
-        self._apply_section_state()
-
-    def activate_section(self, index: int, *, focus_main_panel: bool = False) -> None:
-        self.set_active_section(index)
-        if focus_main_panel:
-            self.app.query_one("#main-panel", MainPanel).focus()
-
-    def cycle_active_section(self, direction: int) -> None:
-        self._active_section = (self._active_section + direction) % 3
-        self._apply_section_state()
-
-    def cycle_dependency_tab(self, direction: int) -> None:
-        self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
-            DEPENDENCY_TABS
-        )
-        self._refresh_dependency_section()
-
-    def set_dependency_tab(self, tab: DependencyTab) -> None:
-        self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
-        self._refresh_dependency_section()
-
-    def select_dependency_tab(
-        self, tab: DependencyTab, *, focus_main_panel: bool = False
-    ) -> None:
-        self.set_active_section(1)
-        self.set_dependency_tab(tab)
-        if focus_main_panel:
-            self.app.query_one("#main-panel", MainPanel).focus()
-
-    def scroll_home_active(self) -> None:
-        self._section(self._active_section).scroll_body_home()
-
-    def scroll_end_active(self) -> None:
-        self._section(self._active_section).scroll_body_end()
-
-    def scroll_active(self, delta: float) -> None:
-        self._section(self._active_section).scroll_body_by(delta)
-
-    def active_page_step(self) -> int:
-        return self._section(self._active_section).page_step()
-
-    def dependency_section_is_active(self) -> bool:
-        return self._active_section == 1
-
-    def _section(self, index: int) -> DetailSection:
-        return list(self.query(DetailSection))[index]
-
-    def _active_dependency_tab(self) -> DependencyTab:
-        return DEPENDENCY_TABS[self._dependency_tab_index]
-
-    def _apply_section_state(self) -> None:
-        for index, section in enumerate(self.query(DetailSection)):
-            section.set_active(index == self._active_section)
-        if self._details is None:
-            return
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_section_header(2, "Files"))
-
-    def _refresh_sections(self) -> None:
-        if self._details is None:
-            return
-
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body("\n".join(self._details.metadata_lines))
-
-        self._refresh_dependency_section()
-
-        self._section(2).update_header(self._render_section_header(2, "Files"))
-        self._section(2).update_body("\n".join(self._details.files))
-
-        self._apply_section_state()
-
-    def _refresh_dependency_section(self) -> None:
-        if self._details is None:
-            return
-
-        dependency_section = self._section(1)
-        dependency_section.update_header(self._render_dependency_header())
-        dependency_section.update_body(
-            "\n".join(self._dependency_lines(self._active_dependency_tab()))
-        )
-
-    def _dependency_lines(self, tab: DependencyTab) -> tuple[str, ...]:
-        assert self._details is not None
-        if tab == "dependencies":
-            return self._details.dependencies
-        if tab == "constraints":
-            return self._details.constraints
-        return self._details.run_exports
-
-    def _render_dependency_tabs(self) -> Text:
-        labels = {
-            "dependencies": "Dependencies",
-            "constraints": "Constraints",
-            "run_exports": "Run exports",
-        }
-        tab_text = Text()
-        for index, tab in enumerate(DEPENDENCY_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_dependency_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_dependency_tab(),
-                    pane_active=self._active_section == 1,
-                )
-            )
-        return tab_text
-
-    def _render_section_header(self, index: int, label: str) -> Text:
-        style = (
-            ACTIVE_SECTION_TITLE_STYLE
-            if index == self._active_section
-            else INACTIVE_SECTION_TITLE_STYLE
-        )
-        return Text(f"[{index + 1}] {label}", style=style)
-
-    def _render_dependency_header(self) -> Text:
-        header = self._render_section_header(1, "")
-        header.append_text(self._render_dependency_tabs())
-        if self._active_section == 1:
-            header.append("  [ / ]", style=TAB_HINT_STYLE)
-        return header
-
-    @staticmethod
-    def _render_clickable_dependency_tab(
-        tab: DependencyTab, label: str, *, active: bool, pane_active: bool
-    ) -> Text:
-        text = Text(label)
-        text.stylize(
-            ACTIVE_TAB_STYLE
-            if active and pane_active
-            else INACTIVE_SELECTED_TAB_STYLE
-            if active
-            else INACTIVE_TAB_STYLE
-        )
-        text.stylize(
-            Style(
-                meta={
-                    "@click": (
-                        "app.select_dependency_tab",
-                        (tab,),
-                    )
-                }
-            )
-        )
-        return text
-
-
-class MainPanel(Vertical):
-    can_focus = True
-    _vim_g_pending = False
-
-    @staticmethod
-    def _page_step(height: int) -> int:
-        return max(1, height)
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(id="main-placeholder-scroll"):
-            yield Static(
-                "Main panel placeholder.\n\nSelect a package in the sidebar.",
-                id="main-placeholder",
-            )
-        yield VersionDetailsView()
-
-    def on_mount(self) -> None:
-        self.show_placeholder(
-            "Main panel placeholder.\n\nSelect a package in the sidebar."
-        )
-
-    def show_placeholder(self, content: str | Text) -> None:
-        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
-        placeholder.display = True
-        self.query_one("#main-placeholder", Static).update(content)
-        self.query_one("#version-details-view", VersionDetailsView).display = False
-
-    def show_version_details(self, details: VersionDetailsData) -> None:
-        self.query_one("#main-placeholder-scroll", VerticalScroll).display = False
-        version_details = self.query_one("#version-details-view", VersionDetailsView)
-        version_details.set_details(details)
-        version_details.display = True
-
-    def set_active_section(self, index: int) -> None:
-        self.query_one("#version-details-view", VersionDetailsView).set_active_section(
-            index
-        )
-
-    def cycle_dependency_tab(self, direction: int) -> None:
-        self.query_one(
-            "#version-details-view", VersionDetailsView
-        ).cycle_dependency_tab(direction)
-
-    def dependency_section_is_active(self) -> bool:
-        return self.query_one(
-            "#version-details-view", VersionDetailsView
-        ).dependency_section_is_active()
-
-    def set_dependency_tab(self, tab: DependencyTab) -> None:
-        self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
-            tab
-        )
-
-    def cycle_active_section(self, direction: int) -> None:
-        self.query_one(
-            "#version-details-view", VersionDetailsView
-        ).cycle_active_section(direction)
-
-    def reset_scroll(self) -> None:
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).scroll_home_active()
-            return
-        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
-        )
-
-    def scroll_main(self, delta: float) -> None:
-        if self._showing_version_details():
-            self.query_one("#version-details-view", VersionDetailsView).scroll_active(
-                delta
-            )
-            return
-        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
-        placeholder.scroll_to(y=placeholder.scroll_y + delta, animate=False)
-
-    def scroll_home_main(self) -> None:
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).scroll_home_active()
-            return
-        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_to(
-            y=0,
-            animate=False,
-        )
-
-    def scroll_end_main(self) -> None:
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).scroll_end_active()
-            return
-        self.query_one("#main-placeholder-scroll", VerticalScroll).scroll_end(
-            animate=False
-        )
-
-    def _showing_version_details(self) -> bool:
-        return self.query_one("#version-details-view", VersionDetailsView).display
-
-    def current_page_step(self) -> int:
-        if self._showing_version_details():
-            return self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).active_page_step()
-
-        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
-        return self._page_step(placeholder.size.height)
-
-    def on_key(self, event: Key) -> None:
-        page_height = self.current_page_step()
-        character = event.character
-
-        if self._showing_version_details():
-            dependency_section_is_active = self.dependency_section_is_active()
-            if event.key == "tab":
-                self.cycle_active_section(1)
-                event.stop()
-                return
-            if event.key in {"shift+tab", "backtab"}:
-                self.cycle_active_section(-1)
-                event.stop()
-                return
-            if character in {"1", "2", "3"}:
-                self.set_active_section(int(character) - 1)
-                event.stop()
-                return
-            if character == "[" and dependency_section_is_active:
-                self.cycle_dependency_tab(-1)
-                event.stop()
-                return
-            if character == "]" and dependency_section_is_active:
-                self.cycle_dependency_tab(1)
-                event.stop()
-                return
-
-        if character == "g":
-            if self._vim_g_pending:
-                self.scroll_home_main()
-                self._vim_g_pending = False
-            else:
-                self._vim_g_pending = True
-            event.stop()
-            return
-
-        if character == "G":
-            self.scroll_end_main()
-            self._vim_g_pending = False
-            event.stop()
-            return
-
-        self._vim_g_pending = False
-
-        if event.key in {"up", "k"}:
-            self.scroll_main(-1)
-            event.stop()
-            return
-        if event.key in {"down", "j"}:
-            self.scroll_main(1)
-            event.stop()
-            return
-        if event.key == "pageup":
-            self.scroll_main(-page_height)
-            event.stop()
-            return
-        if event.key == "pagedown":
-            self.scroll_main(page_height)
-            event.stop()
-            return
-        if event.key == "ctrl+u":
-            self.scroll_main(-page_height)
-            event.stop()
-            return
-        if event.key == "ctrl+d":
-            self.scroll_main(page_height)
-            event.stop()
-            return
-        if event.key == "home":
-            self.scroll_home_main()
-            event.stop()
-            return
-        if event.key == "end":
-            self.scroll_end_main()
-            event.stop()
-            return
-        if character == "h":
-            self.app.query_one("#sidebar-list", OptionList).focus()
-            event.stop()
-
-
-class HelpScreen(ModalScreen[None]):
-    DEFAULT_CSS = """
-    HelpScreen {
-        align: center middle;
-        background: $background 60%;
-    }
-
-    #help-dialog {
-        width: 72;
-        max-width: 90%;
-        height: auto;
-        max-height: 90%;
-        border: round $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #help-title {
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #help-body {
-        color: $text;
-    }
-    """
-
-    BINDINGS = [
-        Binding("escape", "dismiss", show=False),
-        Binding("q", "dismiss", show=False),
-        Binding("question_mark", "dismiss", show=False),
-    ]
-
-    def __init__(self, help_text: str) -> None:
-        super().__init__()
-        self._help_text = help_text
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="help-dialog"):
-            yield Static("Keybinds", id="help-title")
-            yield Static(self._help_text, id="help-body")
-
-    async def action_dismiss(self, result: None = None) -> None:
-        self.dismiss(result)
+from .state import AboutUrls, ChannelStateSnapshot
+from .version_loader import VersionDataLoader
+from .widgets import DEPENDENCY_TABS, HelpScreen, MainPanel
 
 
 class CondaMetadataTui(App[None]):
-    CSS_PATH = "selection_list.tcss"
+    CSS_PATH = Path(__file__).resolve().parent.parent / "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
@@ -567,6 +66,8 @@ class CondaMetadataTui(App[None]):
         selected_platforms = set(default_platforms or [])
         self.theme = "textual-ansi"
         self._client = Client.default_client()
+        from . import create_gateway
+
         self._gateway: Gateway = create_gateway(client=self._client)
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
@@ -583,9 +84,10 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
-        self._version_about_urls_cache: dict[VersionPreviewKey, dict[str, Any]] = {}
-        self._version_paths_cache: dict[VersionPreviewKey, list[str]] = {}
-        self._version_details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
+        self._version_loader = VersionDataLoader(client=self._client)
+        self._version_about_urls_cache = self._version_loader.about_urls_cache
+        self._version_paths_cache = self._version_loader.paths_cache
+        self._version_details_cache = self._version_loader.details_cache
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
         self._selected_package: str | None = None
@@ -674,7 +176,6 @@ class CondaMetadataTui(App[None]):
         if noarch_platform in self._available_platform_names:
             return {noarch_platform}
 
-        # Defensive fallback in case noarch is unexpectedly missing.
         return {self._available_platform_names[0]}
 
     async def _fetch_package_names_with_gateway(self) -> list[str]:
@@ -825,9 +326,7 @@ class CondaMetadataTui(App[None]):
 
     def _clear_record_caches(self) -> None:
         self._package_records_cache.clear()
-        self._version_about_urls_cache.clear()
-        self._version_paths_cache.clear()
-        self._version_details_cache.clear()
+        self._version_loader.clear_caches()
 
     def _reset_preview_state(self) -> None:
         self._previewed_package = None
@@ -850,80 +349,111 @@ class CondaMetadataTui(App[None]):
         self._reset_preview_state()
         self._platforms = []
         self._available_platform_names = []
-        self._selected_platform_names = set()
         self._all_package_names = []
         self._visible_package_names = []
         self._clear_record_caches()
 
-    def _snapshot_channel_state(self) -> dict[str, Any]:
-        return {
-            "channel_name": self._channel_name,
-            "mode": self._mode,
-            "draft_selected_platform_names": (
+    def _snapshot_channel_state(self) -> ChannelStateSnapshot:
+        package_list = self.query_one("#sidebar-list", OptionList)
+        return ChannelStateSnapshot(
+            channel_name=self._channel_name,
+            mode=self._mode,
+            draft_selected_platform_names=(
                 set(self._draft_selected_platform_names)
                 if self._draft_selected_platform_names is not None
                 else None
             ),
-            "current_versions": list(self._current_versions),
-            "version_subdirs": list(self._version_subdirs),
-            "versions_by_subdir": {
+            current_versions=list(self._current_versions),
+            version_subdirs=list(self._version_subdirs),
+            versions_by_subdir={
                 subdir: list(entries)
                 for subdir, entries in self._versions_by_subdir.items()
             },
-            "collapsed_version_subdirs": set(self._collapsed_version_subdirs),
-            "version_rows": list(self._version_rows),
-            "selected_package": self._selected_package,
-            "previewed_version_key": self._previewed_version_key,
-            "pending_preview_version_key": self._pending_preview_version_key,
-            "previewed_package": self._previewed_package,
-            "pending_preview_package": self._pending_preview_package,
-            "platforms": list(self._platforms),
-            "available_platform_names": list(self._available_platform_names),
-            "selected_platform_names": set(self._selected_platform_names),
-            "all_package_names": list(self._all_package_names),
-            "visible_package_names": list(self._visible_package_names),
-            "package_records_cache": {
+            collapsed_version_subdirs=set(self._collapsed_version_subdirs),
+            version_rows=list(self._version_rows),
+            selected_package=self._selected_package,
+            previewed_version_key=self._previewed_version_key,
+            pending_preview_version_key=self._pending_preview_version_key,
+            previewed_package=self._previewed_package,
+            pending_preview_package=self._pending_preview_package,
+            platforms=list(self._platforms),
+            available_platform_names=list(self._available_platform_names),
+            selected_platform_names=set(self._selected_platform_names),
+            all_package_names=list(self._all_package_names),
+            visible_package_names=list(self._visible_package_names),
+            package_records_cache={
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
-            "version_about_urls_cache": {
-                preview_key: dict(about_urls)
-                for preview_key, about_urls in self._version_about_urls_cache.items()
-            },
-            "version_paths_cache": {
+            version_about_urls_cache=dict(self._version_about_urls_cache),
+            version_paths_cache={
                 preview_key: list(paths)
                 for preview_key, paths in self._version_paths_cache.items()
             },
-            "version_details_cache": dict(self._version_details_cache),
-            "last_package_highlight": self._last_package_highlight,
-            "last_package_scroll_y": self._last_package_scroll_y,
-        }
+            version_details_cache=dict(self._version_details_cache),
+            last_package_highlight=self._last_package_highlight,
+            last_package_scroll_y=self._last_package_scroll_y,
+            sidebar_highlight=package_list.highlighted,
+            sidebar_scroll_y=package_list.scroll_y,
+        )
 
-    def _restore_channel_state(self, snapshot: dict[str, Any]) -> None:
-        self._channel_name = snapshot["channel_name"]
-        self._mode = snapshot["mode"]
-        self._draft_selected_platform_names = snapshot["draft_selected_platform_names"]
-        self._current_versions = snapshot["current_versions"]
-        self._version_subdirs = snapshot["version_subdirs"]
-        self._versions_by_subdir = snapshot["versions_by_subdir"]
-        self._collapsed_version_subdirs = snapshot["collapsed_version_subdirs"]
-        self._version_rows = snapshot["version_rows"]
-        self._selected_package = snapshot["selected_package"]
-        self._previewed_version_key = snapshot["previewed_version_key"]
-        self._pending_preview_version_key = snapshot["pending_preview_version_key"]
-        self._previewed_package = snapshot["previewed_package"]
-        self._pending_preview_package = snapshot["pending_preview_package"]
-        self._platforms = snapshot["platforms"]
-        self._available_platform_names = snapshot["available_platform_names"]
-        self._selected_platform_names = snapshot["selected_platform_names"]
-        self._all_package_names = snapshot["all_package_names"]
-        self._visible_package_names = snapshot["visible_package_names"]
-        self._package_records_cache = snapshot["package_records_cache"]
-        self._version_about_urls_cache = snapshot["version_about_urls_cache"]
-        self._version_paths_cache = snapshot["version_paths_cache"]
-        self._version_details_cache = snapshot["version_details_cache"]
-        self._last_package_highlight = snapshot["last_package_highlight"]
-        self._last_package_scroll_y = snapshot["last_package_scroll_y"]
+    def _restore_channel_state(self, snapshot: ChannelStateSnapshot) -> None:
+        self._channel_name = snapshot.channel_name
+        self._mode = snapshot.mode
+        self._draft_selected_platform_names = snapshot.draft_selected_platform_names
+        self._current_versions = snapshot.current_versions
+        self._version_subdirs = snapshot.version_subdirs
+        self._versions_by_subdir = snapshot.versions_by_subdir
+        self._collapsed_version_subdirs = snapshot.collapsed_version_subdirs
+        self._version_rows = snapshot.version_rows
+        self._selected_package = snapshot.selected_package
+        self._previewed_version_key = snapshot.previewed_version_key
+        self._pending_preview_version_key = snapshot.pending_preview_version_key
+        self._previewed_package = snapshot.previewed_package
+        self._pending_preview_package = snapshot.pending_preview_package
+        self._platforms = snapshot.platforms
+        self._available_platform_names = snapshot.available_platform_names
+        self._selected_platform_names = snapshot.selected_platform_names
+        self._all_package_names = snapshot.all_package_names
+        self._visible_package_names = snapshot.visible_package_names
+        self._package_records_cache = snapshot.package_records_cache
+        self._version_loader.restore_caches(
+            about_urls_cache=snapshot.version_about_urls_cache,
+            paths_cache=snapshot.version_paths_cache,
+            details_cache=snapshot.version_details_cache,
+        )
+        self._last_package_highlight = snapshot.last_package_highlight
+        self._last_package_scroll_y = snapshot.last_package_scroll_y
+
+    def _restore_ui_from_snapshot(self, snapshot: ChannelStateSnapshot) -> None:
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.disabled = False
+
+        if self._mode == "packages":
+            self.query_one("#sidebar-title", Static).update("Packages")
+            self._render_package_options()
+            self._update_package_selection_status()
+        elif self._mode == "versions":
+            title = (
+                f"Versions: {self._selected_package}"
+                if self._selected_package is not None
+                else "Versions"
+            )
+            self.query_one("#sidebar-title", Static).update(title)
+            self._render_version_options()
+            self._update_versions_status()
+        else:
+            self.query_one("#sidebar-title", Static).update("Platforms")
+            self._render_platform_options()
+            self._update_platform_selection_status()
+
+        option_count = self._sidebar_option_count()
+        if snapshot.sidebar_highlight is not None and option_count > 0:
+            package_list.highlighted = min(snapshot.sidebar_highlight, option_count - 1)
+            package_list.scroll_to(y=snapshot.sidebar_scroll_y, animate=False)
+            self._update_main_panel_for_sidebar_highlight(package_list.highlighted)
+
+        self._update_filter_indicator()
 
     async def _apply_platform_selection(self) -> None:
         selected = set(
@@ -995,8 +525,7 @@ class CondaMetadataTui(App[None]):
         loaded = await self._load_packages()
         if not loaded:
             self._restore_channel_state(previous_state)
-            self._back_to_packages()
-            package_list.disabled = False
+            self._restore_ui_from_snapshot(previous_state)
             package_list.focus()
             self.notify(
                 f"Failed to load channel: {channel_name}",
@@ -1059,15 +588,6 @@ class CondaMetadataTui(App[None]):
         self._package_records_cache[package_name] = records
         return records
 
-    def _format_detail_row(self, label: str, value: str) -> str:
-        return format_detail_row(label, value)
-
-    def _main_panel_content_width(self) -> int:
-        main_panel = self.query_one("#main-panel")
-        if main_panel.size.width <= 0:
-            return 90
-        return max(50, main_panel.size.width - 6)
-
     def _show_main_placeholder(self, content: str | Text) -> None:
         self.query_one("#main-panel", MainPanel).show_placeholder(content)
 
@@ -1100,9 +620,6 @@ class CondaMetadataTui(App[None]):
 
     def _reset_main_panel_scroll(self) -> None:
         self.query_one("#main-panel", MainPanel).reset_scroll()
-
-    def _scroll_main_panel(self, delta: float) -> None:
-        self.query_one("#main-panel", MainPanel).scroll_main(delta)
 
     def _sidebar_option_count(self) -> int:
         if self._mode == "packages":
@@ -1184,30 +701,9 @@ class CondaMetadataTui(App[None]):
         )
         return "\n".join([*navigation, "", *app])
 
-    def _format_record_value(self, value: Any) -> str:
-        return format_record_value(value)
-
-    def _format_byte_size(self, value: Any) -> str:
-        return format_byte_size(value)
-
-    def _render_kv_box(self, rows: list[tuple[str, str]], width: int) -> list[str]:
-        return render_kv_box(rows, width)
-
     @staticmethod
     def _extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
-        data = yaml.safe_load(rendered_recipe_text)
-        if not isinstance(data, dict):
-            return None
-
-        system_tools = data.get("system_tools")
-        if not isinstance(system_tools, dict):
-            return None
-
-        rattler_build_version = system_tools.get("rattler-build")
-        if rattler_build_version is None:
-            return None
-
-        return str(rattler_build_version)
+        return VersionDataLoader.extract_rattler_build_version(rendered_recipe_text)
 
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -1238,94 +734,12 @@ class CondaMetadataTui(App[None]):
     async def _get_package_paths(
         self, preview_key: VersionPreviewKey, url: str
     ) -> list[str]:
-        cached = self._version_paths_cache.get(preview_key)
-        if cached is not None:
-            return cached
-
-        paths_json = await PathsJson.from_remote_url(self._client, url)
-        paths = [str(path.relative_path) for path in paths_json.paths]
-        self._version_paths_cache[preview_key] = paths
-        return paths
+        return await self._version_loader.get_package_paths(preview_key, url)
 
     async def _get_about_urls(
         self, preview_key: VersionPreviewKey, url: str
-    ) -> dict[str, Any]:
-        cached = self._version_about_urls_cache.get(preview_key)
-        if cached is not None:
-            return cached
-
-        about_json = await AboutJson.from_remote_url(self._client, url)
-        recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
-        if isinstance(recipe_maintainers, str):
-            recipe_maintainers = [recipe_maintainers]
-        elif not isinstance(recipe_maintainers, list):
-            recipe_maintainers = []
-        about_urls = {
-            "repository": list(about_json.dev_url),
-            "documentation": list(about_json.doc_url),
-            "homepage": list(about_json.home),
-            "recipe_maintainers": [
-                str(maintainer)
-                for maintainer in recipe_maintainers
-                if isinstance(maintainer, str)
-            ],
-            "provenance_remote_url": (
-                str(about_json.extra.get("remote_url"))
-                if about_json.extra.get("remote_url")
-                else None
-            ),
-            "provenance_sha": str(about_json.extra.get("sha"))
-            if about_json.extra.get("sha")
-            else None,
-            "rattler_build_version": None,
-        }
-        try:
-            rendered_recipe_bytes = await fetch_raw_package_file_from_url(
-                self._client,
-                url,
-                "info/recipe/rendered_recipe.yaml",
-            )
-            about_urls["rattler_build_version"] = self._extract_rattler_build_version(
-                rendered_recipe_bytes.decode("utf-8", errors="replace")
-            )
-        except Exception:
-            pass
-        self._version_about_urls_cache[preview_key] = about_urls
-        return about_urls
-
-    async def _get_run_exports(self, url: str) -> RunExportsJson:
-        return await RunExportsJson.from_remote_url(self._client, url)
-
-    def _build_selected_version_details(
-        self,
-        package_name: str,
-        record: RepoDataRecord,
-        *,
-        package_paths: list[str] | None = None,
-        package_paths_error: str | None = None,
-        repository_urls: list[str] | None = None,
-        documentation_urls: list[str] | None = None,
-        homepage_urls: list[str] | None = None,
-        recipe_maintainers: list[str] | None = None,
-        provenance_remote_url: str | None = None,
-        provenance_sha: str | None = None,
-        rattler_build_version: str | None = None,
-        run_exports: RunExportsJson | None = None,
-    ) -> VersionDetailsData:
-        return build_version_details_data(
-            package_name,
-            record,
-            package_paths=package_paths,
-            package_paths_error=package_paths_error,
-            repository_urls=repository_urls,
-            documentation_urls=documentation_urls,
-            homepage_urls=homepage_urls,
-            recipe_maintainers=recipe_maintainers,
-            provenance_remote_url=provenance_remote_url,
-            provenance_sha=provenance_sha,
-            rattler_build_version=rattler_build_version,
-            run_exports=run_exports,
-        )
+    ) -> AboutUrls:
+        return await self._version_loader.get_about_urls(preview_key, url)
 
     async def _load_and_render_selected_version_preview(
         self, package_name: str, entry: VersionEntry, preview_key: VersionPreviewKey
@@ -1342,51 +756,18 @@ class CondaMetadataTui(App[None]):
             )
             self._previewed_version_key = None
             return
-        else:
-            package_paths: list[str] | None = None
-            package_paths_error: str | None = None
-            about_urls: dict[str, Any] = {
-                "repository": [],
-                "documentation": [],
-                "homepage": [],
-                "recipe_maintainers": [],
-                "provenance_remote_url": None,
-                "provenance_sha": None,
-                "rattler_build_version": None,
-            }
-            run_exports: RunExportsJson | None = None
-            try:
-                package_paths = await self._get_package_paths(
-                    preview_key, str(record.url)
-                )
-            except Exception as exc:
-                package_paths_error = str(exc)
-            try:
-                about_urls = await self._get_about_urls(preview_key, str(record.url))
-            except Exception:
-                pass
-            try:
-                run_exports = await self._get_run_exports(str(record.url))
-            except Exception:
-                pass
 
-            rendered = self._build_selected_version_details(
-                package_name,
-                record,
-                package_paths=package_paths,
-                package_paths_error=package_paths_error,
-                repository_urls=about_urls["repository"],
-                documentation_urls=about_urls["documentation"],
-                homepage_urls=about_urls["homepage"],
-                recipe_maintainers=about_urls["recipe_maintainers"],
-                provenance_remote_url=about_urls["provenance_remote_url"],
-                provenance_sha=about_urls["provenance_sha"],
-                rattler_build_version=about_urls["rattler_build_version"],
-                run_exports=run_exports,
-            )
+        details = await self._version_loader.load_version_details(
+            package_name,
+            record,
+            preview_key=preview_key,
+        )
+        if self._mode != "versions":
+            return
+        if self._pending_preview_version_key != preview_key:
+            return
 
-        self._version_details_cache[preview_key] = rendered
-        self._show_version_details(rendered)
+        self._show_version_details(details)
         self._reset_main_panel_scroll()
         self._previewed_version_key = preview_key
 
@@ -1432,13 +813,15 @@ class CondaMetadataTui(App[None]):
             if record is not None:
                 url = str(record.url)
             else:
-                url = (
-                    f"https://conda.anaconda.org/{self._channel_name}/"
-                    f"{entry.subdir}/{entry.file_name}"
-                )
+                channel_base = self._channel_name.rstrip("/")
+                if "://" not in channel_base:
+                    channel_base = f"https://conda.anaconda.org/{channel_base}"
+                url = f"{channel_base}/{entry.subdir}/{entry.file_name}"
 
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
+            from . import package_download_to_path
+
             await package_download_to_path(self._client, url, temporary_destination)
             temporary_destination.replace(destination)
         except Exception as exc:
@@ -1608,8 +991,6 @@ class CondaMetadataTui(App[None]):
     def _build_version_entries(
         self, records: list[RepoDataRecord]
     ) -> list[VersionEntry]:
-        """Build version entries while preserving distinct artifacts per
-        build."""
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
         for record in records:
             key = (
@@ -1747,8 +1128,7 @@ class CondaMetadataTui(App[None]):
     def _update_filter_indicator(self) -> None:
         sidebar = self.query_one("#sidebar", Vertical)
         filter_indicator = self._filter_indicator_text()
-        platform_indicator = self._platform_indicator_text()
-        right_indicator = platform_indicator
+        right_indicator = self._platform_indicator_text()
 
         spacing = 1
         sidebar_width = sidebar.size.width
@@ -1870,7 +1250,7 @@ class CondaMetadataTui(App[None]):
         if tab not in DEPENDENCY_TABS:
             return
         self._set_active_main_section(1)
-        self._set_main_dependency_tab(tab)  # type: ignore[arg-type]
+        self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
 
     def action_quit_or_type_q(self) -> None:
@@ -1902,7 +1282,6 @@ class CondaMetadataTui(App[None]):
     def on_key(self, event: Key) -> None:
         if self._channel_edit_mode:
             self._reset_sidebar_vim_pending()
-            # These keys are handled by explicit bindings to avoid duplicate input.
             if event.key in {"f", "p", "c", "slash", "q"}:
                 return
 
@@ -2053,7 +1432,6 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or self._mode != "packages":
             return
 
-        # These keys are handled by explicit bindings to avoid duplicate input.
         if event.key in {"f", "p", "c", "slash", "q"}:
             return
 
@@ -2076,7 +1454,6 @@ class CondaMetadataTui(App[None]):
             self._filter_packages()
             self._update_filter_indicator()
             event.stop()
-            return
 
     def on_paste(self, event: Paste) -> None:
         if not self._channel_edit_mode:
@@ -2135,9 +1512,7 @@ class CondaMetadataTui(App[None]):
             return
 
         row = self._highlighted_version_row()
-        if row is None:
-            return
-        if row.kind != "entry" or row.entry is None:
+        if row is None or row.kind != "entry" or row.entry is None:
             return
 
         preview_key = self._version_preview_key(package_name, row.entry)
