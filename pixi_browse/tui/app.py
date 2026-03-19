@@ -19,6 +19,7 @@ from textual.containers import Horizontal, Vertical
 from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
 
+from pixi_browse import __version__
 from pixi_browse.models import (
     DependencyTab,
     VersionDetailsData,
@@ -1239,7 +1240,7 @@ class CondaMetadataTui(App[None]):
         self._update_filter_indicator()
 
     def action_show_help(self) -> None:
-        self.push_screen(HelpScreen(self._help_text()))
+        self.push_screen(HelpScreen(self._help_text(), version=__version__))
 
     def action_open_external_url(self, url: str) -> None:
         webbrowser.open(url)
