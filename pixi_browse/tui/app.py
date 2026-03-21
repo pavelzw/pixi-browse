@@ -47,6 +47,8 @@ class CondaMetadataTui(App[None]):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
+        Binding("tab", "tab_key", show=False, priority=True),
+        Binding("shift+tab", "backtab_key", show=False, priority=True),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
         Binding("slash", "filter_key_slash", show=False),
@@ -1192,6 +1194,24 @@ class CondaMetadataTui(App[None]):
         self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
 
+    def action_tab_key(self) -> None:
+        if self._mode != "versions":
+            return
+        if not self._main_panel_shows_version_details():
+            return
+        if not self._main_panel_is_focused():
+            return
+        self._cycle_active_main_section(1)
+
+    def action_backtab_key(self) -> None:
+        if self._mode != "versions":
+            return
+        if not self._main_panel_shows_version_details():
+            return
+        if not self._main_panel_is_focused():
+            return
+        self._cycle_active_main_section(-1)
+
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:
             self._append_channel_char("q")
@@ -1317,7 +1337,10 @@ class CondaMetadataTui(App[None]):
 
         if (
             self._mode == "versions"
-            and not self._main_panel_shows_version_details()
+            and (
+                not self._main_panel_shows_version_details()
+                or not self._main_panel_is_focused()
+            )
             and event.key in {"tab", "shift+tab", "backtab"}
         ):
             event.stop()

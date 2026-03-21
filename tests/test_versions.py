@@ -1334,6 +1334,29 @@ def test_on_key_tab_does_nothing_when_sidebar_is_active(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_on_key_tab_does_not_switch_panes_when_details_exist_but_main_is_inactive(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
+    assert event.stopped is True
+
+
 def test_on_key_tab_does_nothing_in_versions_preview_with_main_focus(
     monkeypatch,
 ) -> None:
