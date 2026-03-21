@@ -555,23 +555,16 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
 def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     app = CondaMetadataTui()
     focused: list[str] = []
-    title_updates: list[str] = []
 
     class _FakeOptionList:
         highlighted = 0
         scroll_y = 0.0
 
-    class _FakeStatic:
-        def update(self, value: str) -> None:
-            title_updates.append(value)
-
     option_list = _FakeOptionList()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        if selector == "#sidebar-list":
-            return option_list
-        assert selector == "#sidebar-title"
-        return _FakeStatic()
+        assert selector == "#sidebar-list"
+        return option_list
 
     async def _fake_get_package_records(package_name: str) -> list[_Record]:
         assert package_name == "demo"
@@ -595,7 +588,7 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     asyncio.run(app._open_versions("demo"))
 
     assert focused == []
-    assert title_updates == ["Versions: demo"]
+    assert app._sidebar_title_text().plain == "[0] Versions: demo"
 
 
 def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
@@ -1065,6 +1058,8 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
         app, "_set_active_main_section", lambda value: selected_sections.append(value)
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
 
     event = _FakeKeyEvent("2", "2")
@@ -1072,6 +1067,23 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
 
     assert selected_sections == [1]
     assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_zero_focuses_sidebar_in_versions_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    event = _FakeKeyEvent("0", "0")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
     assert event.stopped is True
 
 
@@ -1091,6 +1103,8 @@ def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
         lambda value: tab_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
     monkeypatch.setattr(
         app,
@@ -1243,6 +1257,8 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
     monkeypatch.setattr(
         app,
         "query_one",
@@ -1258,7 +1274,6 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
-    focused: list[str] = []
     section_directions: list[int] = []
 
     monkeypatch.setattr(
@@ -1267,20 +1282,19 @@ def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
         lambda value: section_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
 
     event = _FakeKeyEvent("tab")
     app.on_key(event)  # type: ignore[arg-type]
 
     assert section_directions == [1]
-    assert focused == ["main"]
     assert event.stopped is True
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
-    focused: list[str] = []
     section_directions: list[int] = []
 
     monkeypatch.setattr(
@@ -1289,13 +1303,57 @@ def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) ->
         lambda value: section_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
 
     event = _FakeKeyEvent("shift+tab")
     app.on_key(event)  # type: ignore[arg-type]
 
     assert section_directions == [-1]
-    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_tab_does_nothing_when_sidebar_is_active(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
+    assert event.stopped is True
+
+
+def test_on_key_tab_does_nothing_in_versions_preview_with_main_focus(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
     assert event.stopped is True
 
 

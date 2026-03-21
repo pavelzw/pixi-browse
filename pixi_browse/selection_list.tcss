@@ -18,12 +18,6 @@ Screen {
     border: round $accent;
 }
 
-#sidebar-title {
-    text-style: bold;
-    padding: 1 0 0 0;
-    margin-bottom: 1;
-}
-
 #sidebar-list {
     height: 1fr;
     border: solid $surface;

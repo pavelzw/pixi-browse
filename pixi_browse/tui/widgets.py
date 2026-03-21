@@ -374,6 +374,9 @@ class MainPanel(Vertical):
     def _showing_version_details(self) -> bool:
         return self.query_one("#version-details-view", VersionDetailsView).display
 
+    def showing_version_details(self) -> bool:
+        return self._showing_version_details()
+
     def current_page_step(self) -> int:
         if self._showing_version_details():
             return self.query_one(
