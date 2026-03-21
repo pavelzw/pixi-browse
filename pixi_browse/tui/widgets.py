@@ -288,6 +288,10 @@ class MainPanel(Vertical):
             "Main panel placeholder.\n\nSelect a package in the sidebar."
         )
 
+    def on_click(self, event: Click) -> None:
+        self.focus()
+        event.stop()
+
     def show_placeholder(self, content: str | Text) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = True

@@ -47,7 +47,6 @@ class CondaMetadataTui(App[None]):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
-        Binding("f", "filter_key_f", "Filter"),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
         Binding("slash", "filter_key_slash", show=False),
@@ -110,6 +109,7 @@ class CondaMetadataTui(App[None]):
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
             yield MainPanel(id="main-panel")
+        yield Static(self._footer_text(), id="footer")
 
     async def on_mount(self) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -693,7 +693,7 @@ class CondaMetadataTui(App[None]):
             "App",
             [
                 ("?", "Show this help"),
-                ("/ or f", "Start package filter"),
+                ("/", "Start package filter"),
                 ("p", "Open platform selector"),
                 ("c", "Edit channel"),
                 ("d", "Download selected artifact in versions view"),
@@ -1021,77 +1021,38 @@ class CondaMetadataTui(App[None]):
             reverse=True,
         )
 
-    def _filter_indicator_text(self) -> Text:
-        indicator = Text()
-        if self._filter_mode:
-            indicator.append("f", style="bold red")
-            indicator.append(f" {self._search_query}_", style="bold")
-        else:
-            indicator.append("filter", style="dim")
-            indicator.stylize("bold red", 0, 1)
-        return indicator
+    def _footer_text(self) -> str:
+        if self._mode == "packages" and self._filter_mode:
+            return f"Search: {self._search_query}_"
 
-    def _platform_indicator_text(self) -> Text:
-        indicator = Text("platform", style="dim")
-        indicator.stylize("bold red", 0, 1)
-        platforms = (
-            sorted(
-                self._draft_selected_platform_names,
-                key=platform_sort_key,
-            )
-            if self._mode == "platforms"
-            and self._draft_selected_platform_names is not None
-            else sorted(self._selected_platform_names, key=platform_sort_key)
-        )
-        platform_names = [str(platform) for platform in platforms]
-        if platform_names:
-            if len(platform_names) <= 2:
-                summary = "+".join(platform_names)
-            else:
-                summary = f"{platform_names[0]}+{len(platform_names) - 1}"
-            indicator.append(f" {summary}", style="bold")
-        return indicator
-
-    def _channel_indicator_text(self) -> Text:
-        indicator = Text("")
-        indicator.append("c", style="bold red")
-        indicator.append("hannel", style="dim")
-        if self._channel_edit_mode:
-            indicator.append(f" {self._channel_draft}_", style="bold")
-        else:
-            indicator.append(f" {self._channel_name}", style="bold")
-        return indicator
+        footer = "Search: / | Platform: p | Channel: c"
+        if self._mode == "versions":
+            footer += f" | {self._download_indicator_text().plain}"
+        footer += " | Help: ?"
+        return footer
 
     def _download_indicator_text(self) -> Text:
         if self._download_indicator_override is not None:
-            return Text(self._download_indicator_override)
+            return Text(self._download_indicator_override, style="dim")
 
-        indicator = Text("download", style="dim")
-        indicator.stylize("bold red", 0, 1)
-        return indicator
-
-    def _help_indicator_text(self) -> Text:
-        indicator = Text("? Help", style="dim")
-        indicator.stylize("bold red", 0, 1)
+        indicator = Text("Download: d", style="dim")
+        indicator.stylize("bold red", len("Download: "), len("Download: d"))
         return indicator
 
     def _set_download_indicator(self, value: str | None) -> None:
         self._download_indicator_override = value
+        self.query_one("#footer", Static).update(self._footer_text())
+        if self._mode == "versions":
+            self._update_versions_status()
+            return
         self._update_download_indicator()
 
     def _update_download_indicator(self) -> None:
         main_panel = self.query_one("#main-panel")
         main_panel.styles.border_title_align = "left"
-        main_panel.border_title = self._channel_indicator_text()
+        main_panel.border_title = ""
         main_panel.styles.border_subtitle_align = "right"
-        if self._mode == "versions":
-            main_panel.border_subtitle = Text.assemble(
-                self._download_indicator_text(),
-                "  ",
-                self._help_indicator_text(),
-            )
-        else:
-            main_panel.border_subtitle = self._help_indicator_text()
+        main_panel.border_subtitle = ""
 
     def _selected_platforms_text(self) -> str:
         return ", ".join(
@@ -1128,22 +1089,9 @@ class CondaMetadataTui(App[None]):
 
     def _update_filter_indicator(self) -> None:
         sidebar = self.query_one("#sidebar", Vertical)
-        filter_indicator = self._filter_indicator_text()
-        right_indicator = self._platform_indicator_text()
-
-        spacing = 1
-        sidebar_width = sidebar.size.width
-        if sidebar_width > 0:
-            title_width = max(1, sidebar_width - 2)
-            spacing = max(
-                1,
-                title_width - len(filter_indicator.plain) - len(right_indicator.plain),
-            )
-
-        sidebar.border_title = Text.assemble(
-            filter_indicator, " " * spacing, right_indicator
-        )
+        sidebar.border_title = ""
         sidebar.border_subtitle = ""
+        self.query_one("#footer", Static).update(self._footer_text())
         self._update_download_indicator()
 
     def _update_platform_indicator(self) -> None:
@@ -1188,20 +1136,6 @@ class CondaMetadataTui(App[None]):
             exclusive=True,
             exit_on_error=False,
         )
-
-    def action_filter_key_f(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("f")
-            return
-
-        if self._mode != "packages":
-            return
-
-        if not self._filter_mode:
-            self._set_filter_mode(True, reset_query=True)
-            return
-
-        self._append_filter_char("f")
 
     def action_filter_key_slash(self) -> None:
         if self._channel_edit_mode:
@@ -1283,7 +1217,7 @@ class CondaMetadataTui(App[None]):
     def on_key(self, event: Key) -> None:
         if self._channel_edit_mode:
             self._reset_sidebar_vim_pending()
-            if event.key in {"f", "p", "c", "slash", "q"}:
+            if event.key in {"p", "c", "slash", "q"}:
                 return
 
             if event.key == "enter":
@@ -1433,7 +1367,7 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or self._mode != "packages":
             return
 
-        if event.key in {"f", "p", "c", "slash", "q"}:
+        if event.key in {"p", "c", "slash", "q"}:
             return
 
         if event.key == "backspace":

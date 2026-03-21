@@ -1381,6 +1381,19 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     assert event.stopped is True
 
 
+def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
+    panel = MainPanel()
+    focused: list[str] = []
+
+    monkeypatch.setattr(panel, "focus", lambda: focused.append("main"))
+
+    event = _FakeClickEvent()
+    panel.on_click(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
 def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._current_versions = [
@@ -1393,10 +1406,10 @@ def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
         )
     ]
     app._version_subdirs = ["noarch"]
-    updates: list[str] = []
+    updates: list[Text | str] = []
 
     class _FakeStatus:
-        def update(self, value: str) -> None:
+        def update(self, value: Text | str) -> None:
             updates.append(value)
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatus:
@@ -1407,9 +1420,7 @@ def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
     app._update_versions_status()
 
     assert len(updates) == 1
-    assert updates == [
-        "1 entries across 1 platform.",
-    ]
+    assert updates == ["1 entries across 1 platform."]
 
 
 def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
@@ -1435,20 +1446,8 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
     app._update_download_indicator()
 
     assert main_panel.styles.border_subtitle_align == "right"
-    assert isinstance(main_panel.border_title, Text)
-    assert main_panel.border_title.plain == "channel conda-forge"
-    assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "download  ? Help"
-    assert any(
-        str(span.style) == "bold red"
-        and main_panel.border_subtitle.plain[span.start : span.end] == "d"
-        for span in main_panel.border_subtitle.spans
-    )
-    assert any(
-        str(span.style) == "bold red"
-        and main_panel.border_subtitle.plain[span.start : span.end] == "?"
-        for span in main_panel.border_subtitle.spans
-    )
+    assert main_panel.border_title == ""
+    assert main_panel.border_subtitle == ""
 
 
 def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None:
@@ -1473,11 +1472,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     app._update_download_indicator()
 
-    assert isinstance(main_panel.border_title, Text)
-    assert main_panel.border_title.plain == "channel conda-forge"
+    assert main_panel.border_title == ""
     assert main_panel.styles.border_subtitle_align == "right"
-    assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "? Help"
+    assert main_panel.border_subtitle == ""
 
 
 def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) -> None:
@@ -1494,6 +1491,29 @@ def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) ->
     app.action_channel_key_c()
 
     assert appended == ["c"]
+
+
+def test_on_key_f_appends_filter_text_when_filter_mode_is_active(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    app._filter_mode = True
+    app._search_query = ""
+    filtered: list[str] = []
+    updated: list[str] = []
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
+    monkeypatch.setattr(
+        app, "_update_filter_indicator", lambda: updated.append("updated")
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("f", "f")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._search_query == "f"
+    assert filtered == ["filtered"]
+    assert updated == ["updated"]
+    assert event.stopped is True
 
 
 def test_action_channel_key_c_starts_channel_edit_mode() -> None:
@@ -1533,14 +1553,40 @@ def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     ]
 
 
-def test_channel_indicator_text_shows_edit_draft() -> None:
+def test_footer_text_matches_redesigned_shortcuts() -> None:
     app = CondaMetadataTui()
-    app._channel_edit_mode = True
-    app._channel_draft = "prefix.dev/conda-forge"
 
-    indicator = app._channel_indicator_text()
+    assert app._footer_text() == "Search: / | Platform: p | Channel: c | Help: ?"
 
-    assert indicator.plain == "channel prefix.dev/conda-forge_"
+
+def test_footer_text_shows_download_hint_in_versions_mode() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+
+    assert (
+        app._footer_text()
+        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+    )
+
+
+def test_footer_text_shows_live_search_query_in_filter_mode() -> None:
+    app = CondaMetadataTui()
+    app._filter_mode = True
+    app._search_query = "polars"
+
+    assert app._footer_text() == "Search: polars_"
+
+
+def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._filter_mode = True
+    app._search_query = "polars"
+
+    assert (
+        app._footer_text()
+        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+    )
 
 
 def test_on_paste_appends_sanitized_text_in_channel_edit_mode() -> None:
@@ -1656,26 +1702,38 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
                 self.subtitle_history.append(value)
 
     class _FakeStatus:
-        updates: list[str]
+        updates: list[Text | str]
 
         def __init__(self) -> None:
             self.updates = []
 
-        def update(self, value: str) -> None:
+        def update(self, value: Text | str) -> None:
+            self.updates.append(value)
+
+    class _FakeFooter:
+        updates: list[Text | str]
+
+        def __init__(self) -> None:
+            self.updates = []
+
+        def update(self, value: Text | str) -> None:
             self.updates.append(value)
 
     main_panel = _FakeMainPanel()
     status = _FakeStatus()
+    footer = _FakeFooter()
     notifications: list[str] = []
     captured_downloads: list[tuple[object, str, object]] = []
 
     def _fake_query_one(
         selector: str, _widget_type: object = None
-    ) -> _FakeMainPanel | _FakeStatus:
+    ) -> _FakeMainPanel | _FakeStatus | _FakeFooter:
         if selector == "#main-panel":
             return main_panel
-        assert selector == "#status"
-        return status
+        if selector == "#status":
+            return status
+        assert selector == "#footer"
+        return footer
 
     async def _fake_get_record_for_version_entry(
         package_name: str, _entry: VersionEntry
@@ -1720,6 +1778,13 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     ]
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
-    assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history
-    assert "download  ? Help" in main_panel.subtitle_history
+    assert main_panel.subtitle_history == []
+    assert status.updates[-1] == "0 entries across 0 platform."
+    assert (
+        f"Search: / | Platform: p | Channel: c | Downloading {entry.file_name}... | Help: ?"
+        in footer.updates
+    )
+    assert (
+        "Search: / | Platform: p | Channel: c | Download: d | Help: ?" in footer.updates
+    )
     assert notifications == [f"Downloaded successfully to {destination}"]

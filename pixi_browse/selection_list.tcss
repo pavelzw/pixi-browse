@@ -9,9 +9,13 @@ Screen {
 #sidebar {
     width: 1fr;
     min-width: 28;
+    border: round $text;
+    padding: 0;
+    margin: 0;
+}
+
+#sidebar:focus-within {
     border: round $accent;
-    padding: 0 1;
-    margin: 0 1;
 }
 
 #sidebar-title {
@@ -38,20 +42,22 @@ Screen {
 #main-panel {
     width: 2fr;
     height: 1fr;
-    border: round $primary;
-    margin-right: 1;
-    padding: 1;
+    padding: 0;
     scrollbar-size-vertical: 1;
 }
 
 #main-panel:focus {
-    border: round $accent;
 }
 
 #main-placeholder-scroll {
     height: 1fr;
-    padding: 0 1;
+    border: round $text;
+    padding: 0;
     scrollbar-size-vertical: 1;
+}
+
+#main-panel:focus #main-placeholder-scroll {
+    border: round $accent;
 }
 
 #main-placeholder {
@@ -65,31 +71,37 @@ Screen {
 
 .detail-section {
     height: 1fr;
-    border: round $surface;
-    margin: 0 0 1 0;
-    padding: 0 1;
-}
-
-.detail-section:last-child {
-    margin-bottom: 0;
+    border: round $text;
+    margin: 0;
+    padding: 0;
 }
 
 .detail-section.-active {
     height: 4fr;
-    border: round $accent;
+    border: round $text;
 }
 
 .detail-section.-collapsed {
     height: 1fr;
-    border: round $border-blurred;
+    border: round $text;
+}
+
+#main-panel:focus .detail-section.-active {
+    border: round $accent;
 }
 
 .detail-scroll {
     height: 1fr;
-    padding: 0 1 1 1;
+    padding: 0 0 1 0;
     scrollbar-size-vertical: 1;
 }
 
 .detail-body {
     width: 100%;
+}
+
+#footer {
+    height: 1;
+    margin: 0 0 1 0;
+    color: $text-muted;
 }
