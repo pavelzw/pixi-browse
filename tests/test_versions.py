@@ -615,6 +615,37 @@ def test_on_key_l_focuses_main_panel_from_sidebar(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_on_key_one_focuses_main_panel_in_packages_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("1", "1")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_one_focuses_main_panel_in_versions_preview(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("1", "1")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
 def test_on_key_gg_jumps_sidebar_to_first(monkeypatch) -> None:
     app = CondaMetadataTui()
     jumped: list[str] = []
@@ -1078,6 +1109,21 @@ def test_on_key_zero_focuses_sidebar_in_versions_mode(monkeypatch) -> None:
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
     monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
     monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    event = _FakeKeyEvent("0", "0")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
+    assert event.stopped is True
+
+
+def test_on_key_zero_focuses_sidebar_in_packages_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
     monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
 
     event = _FakeKeyEvent("0", "0")
@@ -1621,6 +1667,9 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
             self.border_title: Text | str = ""
             self.border_subtitle: Text | str = ""
 
+        def showing_version_details(self) -> bool:
+            return False
+
     main_panel = _FakeMainPanel()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeMainPanel:
@@ -1647,6 +1696,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
             self.styles = _FakeStyles()
             self.border_title: Text | str = ""
             self.border_subtitle: Text | str = "existing"
+
+        def showing_version_details(self) -> bool:
+            return False
 
     main_panel = _FakeMainPanel()
 

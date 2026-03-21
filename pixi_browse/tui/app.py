@@ -1054,7 +1054,7 @@ class CondaMetadataTui(App[None]):
         self._update_download_indicator()
 
     def _update_download_indicator(self) -> None:
-        main_panel = self.query_one("#main-panel")
+        main_panel = self.query_one("#main-panel", MainPanel)
         main_panel.styles.border_title_align = "left"
         main_panel.border_title = ""
         main_panel.styles.border_subtitle_align = "right"
@@ -1346,14 +1346,23 @@ class CondaMetadataTui(App[None]):
             event.stop()
             return
 
-        if self._mode == "versions" and event.character in {"1", "2", "3"}:
+        if (
+            self._mode == "versions"
+            and self._main_panel_shows_version_details()
+            and event.character in {"1", "2", "3"}
+        ):
             self._set_active_main_section(int(event.character) - 1)
             self._focus_main_panel()
             event.stop()
             return
 
-        if self._mode == "versions" and event.character == "0":
+        if event.character == "0" and self._mode in {"packages", "versions"}:
             self._focus_sidebar()
+            event.stop()
+            return
+
+        if event.character == "1" and self._mode in {"packages", "versions"}:
+            self._focus_main_panel()
             event.stop()
             return
 

@@ -295,11 +295,14 @@ class MainPanel(Vertical):
     def show_placeholder(self, content: str | Text) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = True
+        placeholder.border_title = Text("[1] Details", style="bold")
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
     def show_version_details(self, details: VersionDetailsData) -> None:
-        self.query_one("#main-placeholder-scroll", VerticalScroll).display = False
+        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
+        placeholder.display = False
+        placeholder.border_title = ""
         version_details = self.query_one("#version-details-view", VersionDetailsView)
         version_details.set_details(details)
         version_details.display = True
