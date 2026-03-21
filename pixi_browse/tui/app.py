@@ -101,6 +101,7 @@ class CondaMetadataTui(App[None]):
         self._last_package_highlight: int | None = None
         self._last_package_scroll_y = 0.0
         self._sidebar_vim_g_pending = False
+        self._sidebar_selection_by_keyboard = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -1246,6 +1247,10 @@ class CondaMetadataTui(App[None]):
         if self._sidebar_is_focused() and not (
             self._mode == "packages" and self._filter_mode
         ):
+            if event.key == "enter":
+                self._reset_sidebar_vim_pending()
+                self._sidebar_selection_by_keyboard = True
+                return
             if event.character == "j":
                 self._reset_sidebar_vim_pending()
                 self._move_sidebar_highlight(1)
@@ -1509,6 +1514,9 @@ class CondaMetadataTui(App[None]):
     async def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
     ) -> None:
+        selection_by_keyboard = self._sidebar_selection_by_keyboard
+        self._sidebar_selection_by_keyboard = False
+
         if event.option_list.id != "sidebar-list":
             return
 
@@ -1550,3 +1558,5 @@ class CondaMetadataTui(App[None]):
         version = row.entry
         package_name = self._selected_package or "<unknown>"
         self._request_selected_version_preview(package_name, version)
+        if selection_by_keyboard:
+            self._focus_main_panel()

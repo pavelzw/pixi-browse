@@ -1017,6 +1017,44 @@ def test_selecting_version_entry_keeps_focus_in_sidebar(monkeypatch) -> None:
     assert focused == []
 
 
+def test_selecting_version_entry_with_keyboard_focuses_main_panel(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    app._sidebar_selection_by_keyboard = True
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    preview_calls: list[tuple[str, VersionEntry]] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version: preview_calls.append((package_name, version)),
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert preview_calls == [("demo", entry)]
+    assert focused == ["main"]
+
+
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
