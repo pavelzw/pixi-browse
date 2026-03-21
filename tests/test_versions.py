@@ -31,6 +31,7 @@ from pixi_browse.tui import (
     DetailSection,
     HelpScreen,
     MainPanel,
+    SidebarPanel,
     VersionDetailsView,
 )
 from pixi_browse.tui.state import AboutUrls
@@ -979,6 +980,43 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
     assert app._pending_preview_version_key == preview_key
 
 
+def test_selecting_version_entry_keeps_focus_in_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    preview_calls: list[tuple[str, VersionEntry]] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version: preview_calls.append((package_name, version)),
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert preview_calls == [("demo", entry)]
+    assert focused == []
+
+
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -1377,7 +1415,7 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == [("constraints", True)]
+    assert selected_tabs == [("constraints", False)]
     assert event.stopped is True
 
 
@@ -1391,6 +1429,34 @@ def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
     panel.on_click(event)  # type: ignore[arg-type]
 
     assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
+    panel = SidebarPanel()
+    focused: list[str] = []
+
+    class _FakeSidebarList:
+        def focus(self) -> None:
+            focused.append("sidebar")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeSidebarList:
+            assert selector == "#sidebar-list"
+            return _FakeSidebarList()
+
+    monkeypatch.setattr(
+        SidebarPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+
+    event = _FakeClickEvent()
+    panel.on_click(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
     assert event.stopped is True
 
 

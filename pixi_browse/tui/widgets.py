@@ -47,7 +47,7 @@ class DetailSection(Vertical):
                     "#version-details-view", VersionDetailsView
                 ).select_dependency_tab(
                     *args,
-                    focus_main_panel=True,
+                    focus_main_panel=False,
                 )
                 event.stop()
                 return
@@ -462,6 +462,12 @@ class MainPanel(Vertical):
         if character == "h":
             self.app.query_one("#sidebar-list").focus()
             event.stop()
+
+
+class SidebarPanel(Vertical):
+    def on_click(self, event: Click) -> None:
+        self.app.query_one("#sidebar-list").focus()
+        event.stop()
 
 
 class HelpScreen(ModalScreen[None]):

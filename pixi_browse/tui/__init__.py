@@ -21,6 +21,7 @@ from .widgets import (
     DetailSection,
     HelpScreen,
     MainPanel,
+    SidebarPanel,
     VersionDetailsView,
 )
 
@@ -39,6 +40,7 @@ __all__ = [
     "MainPanel",
     "PathsJson",
     "RunExportsJson",
+    "SidebarPanel",
     "TAB_HINT_STYLE",
     "VersionDetailsView",
     "create_gateway",

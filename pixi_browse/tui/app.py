@@ -39,7 +39,7 @@ from pixi_browse.search import fuzzy_score
 
 from .state import AboutUrls, ChannelStateSnapshot
 from .version_loader import VersionDataLoader
-from .widgets import DEPENDENCY_TABS, HelpScreen, MainPanel
+from .widgets import DEPENDENCY_TABS, HelpScreen, MainPanel, SidebarPanel
 
 
 class CondaMetadataTui(App[None]):
@@ -104,7 +104,7 @@ class CondaMetadataTui(App[None]):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
-            with Vertical(id="sidebar"):
+            with SidebarPanel(id="sidebar"):
                 yield Static("Packages", id="sidebar-title")
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
@@ -1550,4 +1550,3 @@ class CondaMetadataTui(App[None]):
         version = row.entry
         package_name = self._selected_package or "<unknown>"
         self._request_selected_version_preview(package_name, version)
-        self._focus_main_panel()
