@@ -27,6 +27,7 @@ from pixi_browse.rendering import (
 )
 from pixi_browse.tui import (
     INACTIVE_SELECTED_TAB_STYLE,
+    INACTIVE_TAB_STYLE,
     DetailSection,
     HelpScreen,
     MainPanel,
@@ -1044,7 +1045,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
         if isinstance(span.style, Style)
     )
     assert any(
-        span.style.bold is False
+        span.style == INACTIVE_TAB_STYLE
         for span in text.spans
         if isinstance(span.style, Style)
         and span.style.meta
@@ -1100,6 +1101,28 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
     assert any(
         span.style == INACTIVE_SELECTED_TAB_STYLE
         and header.plain[span.start : span.end] == "Constraints (1)"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+
+
+def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> None:
+    view = VersionDetailsView()
+    view._active_section = 0
+    view._dependency_tab_index = 1
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("dep",),
+        constraints=("constraint",),
+        run_exports=("run export",),
+        files=("file",),
+    )
+
+    header = view._render_dependency_header()
+
+    assert any(
+        span.style == INACTIVE_TAB_STYLE
+        and header.plain[span.start : span.end] == "Run exports (1)"
         for span in header.spans
         if isinstance(span.style, Style)
     )

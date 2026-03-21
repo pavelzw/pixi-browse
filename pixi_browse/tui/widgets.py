@@ -20,7 +20,7 @@ ACTIVE_SECTION_TITLE_STYLE = Style(color="bright_blue", bold=True)
 INACTIVE_SECTION_TITLE_STYLE = Style(dim=True)
 ACTIVE_TAB_STYLE = Style(color="bright_blue", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="blue", bold=False)
-INACTIVE_TAB_STYLE = Style(color="default", bold=False)
+INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 TAB_HINT_STYLE = Style(color="default", dim=True)
 
 
