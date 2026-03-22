@@ -421,6 +421,72 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
     assert lib_demo_row.changed is True
 
 
+def test_build_version_compare_data_surfaces_unavailable_file_metadata() -> None:
+    left_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    right_record = _make_repo_data_record(
+        version="1.2.4",
+        build="py313h456_0",
+        file_name="demo-1.2.4-py313h456_0.conda",
+    )
+
+    left_artifact = build_version_artifact_data(
+        "demo",
+        left_record,
+        package_paths_error="paths.json missing",
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        right_record,
+        package_paths=(
+            PackageFile(
+                "bin/demo",
+                2048,
+                bytes.fromhex("22" * 32),
+                False,
+                "hardlink",
+            ),
+        ),
+    )
+
+    compare_data = build_version_compare_data(
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        left_artifact,
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.4"),
+                build="py313h456_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.4-py313h456_0.conda",
+            ),
+        ),
+        right_artifact,
+    )
+
+    assert compare_data.files == (
+        CompareRow(
+            label="Unavailable: paths.json missing",
+            left="Unavailable: paths.json missing",
+            right="",
+            changed=True,
+        ),
+    )
+
+
 def test_render_selected_version_details_includes_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",

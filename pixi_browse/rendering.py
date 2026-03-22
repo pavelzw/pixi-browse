@@ -564,6 +564,47 @@ def _diff_file_paths(
     return tuple(rows)
 
 
+def _file_compare_error(artifact: VersionArtifactData) -> str | None:
+    if (
+        len(artifact.files) == 1
+        and artifact.files[0].startswith("Unavailable: ")
+        and not artifact.file_paths
+    ):
+        return artifact.files[0]
+    return None
+
+
+def _build_file_compare_rows(
+    left_artifact: VersionArtifactData, right_artifact: VersionArtifactData
+) -> tuple[CompareRow, ...]:
+    left_error = _file_compare_error(left_artifact)
+    right_error = _file_compare_error(right_artifact)
+
+    if left_error is None and right_error is None:
+        return _diff_file_paths(left_artifact.file_paths, right_artifact.file_paths)
+
+    if left_error is not None and right_error is not None:
+        if left_error == right_error:
+            return (
+                CompareRow(
+                    label=left_error,
+                    left=left_error,
+                    right=right_error,
+                    changed=False,
+                ),
+            )
+        return (
+            CompareRow(label=left_error, left=left_error, right="", changed=True),
+            CompareRow(label=right_error, left="", right=right_error, changed=True),
+        )
+
+    if left_error is not None:
+        return (CompareRow(label=left_error, left=left_error, right="", changed=True),)
+
+    assert right_error is not None
+    return (CompareRow(label=right_error, left="", right=right_error, changed=True),)
+
+
 def build_version_compare_data(
     left_selection: CompareSelection,
     left_artifact: VersionArtifactData,
@@ -614,7 +655,7 @@ def build_version_compare_data(
             right_artifact.run_exports,
             run_export=True,
         ),
-        files=_diff_file_paths(left_artifact.file_paths, right_artifact.file_paths),
+        files=_build_file_compare_rows(left_artifact, right_artifact),
     )
 
 
