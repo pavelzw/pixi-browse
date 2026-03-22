@@ -41,9 +41,21 @@ Ctrl+d
 Sleep 2s
 Ctrl+d
 Sleep 2s
-# escape right view
-Escape
-Sleep 1s
+# go to dependencies view
+Shift+Tab
+# cycle through dependencies/constraints/run exports
+Sleep 1
+Type "]"
+Sleep 1
+Type "]"
+Sleep 1
+Type "]"
+# Open matchspec
+Sleep 1
+Enter
+Sleep 3
+Enter
+Sleep 3s
 
 Type "c"
 Sleep 1s
