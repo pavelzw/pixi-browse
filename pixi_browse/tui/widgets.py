@@ -45,6 +45,7 @@ class DependencyListEntry:
 class FileListEntry:
     label: str
     path: str | None
+    size_in_bytes: int | None = None
 
 
 EMPTY_MATCHSPEC_RESULT = Empty()
@@ -285,6 +286,19 @@ class VersionDetailsView(Vertical):
             return None
         return self.file_path_at(highlighted)
 
+    def file_size_at(self, index: int) -> int | None:
+        entries = self._current_file_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].size_in_bytes
+
+    def selected_file_size_in_bytes(self) -> int | None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_size_at(highlighted)
+
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
 
@@ -395,6 +409,7 @@ class VersionDetailsView(Vertical):
                         else package_file.path
                     ),
                     path=package_file.path,
+                    size_in_bytes=package_file.size_in_bytes,
                 )
                 for package_file in self._details.file_paths
             )
@@ -606,8 +621,18 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).selected_file_path()
 
+    def selected_file_size_in_bytes(self) -> int | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_file_size_in_bytes()
+
     def file_path_at(self, index: int) -> str | None:
         return self.query_one("#version-details-view", VersionDetailsView).file_path_at(
+            index
+        )
+
+    def file_size_at(self, index: int) -> int | None:
+        return self.query_one("#version-details-view", VersionDetailsView).file_size_at(
             index
         )
 

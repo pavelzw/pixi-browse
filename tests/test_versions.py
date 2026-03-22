@@ -1885,21 +1885,21 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
         subdir="noarch",
         file_name="demo-1.2.3-py313h123_0.conda",
     )
-    opened: list[tuple[str, str, str]] = []
+    opened: list[tuple[str, str, str, int | None]] = []
     scheduled: list[object] = []
 
     monkeypatch.setattr(
         app,
         "_open_file_action_screen",
-        lambda package_name, selected_entry, file_path: opened.append(
-            (package_name, selected_entry.file_name, file_path)
+        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
+            (package_name, selected_entry.file_name, file_path, size_in_bytes)
         ),
     )
     monkeypatch.setattr(
         app, "call_after_refresh", lambda callback: scheduled.append(callback)
     )
 
-    app._defer_file_action_screen("demo", entry, "info/about.json")
+    app._defer_file_action_screen("demo", entry, "info/about.json", 17)
 
     assert opened == []
     assert len(scheduled) == 1
@@ -1908,7 +1908,7 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
     assert callable(callback)
     callback()
 
-    assert opened == [("demo", entry.file_name, "info/about.json")]
+    assert opened == [("demo", entry.file_name, "info/about.json", 17)]
 
 
 def test_request_file_action_for_selected_file_is_noop_without_file_path(
@@ -1931,9 +1931,9 @@ def test_request_file_action_for_selected_file_is_noop_without_file_path(
     monkeypatch.setattr(
         app,
         "_defer_file_action_screen",
-        lambda package_name, selected_entry, file_path: (_ for _ in ()).throw(
-            AssertionError("should not open file action screen")
-        ),
+        lambda package_name, selected_entry, file_path, size_in_bytes: (
+            _ for _ in ()
+        ).throw(AssertionError("should not open file action screen")),
     )
     monkeypatch.setattr(
         app,
@@ -2151,6 +2151,7 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
             self.option_index = 0
 
     monkeypatch.setattr(app, "_file_path_at", lambda index: "info/about.json")
+    monkeypatch.setattr(app, "_file_size_at", lambda index: 17)
     monkeypatch.setattr(app, "_highlighted_version_entry", lambda: entry)
     monkeypatch.setattr(
         app, "_set_active_main_section", lambda value: sections.append(value)
@@ -2159,7 +2160,7 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     monkeypatch.setattr(
         app,
         "_defer_file_action_screen",
-        lambda package_name, selected_entry, file_path: opened.append(
+        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
             (package_name, file_path)
         ),
     )
@@ -2961,7 +2962,7 @@ def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
 
     monkeypatch.setattr(app, "run_worker", _fake_run_worker)
 
-    app._handle_file_action_result("demo", entry, "info/about.json", "download")
+    app._handle_file_action_result("demo", entry, "info/about.json", None, "download")
 
     assert worker_calls == [
         {
@@ -3048,6 +3049,43 @@ def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     assert isinstance(pushed[0], FilePreviewScreen)
     assert pushed[0]._title == "info/about.json (17 B)"
     assert pushed[0]._content == '{"name": "demo"}\n'
+
+
+def test_preview_selected_package_file_skips_fetch_when_cached_size_is_too_large(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    pushed: list[FilePreviewScreen] = []
+
+    monkeypatch.setattr(
+        app,
+        "_fetch_package_file_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not fetch bytes for oversized preview")
+        ),
+    )
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
+
+    asyncio.run(
+        app._preview_selected_package_file(
+            "demo",
+            entry,
+            "info/about.json",
+            size_in_bytes=300_000,
+        )
+    )
+
+    assert len(pushed) == 1
+    assert pushed[0]._title == "info/about.json (293.0 KiB)"
+    assert "File too large to preview in-app" in pushed[0]._content
+    assert "300,000 bytes" in pushed[0]._content
 
 
 def test_preview_content_rejects_binary_files() -> None:

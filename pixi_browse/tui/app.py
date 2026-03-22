@@ -683,8 +683,14 @@ class CondaMetadataTui(App[None]):
     def _selected_file_path(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_file_path()
 
+    def _selected_file_size_in_bytes(self) -> int | None:
+        return self.query_one("#main-panel", MainPanel).selected_file_size_in_bytes()
+
     def _file_path_at(self, index: int) -> str | None:
         return self.query_one("#main-panel", MainPanel).file_path_at(index)
+
+    def _file_size_at(self, index: int) -> int | None:
+        return self.query_one("#main-panel", MainPanel).file_size_at(index)
 
     def _open_matchspec_screen(
         self, initial_value: str, *, select_on_focus: bool = True
@@ -1002,20 +1008,30 @@ class CondaMetadataTui(App[None]):
             raise
 
     def _open_file_action_screen(
-        self, package_name: str, entry: VersionEntry, file_path: str
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        size_in_bytes: int | None,
     ) -> None:
         self.push_screen(
             FileActionScreen(file_path),
             lambda action: self._handle_file_action_result(
-                package_name, entry, file_path, action
+                package_name, entry, file_path, size_in_bytes, action
             ),
         )
 
     def _defer_file_action_screen(
-        self, package_name: str, entry: VersionEntry, file_path: str
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        size_in_bytes: int | None,
     ) -> None:
         self.call_after_refresh(
-            lambda: self._open_file_action_screen(package_name, entry, file_path)
+            lambda: self._open_file_action_screen(
+                package_name, entry, file_path, size_in_bytes
+            )
         )
 
     def _request_file_action_for_selected_file(self) -> None:
@@ -1026,11 +1042,12 @@ class CondaMetadataTui(App[None]):
         if file_path is None:
             return
 
+        size_in_bytes = self._selected_file_size_in_bytes()
         package_name = self._selected_package
         entry = self._highlighted_version_entry()
         assert package_name is not None
         assert entry is not None
-        self._defer_file_action_screen(package_name, entry, file_path)
+        self._defer_file_action_screen(package_name, entry, file_path, size_in_bytes)
 
     async def _fetch_package_file_bytes(
         self, package_name: str, entry: VersionEntry, file_path: str
@@ -1040,14 +1057,23 @@ class CondaMetadataTui(App[None]):
         return await fetch_raw_package_file_from_url(self._client, url, file_path)
 
     @staticmethod
-    def _preview_content(file_path: str, package_bytes: bytes) -> str:
-        if len(package_bytes) > _PREVIEW_MAX_BYTES:
+    def _preview_content(
+        file_path: str,
+        package_bytes: bytes | None,
+        *,
+        size_in_bytes: int | None = None,
+    ) -> str:
+        if size_in_bytes is None and package_bytes is not None:
+            size_in_bytes = len(package_bytes)
+
+        if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
             return (
                 "File too large to preview in-app "
-                f"({len(package_bytes):,} bytes).\n\n"
+                f"({size_in_bytes:,} bytes).\n\n"
                 "Use Download as file instead."
             )
 
+        assert package_bytes is not None
         if b"\0" in package_bytes:
             return (
                 "Binary file preview is not supported.\n\nUse Download as file instead."
@@ -1061,8 +1087,17 @@ class CondaMetadataTui(App[None]):
             )
 
     @staticmethod
-    def _preview_title(file_path: str, package_bytes: bytes) -> str:
-        return f"{file_path} ({format_human_byte_size(len(package_bytes))})"
+    def _preview_title(
+        file_path: str,
+        package_bytes: bytes | None = None,
+        *,
+        size_in_bytes: int | None = None,
+    ) -> str:
+        if size_in_bytes is None and package_bytes is not None:
+            size_in_bytes = len(package_bytes)
+        if size_in_bytes is None:
+            return file_path
+        return f"{file_path} ({format_human_byte_size(size_in_bytes)})"
 
     async def _download_selected_package_file(
         self, package_name: str, entry: VersionEntry, file_path: str
@@ -1092,9 +1127,25 @@ class CondaMetadataTui(App[None]):
         )
 
     async def _preview_selected_package_file(
-        self, package_name: str, entry: VersionEntry, file_path: str
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        size_in_bytes: int | None = None,
     ) -> None:
         try:
+            if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
+                self.push_screen(
+                    FilePreviewScreen(
+                        self._preview_title(file_path, size_in_bytes=size_in_bytes),
+                        self._preview_content(
+                            file_path,
+                            None,
+                            size_in_bytes=size_in_bytes,
+                        ),
+                    )
+                )
+                return
             package_bytes = await self._fetch_package_file_bytes(
                 package_name, entry, file_path
             )
@@ -1116,6 +1167,7 @@ class CondaMetadataTui(App[None]):
         package_name: str,
         entry: VersionEntry,
         file_path: str,
+        size_in_bytes: int | None,
         action: Literal["download", "preview"],
     ) -> None:
         try:
@@ -1126,7 +1178,7 @@ class CondaMetadataTui(App[None]):
                 return
             if action == "preview":
                 await self._preview_selected_package_file(
-                    package_name, entry, file_path
+                    package_name, entry, file_path, size_in_bytes
                 )
                 return
         finally:
@@ -1137,6 +1189,7 @@ class CondaMetadataTui(App[None]):
         package_name: str,
         entry: VersionEntry,
         file_path: str,
+        size_in_bytes: int | None,
         action: Literal["download", "preview"] | None,
     ) -> None:
         if action is None or self._file_action_in_progress:
@@ -1145,7 +1198,9 @@ class CondaMetadataTui(App[None]):
         self._file_action_in_progress = True
         try:
             self.run_worker(
-                self._run_file_action(package_name, entry, file_path, action),
+                self._run_file_action(
+                    package_name, entry, file_path, size_in_bytes, action
+                ),
                 group="file-action",
                 exclusive=True,
                 exit_on_error=False,
@@ -1987,13 +2042,19 @@ class CondaMetadataTui(App[None]):
 
         if event.option_list.id == "detail-option-list-2":
             file_path = self._file_path_at(event.option_index)
+            size_in_bytes = self._file_size_at(event.option_index)
             entry = self._highlighted_version_entry()
             package_name = self._selected_package
             if file_path is None or entry is None or package_name is None:
                 return
             self._set_active_main_section(2)
             self._focus_main_panel()
-            self._defer_file_action_screen(package_name, entry, file_path)
+            self._defer_file_action_screen(
+                package_name,
+                entry,
+                file_path,
+                size_in_bytes,
+            )
             return
 
         if event.option_list.id != "sidebar-list":
