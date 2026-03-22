@@ -75,6 +75,7 @@ class CondaMetadataTui(App[None]):
         *,
         default_channel: str = "conda-forge",
         default_platforms: Iterable[Platform] | None = None,
+        default_matchspec: MatchSpec | None = None,
     ) -> None:
         super().__init__()
         channel_name = default_channel.strip() or "conda-forge"
@@ -95,6 +96,7 @@ class CondaMetadataTui(App[None]):
         self._channel_package_names: list[str] = []
         self._all_package_names: list[str] = []
         self._visible_package_names: list[str] = []
+        self._startup_matchspec = default_matchspec
         self._matchspec_query = ""
         self._matchspec_records_by_package: dict[str, list[RepoDataRecord]] = {}
         self._current_versions: list[VersionEntry] = []
@@ -135,7 +137,9 @@ class CondaMetadataTui(App[None]):
         package_list.disabled = True
         package_list.focus()
         self._update_filter_indicator()
-        await self._load_packages()
+        loaded = await self._load_packages()
+        if loaded and self._startup_matchspec is not None:
+            await self._apply_matchspec_query(self._startup_matchspec)
 
     async def _load_packages(self) -> bool:
         status = self.query_one("#status", Static)

@@ -53,18 +53,25 @@ pixi-browse -c https://prefix.dev/conda-forge
 # Restrict to specific platforms
 pixi-browse -p linux-64 -p osx-arm64
 
+# Start with a MatchSpec query applied
+pixi-browse -m "numpy >=2"
+
+# Combine channel, platform, and MatchSpec filters
+pixi-browse -c https://prefix.dev/conda-forge -p linux-64 -m "python >=3.13"
+
 # Show version
 pixi-browse --version
 ```
 
 ### CLI Options
 
-| Option             | Description                                         |
-| ------------------ | --------------------------------------------------- |
-| `-c`, `--channel`  | Channel to load at startup (default: `conda-forge`) |
-| `-p`, `--platform` | Platforms to include (repeat for multiple)          |
-| `--version`        | Show version and exit                               |
-| `--help`           | Show help and exit                                  |
+| Option              | Description                                         |
+| ------------------- | --------------------------------------------------- |
+| `-c`, `--channel`   | Channel to load at startup (default: `conda-forge`) |
+| `-p`, `--platform`  | Platforms to include (repeat for multiple)          |
+| `-m`, `--matchspec` | MatchSpec query to apply at startup                 |
+| `--version`         | Show version and exit                               |
+| `--help`            | Show help and exit                                  |
 
 ## Keybindings
 
