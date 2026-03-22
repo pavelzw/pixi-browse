@@ -1765,6 +1765,10 @@ class CondaMetadataTui(App[None]):
         self._focus_main_panel()
 
     def action_tab_key(self) -> None:
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            compare_screen = cast(CompareScreen, self.screen)
+            compare_screen.action_next_section()
+            return
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
@@ -1774,6 +1778,10 @@ class CondaMetadataTui(App[None]):
         self._cycle_active_main_section(1)
 
     def action_backtab_key(self) -> None:
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            compare_screen = cast(CompareScreen, self.screen)
+            compare_screen.action_previous_section()
+            return
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
@@ -1809,6 +1817,17 @@ class CondaMetadataTui(App[None]):
             self._set_filter_mode(False, reset_query=True)
 
     def on_key(self, event: Key) -> None:
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            compare_screen = cast(CompareScreen, self.screen)
+            if event.key == "tab":
+                compare_screen.action_next_section()
+                event.stop()
+                return
+            if event.key in {"shift+tab", "backtab"}:
+                compare_screen.action_previous_section()
+                event.stop()
+                return
+
         if self._channel_edit_mode:
             self._reset_sidebar_vim_pending()
             if event.key in {"p", "c", "slash", "q"}:

@@ -38,7 +38,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
-DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "detail.select_dependency_tab"
+DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 
 
 @dataclass(frozen=True)
@@ -112,14 +112,16 @@ class DetailSection(Vertical):
         style = event.style
         meta = style.meta if style is not None else None
         click_meta = meta.get("@click") if meta is not None else None
-        if click_meta is not None and self._on_select_dependency_tab is not None:
-            action_name, args = click_meta
-            if action_name == DETAIL_SELECT_DEPENDENCY_TAB_ACTION:
-                self._on_select_dependency_tab(*args)
-                event.stop()
-                return
+        if click_meta is not None:
+            event.stop()
+            return
         self._on_activate(self._index)
         event.stop()
+
+    def action_select_dependency_tab(self, tab: DependencyTab) -> None:
+        if self._on_select_dependency_tab is None:
+            return
+        self._on_select_dependency_tab(tab)
 
     def update_header(self, title: str | Text) -> None:
         self.border_title = title

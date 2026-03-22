@@ -47,6 +47,7 @@ from pixi_browse.tui import (
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
     CompareDetailsView,
+    CompareScreen,
     DetailSection,
     Empty,
     FileActionScreen,
@@ -1666,8 +1667,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
 
     assert text.plain == "Constraints (1)"
     assert any(
-        span.style.meta
-        == {"@click": ("detail.select_dependency_tab", ("constraints",))}
+        span.style.meta == {"@click": ("select_dependency_tab", ("constraints",))}
         for span in text.spans
         if isinstance(span.style, Style)
     )
@@ -1675,8 +1675,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
         span.style == INACTIVE_TAB_STYLE
         for span in text.spans
         if isinstance(span.style, Style)
-        and span.style.meta
-        != {"@click": ("detail.select_dependency_tab", ("constraints",))}
+        and span.style.meta != {"@click": ("select_dependency_tab", ("constraints",))}
     )
 
 
@@ -1692,8 +1691,7 @@ def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
         span.style.bold is False
         for span in text.spans
         if isinstance(span.style, Style)
-        and span.style.meta
-        != {"@click": ("detail.select_dependency_tab", ("constraints",))}
+        and span.style.meta != {"@click": ("select_dependency_tab", ("constraints",))}
     )
 
 
@@ -2444,6 +2442,94 @@ def test_on_key_tab_does_nothing_in_versions_preview_with_main_focus(
     assert event.stopped is True
 
 
+def test_action_tab_key_cycles_compare_screen_sections(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    calls: list[str] = []
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    monkeypatch.setattr(screen, "action_next_section", lambda: calls.append("next"))
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda self: screen))
+
+    app.action_tab_key()
+
+    assert calls == ["next"]
+
+
+def test_on_key_backtab_cycles_compare_screen_sections(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    calls: list[str] = []
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    monkeypatch.setattr(
+        screen, "action_previous_section", lambda: calls.append("previous")
+    )
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda self: screen))
+
+    event = _FakeKeyEvent("shift+tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert calls == ["previous"]
+    assert event.stopped is True
+
+
 def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -2597,11 +2683,19 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action() -> None:
         on_select_dependency_tab=selected_tabs.append,
     )
 
+    section.action_select_dependency_tab("constraints")
+    assert selected_tabs == ["constraints"]
+
+
+def test_clicking_dependency_tab_does_not_activate_section_click_handler() -> None:
+    activated: list[int] = []
+    section = DetailSection("Dependencies", 1, on_activate=activated.append)
+
     event = _FakeClickEvent(
         Style(
             meta={
                 "@click": (
-                    "detail.select_dependency_tab",
+                    "select_dependency_tab",
                     ("constraints",),
                 )
             }
@@ -2609,7 +2703,7 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action() -> None:
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == ["constraints"]
+    assert activated == []
     assert event.stopped is True
 
 
