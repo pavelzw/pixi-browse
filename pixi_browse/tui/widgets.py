@@ -398,7 +398,7 @@ class VersionDetailsView(Vertical):
 
     @staticmethod
     def _plain_text(value: str) -> str:
-        return Text.from_markup(value).plain.replace(r"\[", "[").replace(r"\]", "]")
+        return value.replace(r"\[", "[").replace(r"\]", "]")
 
     @classmethod
     def _run_export_matchspec(cls, value: str) -> str | None:
