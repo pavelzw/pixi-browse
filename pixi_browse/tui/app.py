@@ -81,7 +81,7 @@ class CondaMetadataTui(App[None]):
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
         self.theme = "textual-ansi"
-        self._client = Client.default_client()
+        self._client = Client.default_client(user_agent=f"pixi-browse/{__version__}")
         from . import create_gateway
 
         self._gateway: Gateway = create_gateway(client=self._client)
