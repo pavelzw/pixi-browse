@@ -1441,7 +1441,7 @@ def test_sidebar_highlight_does_not_switch_selected_pane_without_sidebar_focus(
     )
 
     event = _FakeEvent()
-    app.on_option_list_option_highlighted(event)
+    app.on_option_list_option_highlighted(event)  # type: ignore[arg-type]
 
     assert app._selected_pane == "main"
     assert highlighted_updates == [3]
