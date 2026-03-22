@@ -2128,13 +2128,6 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
 def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._selected_package = "demo"
-    entry = VersionEntry(
-        version=Version("1.2.3"),
-        build="py313h123_0",
-        build_number=0,
-        subdir="noarch",
-        file_name="demo-1.2.3-py313h123_0.conda",
-    )
     opened: list[tuple[str, str]] = []
     sections: list[int] = []
     focused: list[str] = []
@@ -2150,19 +2143,14 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
             )()
             self.option_index = 0
 
-    monkeypatch.setattr(app, "_file_path_at", lambda index: "info/about.json")
-    monkeypatch.setattr(app, "_file_size_at", lambda index: 17)
-    monkeypatch.setattr(app, "_highlighted_version_entry", lambda: entry)
     monkeypatch.setattr(
         app, "_set_active_main_section", lambda value: sections.append(value)
     )
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
     monkeypatch.setattr(
         app,
-        "_defer_file_action_screen",
-        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
-            (package_name, file_path)
-        ),
+        "_request_file_action_for_selected_file",
+        lambda: opened.append(("demo", "info/about.json")),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
     monkeypatch.setattr(

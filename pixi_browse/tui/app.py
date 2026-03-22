@@ -2041,20 +2041,9 @@ class CondaMetadataTui(App[None]):
             return
 
         if event.option_list.id == "detail-option-list-2":
-            file_path = self._file_path_at(event.option_index)
-            size_in_bytes = self._file_size_at(event.option_index)
-            entry = self._highlighted_version_entry()
-            package_name = self._selected_package
-            if file_path is None or entry is None or package_name is None:
-                return
             self._set_active_main_section(2)
             self._focus_main_panel()
-            self._defer_file_action_screen(
-                package_name,
-                entry,
-                file_path,
-                size_in_bytes,
-            )
+            self._request_file_action_for_selected_file()
             return
 
         if event.option_list.id != "sidebar-list":
