@@ -16,6 +16,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
 from pixi_browse.models import DependencyTab, VersionDetailsData
+from pixi_browse.rendering import format_human_byte_size
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -386,8 +387,16 @@ class VersionDetailsView(Vertical):
         assert self._details is not None
         if self._details.file_paths:
             return tuple(
-                FileListEntry(label=path, path=path)
-                for path in self._details.file_paths
+                FileListEntry(
+                    label=(
+                        f"{package_file.path}"
+                        f" ({format_human_byte_size(package_file.size_in_bytes)})"
+                        if package_file.size_in_bytes is not None
+                        else package_file.path
+                    ),
+                    path=package_file.path,
+                )
+                for package_file in self._details.file_paths
             )
         return tuple(
             FileListEntry(label=line, path=None) for line in self._details.files

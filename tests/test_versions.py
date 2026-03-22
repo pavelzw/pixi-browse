@@ -18,7 +18,7 @@ from textual.events import Paste
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.models import VersionDetailsData
+from pixi_browse.models import PackageFile, VersionDetailsData
 from pixi_browse.rendering import (
     build_version_details_data,
     format_clickable_github_handle,
@@ -442,13 +442,14 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     calls: list[str] = []
 
     class _FakePathEntry:
-        def __init__(self, relative_path: str) -> None:
+        def __init__(self, relative_path: str, size_in_bytes: int | None) -> None:
             self.relative_path = relative_path
+            self.size_in_bytes = size_in_bytes
 
     class _FakePathsJson:
         paths = [
-            _FakePathEntry("bin/demo"),
-            _FakePathEntry("lib/python3.13/site-packages/demo.py"),
+            _FakePathEntry("bin/demo", 1234),
+            _FakePathEntry("lib/python3.13/site-packages/demo.py", None),
         ]
 
     async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
@@ -466,8 +467,8 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
 
     assert paths == [
-        "bin/demo",
-        "lib/python3.13/site-packages/demo.py",
+        PackageFile("bin/demo", 1234),
+        PackageFile("lib/python3.13/site-packages/demo.py", None),
     ]
     assert cached_paths == paths
     assert calls == [url]
@@ -1662,12 +1663,12 @@ def test_file_list_entry_uses_plain_file_path() -> None:
         constraints=(),
         run_exports=(),
         files=("site-packages/demo.py",),
-        file_paths=("site-packages/demo.py",),
+        file_paths=(PackageFile("site-packages/demo.py", 1536),),
     )
 
     entries = view._file_entries_for_details()
 
-    assert entries[0].label == "site-packages/demo.py"
+    assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
 
 

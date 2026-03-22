@@ -11,7 +11,7 @@ from rattler.repo_data import RepoDataRecord
 from rattler.version import VersionWithSource
 from rich.markup import escape
 
-from pixi_browse.models import VersionDetailsData
+from pixi_browse.models import PackageFile, VersionDetailsData
 
 
 def format_detail_row(label: str, value: str) -> str:
@@ -228,7 +228,7 @@ def build_version_details_data(
     package_name: str,
     record: RepoDataRecord,
     *,
-    package_paths: Sequence[str] | None = None,
+    package_paths: Sequence[PackageFile] | None = None,
     package_paths_error: str | None = None,
     repository_urls: Sequence[str] | None = None,
     documentation_urls: Sequence[str] | None = None,
@@ -315,7 +315,7 @@ def build_version_details_data(
     if package_paths_error is not None:
         file_lines = [f"Unavailable: {escape(package_paths_error)}"]
     elif package_paths:
-        file_lines = [escape(path) for path in package_paths]
+        file_lines = [escape(package_file.path) for package_file in package_paths]
     else:
         file_lines = ["No files listed."]
 

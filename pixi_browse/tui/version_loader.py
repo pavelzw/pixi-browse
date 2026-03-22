@@ -5,7 +5,7 @@ from rattler.networking import Client
 from rattler.package import RunExportsJson
 from rattler.repo_data import RepoDataRecord
 
-from pixi_browse.models import VersionDetailsData, VersionPreviewKey
+from pixi_browse.models import PackageFile, VersionDetailsData, VersionPreviewKey
 from pixi_browse.rendering import build_version_details_data
 
 from .state import AboutUrls
@@ -15,7 +15,7 @@ class VersionDataLoader:
     def __init__(self, *, client: Client) -> None:
         self._client = client
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
-        self.paths_cache: dict[VersionPreviewKey, list[str]] = {}
+        self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
 
     def clear_caches(self) -> None:
@@ -27,7 +27,7 @@ class VersionDataLoader:
         self,
         *,
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
-        paths_cache: dict[VersionPreviewKey, list[str]],
+        paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         details_cache: dict[VersionPreviewKey, VersionDetailsData],
     ) -> None:
         self.about_urls_cache.clear()
@@ -55,7 +55,7 @@ class VersionDataLoader:
 
     async def get_package_paths(
         self, preview_key: VersionPreviewKey, url: str
-    ) -> list[str]:
+    ) -> list[PackageFile]:
         cached = self.paths_cache.get(preview_key)
         if cached is not None:
             return cached
@@ -63,7 +63,13 @@ class VersionDataLoader:
         from . import PathsJson
 
         paths_json = await PathsJson.from_remote_url(self._client, url)
-        paths = [str(path.relative_path) for path in paths_json.paths]
+        paths = [
+            PackageFile(
+                path=str(path.relative_path),
+                size_in_bytes=path.size_in_bytes,
+            )
+            for path in paths_json.paths
+        ]
         self.paths_cache[preview_key] = paths
         return paths
 
@@ -142,7 +148,7 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        package_paths: list[str] | None = None
+        package_paths: list[PackageFile] | None = None
         package_paths_error: str | None = None
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None

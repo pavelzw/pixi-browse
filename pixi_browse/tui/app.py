@@ -23,6 +23,7 @@ from textual.widgets import OptionList, Static
 from pixi_browse import __version__
 from pixi_browse.models import (
     DependencyTab,
+    PackageFile,
     VersionDetailsData,
     VersionEntry,
     VersionPreviewKey,
@@ -894,7 +895,7 @@ class CondaMetadataTui(App[None]):
 
     async def _get_package_paths(
         self, preview_key: VersionPreviewKey, url: str
-    ) -> list[str]:
+    ) -> list[PackageFile]:
         return await self._version_loader.get_package_paths(preview_key, url)
 
     async def _get_about_urls(
