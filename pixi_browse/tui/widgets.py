@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from rich.style import Style
 from rich.text import Text
+from textual._context import NoActiveAppError
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -273,6 +274,10 @@ class MainPanel(Vertical):
     can_focus = True
     _vim_g_pending = False
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._pane_selected = False
+
     @staticmethod
     def _page_step(height: int) -> int:
         return max(1, height)
@@ -292,13 +297,19 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
+        try:
+            select_pane = getattr(self.app, "_set_selected_pane", None)
+        except NoActiveAppError:
+            select_pane = None
+        if callable(select_pane):
+            select_pane("main")
         self.focus()
         event.stop()
 
     def show_placeholder(self, content: str | Text) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = True
-        self._set_placeholder_title(selected=self.has_focus)
+        self._set_placeholder_title(selected=self._pane_selected)
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
@@ -308,8 +319,17 @@ class MainPanel(Vertical):
         placeholder.border_title = ""
         version_details = self.query_one("#version-details-view", VersionDetailsView)
         version_details.set_details(details)
-        version_details.set_pane_selected(self.has_focus)
+        version_details.set_pane_selected(self._pane_selected)
         version_details.display = True
+
+    def set_pane_selected(self, selected: bool) -> None:
+        self._pane_selected = selected
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).set_pane_selected(selected)
+        else:
+            self._set_placeholder_title(selected=selected)
 
     def _set_placeholder_title(self, *, selected: bool) -> None:
         self.query_one("#main-placeholder-scroll", VerticalScroll).border_title = Text(
@@ -320,26 +340,30 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
+        try:
+            select_pane = getattr(self.app, "_set_selected_pane", None)
+        except NoActiveAppError:
+            select_pane = None
+        if callable(select_pane):
+            select_pane("main")
+        try:
+            update_filter_indicator = getattr(
+                self.app, "_update_filter_indicator", None
+            )
+        except NoActiveAppError:
+            update_filter_indicator = None
         if callable(update_filter_indicator):
             update_filter_indicator()
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).set_pane_selected(True)
-        else:
-            self._set_placeholder_title(selected=True)
 
     def on_blur(self) -> None:
-        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
+        try:
+            update_filter_indicator = getattr(
+                self.app, "_update_filter_indicator", None
+            )
+        except NoActiveAppError:
+            update_filter_indicator = None
         if callable(update_filter_indicator):
             update_filter_indicator()
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).set_pane_selected(False)
-        else:
-            self._set_placeholder_title(selected=False)
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -506,6 +530,12 @@ class MainPanel(Vertical):
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
+        try:
+            select_pane = getattr(self.app, "_set_selected_pane", None)
+        except NoActiveAppError:
+            select_pane = None
+        if callable(select_pane):
+            select_pane("sidebar")
         self.app.query_one("#sidebar-list").focus()
         event.stop()
 

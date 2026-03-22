@@ -14,7 +14,7 @@ Screen {
     margin: 0;
 }
 
-#sidebar:focus-within {
+#sidebar.-active-pane {
     border: round #ec4899;
 }
 
@@ -76,9 +76,6 @@ Screen {
     scrollbar-size-vertical: 1;
 }
 
-#main-panel:focus {
-}
-
 #main-placeholder-scroll {
     height: 1fr;
     border: round $text;
@@ -86,7 +83,7 @@ Screen {
     scrollbar-size-vertical: 1;
 }
 
-#main-panel:focus #main-placeholder-scroll {
+#main-panel.-active-pane #main-placeholder-scroll {
     border: round #ec4899;
 }
 
@@ -116,7 +113,7 @@ Screen {
     border: round $text;
 }
 
-#main-panel:focus .detail-section.-active {
+#main-panel.-active-pane .detail-section.-active {
     border: round #ec4899;
 }
 
