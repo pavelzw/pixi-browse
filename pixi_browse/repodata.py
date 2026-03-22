@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 from rattler.exceptions import GatewayError
+from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord, SourceConfig
 from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
+
+
+@dataclass(frozen=True)
+class MatchSpecQueryResult:
+    package_names: list[str]
+    records_by_package: dict[str, list[RepoDataRecord]]
 
 
 def create_gateway(*, client: Client | None = None) -> Gateway:
@@ -106,4 +114,44 @@ async def query_package_records(
         unique_records.values(),
         key=record_sort_key,
         reverse=True,
+    )
+
+
+async def query_matchspec_records(
+    *,
+    gateway: Gateway,
+    channel_name: str,
+    platforms: list[Platform],
+    matchspec: MatchSpec,
+    record_sort_key: Callable[
+        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+    ],
+) -> MatchSpecQueryResult:
+    unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
+    by_source = await gateway.query(
+        sources=[channel_name],
+        platforms=platforms,
+        specs=[matchspec],
+        recursive=False,
+    )
+    for source_records in by_source:
+        for record in source_records:
+            unique_records[record_identity_key(record)] = record
+
+    grouped_records: dict[str, list[RepoDataRecord]] = {}
+    for record in unique_records.values():
+        package_name = record.name.normalized
+        grouped_records.setdefault(package_name, []).append(record)
+
+    sorted_package_names = sorted(grouped_records)
+    return MatchSpecQueryResult(
+        package_names=sorted_package_names,
+        records_by_package={
+            package_name: sorted(
+                grouped_records[package_name],
+                key=record_sort_key,
+                reverse=True,
+            )
+            for package_name in sorted_package_names
+        },
     )

@@ -4,6 +4,9 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+import pytest
+from rattler.exceptions import InvalidMatchSpecError
+from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
@@ -25,14 +28,18 @@ from pixi_browse.rendering import (
     render_package_preview,
     render_selected_version_details,
 )
+from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
+    EMPTY_MATCHSPEC_RESULT,
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
     DetailSection,
+    Empty,
     HelpScreen,
     MainPanel,
+    MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
 )
@@ -593,6 +600,46 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     assert app._sidebar_title_text(selected=False).plain == "[0] Versions: demo"
 
 
+def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    filtered_record = _make_repo_data_record(
+        version="2.0.0",
+        build="py313h999_0",
+        build_number=0,
+        subdir="linux-64",
+        file_name="demo-2.0.0-py313h999_0.conda",
+    )
+    app._matchspec_records_by_package = {"demo": [filtered_record]}
+
+    class _FakeOptionList:
+        highlighted = 0
+        scroll_y = 0.0
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_update_versions_status", lambda: None)
+    monkeypatch.setattr(app, "_render_version_options", lambda: None)
+
+    async def _unexpected_get_package_records(
+        package_name: str,
+    ) -> list[RepoDataRecord]:
+        raise AssertionError(f"unexpected full record lookup for {package_name}")
+
+    monkeypatch.setattr(app, "_get_package_records", _unexpected_get_package_records)
+
+    asyncio.run(app._open_versions("demo"))
+
+    assert [entry.file_name for entry in app._current_versions] == [
+        "demo-2.0.0-py313h999_0.conda"
+    ]
+
+
 def test_open_platform_selector_no_longer_queries_removed_sidebar_title(
     monkeypatch,
 ) -> None:
@@ -920,6 +967,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "Cycle focused section" in help_text
     assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
+    assert "m                 Query MatchSpec" in help_text
 
 
 def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
@@ -933,6 +981,100 @@ def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
     assert len(pushed) == 1
     assert isinstance(pushed[0], HelpScreen)
     assert pushed[0]._title_text() == f"pixi-browse v{__version__}"
+
+
+def test_matchspec_screen_validates_input() -> None:
+    empty = MatchSpecScreen.validate_matchspec("")
+    numpy = MatchSpecScreen.validate_matchspec("numpy >=2")
+    glob = MatchSpecScreen.validate_matchspec("python*")
+
+    assert isinstance(empty, Empty)
+    assert empty == EMPTY_MATCHSPEC_RESULT
+    assert isinstance(numpy, MatchSpec)
+    assert str(numpy).startswith("numpy")
+    assert isinstance(glob, MatchSpec)
+    assert str(glob) == "python*"
+
+    with pytest.raises(InvalidMatchSpecError):
+        MatchSpecScreen.validate_matchspec("numpy[")
+
+
+def test_matchspec_screen_updates_inline_error_message(monkeypatch) -> None:
+    screen = MatchSpecScreen()
+
+    class _FakeStatic:
+        def __init__(self) -> None:
+            self.updates: list[Text] = []
+
+        def update(self, value: Text) -> None:
+            self.updates.append(value)
+
+    error_widget = _FakeStatic()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatic:
+        assert selector == "#matchspec-error"
+        return error_widget
+
+    monkeypatch.setattr(screen, "query_one", _fake_query_one)
+
+    screen._update_validation_error("numpy[")
+    screen._update_validation_error("python*")
+
+    assert error_widget.updates[0].plain != ""
+    assert error_widget.updates[-1].plain == ""
+
+
+def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._matchspec_query = "numpy >=2"
+    pushed: list[tuple[MatchSpecScreen, object | None]] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+
+    app.action_matchspec_key_m()
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, MatchSpecScreen)
+    assert screen._initial_value == "numpy >=2"
+    assert screen._select_on_focus is True
+    assert callback == app._handle_matchspec_result
+
+
+def test_handle_matchspec_result_queues_matchspec_worker(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    worker_calls: list[dict[str, object]] = []
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._handle_matchspec_result(MatchSpec("numpy >=2", exact_names_only=False))
+
+    assert worker_calls == [
+        {
+            "group": "matchspec-selection",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_handle_matchspec_result_ignores_cancel(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    calls: list[object] = []
+
+    monkeypatch.setattr(app, "run_worker", lambda *args, **kwargs: calls.append(args))
+
+    app._handle_matchspec_result(None)
+
+    assert calls == []
 
 
 def test_action_open_external_url_uses_webbrowser(monkeypatch) -> None:
@@ -1118,6 +1260,38 @@ def test_selecting_version_entry_with_keyboard_focuses_main_panel(monkeypatch) -
 
     assert preview_calls == [("demo", entry)]
     assert focused == ["main"]
+
+
+def test_selecting_dependency_option_opens_matchspec_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+    focused: list[str] = []
+    sections: list[int] = []
+
+    monkeypatch.setattr(app, "_dependency_matchspec_at", lambda index: "python >=3.12")
+    monkeypatch.setattr(
+        app, "_defer_matchspec_screen", lambda value: opened.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+
+    class _FakeOptionList:
+        id = "detail-option-list-1"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert sections == [1]
+    assert focused == ["main"]
+    assert opened == ["python >=3.12"]
 
 
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
@@ -1354,6 +1528,38 @@ def test_dependency_header_omits_counts_before_details_are_loaded() -> None:
     assert "(0)" not in header.plain
 
 
+def test_run_export_list_entry_uses_plain_matchspec() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=("weak: python_abi 3.13.* *_cp313",),
+        files=("file",),
+    )
+
+    entries = view._dependency_entries_for_tab("run_exports")
+
+    assert entries[0].label == "weak: python_abi 3.13.* *_cp313"
+    assert entries[0].matchspec == "python_abi 3.13.* *_cp313"
+
+
+def test_dependency_list_entry_unescapes_matchspec_text() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(r"demo \[version='>=1'\]",),
+        constraints=(),
+        run_exports=(),
+        files=("file",),
+    )
+
+    entries = view._dependency_entries_for_tab("dependencies")
+
+    assert entries[0].label == "demo [version='>=1']"
+    assert entries[0].matchspec == "demo [version='>=1']"
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -1466,6 +1672,63 @@ def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
 
     assert section_directions == [1]
     assert event.stopped is True
+
+
+def test_on_key_enter_opens_matchspec_screen_for_selected_dependency(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_selected_dependency_matchspec", lambda: "numpy >=2")
+    monkeypatch.setattr(
+        app, "_defer_matchspec_screen", lambda value: opened.append(value)
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("enter")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert opened == ["numpy >=2"]
+    assert event.stopped is True
+
+
+def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[tuple[str, bool]] = []
+    scheduled: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "_open_matchspec_screen",
+        lambda value, *, select_on_focus=True: opened.append((value, select_on_focus)),
+    )
+    monkeypatch.setattr(
+        app, "call_after_refresh", lambda callback: scheduled.append(callback)
+    )
+
+    app._defer_matchspec_screen("numpy >=2")
+
+    assert opened == []
+    assert len(scheduled) == 1
+
+    callback = scheduled[0]
+    assert callable(callback)
+    callback()
+
+    assert opened == [("numpy >=2", False)]
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
@@ -1972,6 +2235,7 @@ def test_apply_channel_selection_renders_sidebar_loading_placeholder(
             self.disabled = False
             self.options: list[str] = []
             self.highlighted: int | None = None
+            self.scroll_y = 0.0
             self.focused = False
 
         def clear_options(self) -> None:
@@ -2020,10 +2284,283 @@ def test_apply_channel_selection_renders_sidebar_loading_placeholder(
     assert option_list.focused is True
 
 
+def test_request_package_preview_uses_matchspec_records(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="demo")
+    app._matchspec_records_by_package = {"demo": [record]}
+    previewed: list[tuple[str, list[RepoDataRecord]]] = []
+
+    monkeypatch.setattr(
+        app,
+        "_update_main_panel_for_package",
+        lambda package_name, records: previewed.append((package_name, records)),
+    )
+    monkeypatch.setattr(
+        app,
+        "run_worker",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("worker should not run for cached MatchSpec records")
+        ),
+    )
+
+    app._request_package_preview("demo")
+
+    assert previewed == [("demo", [record])]
+
+
+def test_apply_matchspec_query_empty_restores_full_package_selection(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_package_names = ["demo", "numpy"]
+    app._matchspec_query = "demo >=1"
+    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._mode = "versions"
+    filtered: list[str] = []
+    updated: list[str] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
+    monkeypatch.setattr(
+        app, "_update_filter_indicator", lambda: updated.append("updated")
+    )
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    asyncio.run(app._apply_matchspec_query(None))
+
+    assert app._matchspec_query == ""
+    assert app._matchspec_records_by_package == {}
+    assert app._all_package_names == ["demo", "numpy"]
+    assert app._mode == "packages"
+    assert filtered == ["filtered"]
+    assert updated == ["updated"]
+    assert focused == ["sidebar"]
+
+
+def test_apply_matchspec_result_auto_opens_versions_for_single_package(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="demo", version="2.0.0")
+    opened: list[str] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    async def _fake_open_versions(package_name: str) -> None:
+        opened.append(package_name)
+
+    monkeypatch.setattr(app, "_open_versions", _fake_open_versions)
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "demo >=2",
+            MatchSpecQueryResult(
+                package_names=["demo"],
+                records_by_package={"demo": [record]},
+            ),
+        )
+    )
+
+    assert app._matchspec_query == "demo >=2"
+    assert app._matchspec_records_by_package == {"demo": [record]}
+    assert opened == ["demo"]
+    assert focused == ["sidebar"]
+
+
+def test_apply_matchspec_result_clears_package_search_filter(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._filter_mode = True
+    app._search_query = "num"
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "python >=3.12",
+            MatchSpecQueryResult(
+                package_names=["python", "pypy"],
+                records_by_package={
+                    "python": [_make_repo_data_record(name="python")],
+                    "pypy": [_make_repo_data_record(name="pypy")],
+                },
+            ),
+        )
+    )
+
+    assert app._filter_mode is False
+    assert app._search_query == ""
+    assert app._visible_package_names == ["python", "pypy"]
+    assert focused == ["sidebar"]
+
+
+def test_apply_matchspec_result_keeps_packages_view_for_multiple_packages(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    focused: list[str] = []
+    opened: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    async def _fake_open_versions(package_name: str) -> None:
+        opened.append(package_name)
+
+    monkeypatch.setattr(app, "_open_versions", _fake_open_versions)
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "py*",
+            MatchSpecQueryResult(
+                package_names=["python", "pypy"],
+                records_by_package={
+                    "python": [_make_repo_data_record(name="python")],
+                    "pypy": [_make_repo_data_record(name="pypy")],
+                },
+            ),
+        )
+    )
+
+    assert app._matchspec_query == "py*"
+    assert app._all_package_names == ["python", "pypy"]
+    assert app._mode == "packages"
+    assert opened == []
+    assert focused == ["sidebar"]
+
+
+def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> None:
+    app = CondaMetadataTui(default_platforms={Platform("linux-64")})
+    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._selected_platform_names = {Platform("linux-64")}
+    app._draft_selected_platform_names = {Platform("linux-64"), Platform("noarch")}
+    app._matchspec_query = "demo >=1"
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.messages: list[object] = []
+
+        def update(self, value: object) -> None:
+            self.messages.append(value)
+
+    class _FakeOptionList:
+        def __init__(self) -> None:
+            self.focused = False
+
+        def focus(self) -> None:
+            self.focused = True
+
+    status = _FakeStatus()
+    option_list = _FakeOptionList()
+    reapplications: list[str] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#status":
+            return status
+        if selector == "#sidebar-list":
+            return option_list
+        raise AssertionError(selector)
+
+    async def _fake_fetch_package_names_with_gateway() -> list[str]:
+        return ["demo"]
+
+    async def _fake_reapply_active_matchspec() -> None:
+        reapplications.append(app._matchspec_query)
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_snapshot_channel_state", lambda: "snapshot")
+    monkeypatch.setattr(app, "_clear_record_caches", lambda: None)
+    monkeypatch.setattr(app, "_reset_preview_state", lambda: None)
+    monkeypatch.setattr(app, "_update_platform_indicator", lambda: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(
+        app, "_fetch_package_names_with_gateway", _fake_fetch_package_names_with_gateway
+    )
+    monkeypatch.setattr(
+        app, "_reapply_active_matchspec", _fake_reapply_active_matchspec
+    )
+
+    asyncio.run(app._apply_platform_selection())
+
+    assert app._channel_package_names == ["demo"]
+    assert reapplications == ["demo >=1"]
+    assert option_list.focused is True
+
+
+def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._matchspec_query = "demo >=1"
+    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+
+    class _FakeOptionList:
+        def __init__(self) -> None:
+            self.disabled = False
+            self.options: list[str] = []
+            self.highlighted: int | None = None
+            self.scroll_y = 0.0
+            self.focused = False
+
+        def clear_options(self) -> None:
+            self.options.clear()
+
+        def add_option(self, option: str) -> None:
+            self.options.append(option)
+
+        def focus(self) -> None:
+            self.focused = True
+
+    option_list = _FakeOptionList()
+    notifications: list[str] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    async def _fake_load_packages() -> bool:
+        return True
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_show_main_placeholder", lambda value: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_load_packages", _fake_load_packages)
+    monkeypatch.setattr(
+        app, "notify", lambda message, **kwargs: notifications.append(message)
+    )
+
+    asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
+
+    assert app._matchspec_query == ""
+    assert app._matchspec_records_by_package == {}
+    assert notifications == ["Switched to channel: prefix.dev/conda-forge"]
+
+
 def test_footer_text_matches_redesigned_shortcuts() -> None:
     app = CondaMetadataTui()
 
-    assert app._footer_text() == "Search: / | Platform: p | Channel: c | Help: ?"
+    assert (
+        app._footer_text()
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
+    )
 
 
 def test_footer_text_shows_download_hint_in_versions_mode() -> None:
@@ -2032,7 +2569,7 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
     )
 
 
@@ -2060,7 +2597,7 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
     )
 
 
@@ -2256,10 +2793,11 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     assert main_panel.subtitle_history == []
     assert status.updates[-1] == "0 entries across 0 platform."
     assert (
-        f"Search: / | Platform: p | Channel: c | Downloading {entry.file_name}... | Help: ?"
+        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Downloading {entry.file_name}... | Help: ?"
         in footer.updates
     )
     assert (
-        "Search: / | Platform: p | Channel: c | Download: d | Help: ?" in footer.updates
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        in footer.updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]

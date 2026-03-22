@@ -43,8 +43,11 @@ class ChannelStateSnapshot:
     platforms: list[Platform]
     available_platform_names: list[Platform]
     selected_platform_names: set[Platform]
+    channel_package_names: list[str]
     all_package_names: list[str]
     visible_package_names: list[str]
+    matchspec_query: str
+    matchspec_records_by_package: dict[str, list[RepoDataRecord]]
     package_records_cache: dict[str, list[RepoDataRecord]]
     version_about_urls_cache: dict[VersionPreviewKey, AboutUrls]
     version_paths_cache: dict[VersionPreviewKey, list[str]]
