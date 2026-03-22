@@ -1529,7 +1529,9 @@ class CondaMetadataTui(App[None]):
             return f"Search: {self._search_query}_"
 
         if self._compare_screen_open:
-            return "Compare: Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
+            return (
+                "Compare: Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
+            )
 
         footer = "Search: / | Platform: p | Channel: c | MatchSpec: m"
         if self._mode == "versions":

@@ -1146,8 +1146,8 @@ class CompareScreen(Screen[None]):
         Binding("tab", "next_section", show=False, priority=True),
         Binding("shift+tab", "previous_section", show=False, priority=True),
         Binding("x", "swap_sides", show=False),
-        Binding("escape", "dismiss", show=False),
-        Binding("q", "dismiss", show=False),
+        Binding("escape", "back", show=False),
+        Binding("q", "quit", show=False),
     ]
 
     def __init__(self, compare_data: VersionCompareData) -> None:
@@ -1174,7 +1174,7 @@ class CompareScreen(Screen[None]):
 
     @staticmethod
     def _footer_text() -> str:
-        return "Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
+        return "Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
 
     @staticmethod
     def _selection_label(selection: CompareSelection) -> str:
@@ -1192,6 +1192,12 @@ class CompareScreen(Screen[None]):
         self.query_one(
             "#compare-details-view", CompareDetailsView
         ).cycle_active_section(-1)
+
+    def action_back(self) -> None:
+        self.dismiss()
+
+    def action_quit(self) -> None:
+        self.app.exit()
 
     @staticmethod
     def _swap_rows(rows: tuple[CompareRow, ...]) -> tuple[CompareRow, ...]:

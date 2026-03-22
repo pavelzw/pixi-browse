@@ -2679,10 +2679,92 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
 
             assert (
                 str(screen.query_one("#compare-footer", Static).render())
-                == "Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
+                == "Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
             )
 
     asyncio.run(_run())
+
+
+def test_compare_screen_escape_dismisses_overlay(monkeypatch) -> None:
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h456_0",
+                    build_number=0,
+                    subdir="linux-64",
+                    file_name="demo-1.0.1-py313h456_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    dismissed: list[str] = []
+
+    monkeypatch.setattr(screen, "dismiss", lambda: dismissed.append("dismiss"))
+
+    screen.action_back()
+
+    assert dismissed == ["dismiss"]
+
+
+def test_compare_screen_q_exits_app(monkeypatch) -> None:
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h456_0",
+                    build_number=0,
+                    subdir="linux-64",
+                    file_name="demo-1.0.1-py313h456_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    exited: list[str] = []
+
+    class _FakeApp:
+        def exit(self) -> None:
+            exited.append("exit")
+
+    monkeypatch.setattr(CompareScreen, "app", property(lambda self: _FakeApp()))
+
+    screen.action_quit()
+
+    assert exited == ["exit"]
 
 
 def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:
@@ -3598,7 +3680,7 @@ def test_footer_text_shows_compare_keybinds_when_compare_screen_is_open() -> Non
 
     assert (
         app._footer_text()
-        == "Compare: Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
+        == "Compare: Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
     )
 
 
