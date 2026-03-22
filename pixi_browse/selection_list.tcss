@@ -86,7 +86,7 @@ Screen {
 
 .detail-scroll {
     height: 1fr;
-    padding: 0 0 1 0;
+    padding: 0;
     scrollbar-size-vertical: 1;
 }
 
