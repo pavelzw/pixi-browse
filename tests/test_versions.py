@@ -158,7 +158,7 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
         lambda: shared_client,
     )
     monkeypatch.setattr(
-        "pixi_browse.tui.create_gateway",
+        "pixi_browse.tui.app.create_gateway",
         _fake_create_gateway,
     )
 
@@ -458,7 +458,7 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
         return _FakePathsJson()
 
     monkeypatch.setattr(
-        "pixi_browse.tui.PathsJson.from_remote_url",
+        "pixi_browse.tui.version_loader.PathsJson.from_remote_url",
         _fake_from_remote_url,
     )
 
@@ -503,11 +503,11 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         return b"system_tools:\n  rattler-build: 0.38.0\n"
 
     monkeypatch.setattr(
-        "pixi_browse.tui.AboutJson.from_remote_url",
+        "pixi_browse.tui.version_loader.AboutJson.from_remote_url",
         _fake_from_remote_url,
     )
     monkeypatch.setattr(
-        "pixi_browse.tui.fetch_raw_package_file_from_url",
+        "pixi_browse.tui.version_loader.fetch_raw_package_file_from_url",
         _fake_fetch_raw_package_file_from_url,
     )
 
@@ -3207,7 +3207,7 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
         )
 
     monkeypatch.setattr(
-        "pixi_browse.tui.package_download_to_path",
+        "pixi_browse.tui.app.package_download_to_path",
         _fake_download,
     )
     monkeypatch.setattr(app, "notify", _fake_notify)

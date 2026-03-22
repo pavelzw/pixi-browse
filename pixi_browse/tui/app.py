@@ -9,6 +9,10 @@ from typing import Literal, cast
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
+from rattler.package_streaming import (
+    download_to_path as package_download_to_path,
+)
+from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
 from rattler.version import Version, VersionWithSource
@@ -34,6 +38,7 @@ from pixi_browse.platform_utils import platform_sort_key
 from pixi_browse.rendering import format_human_byte_size, render_package_preview
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
+    create_gateway,
     discover_available_platforms,
     fetch_package_names,
     query_matchspec_records,
@@ -87,7 +92,6 @@ class CondaMetadataTui(App[None]):
         selected_platforms = set(default_platforms or [])
         self.theme = "textual-ansi"
         self._client = Client.default_client()
-        from . import create_gateway
 
         self._gateway: Gateway = create_gateway(client=self._client)
         self._platforms: list[Platform] = []
@@ -944,7 +948,6 @@ class CondaMetadataTui(App[None]):
             url = await self._package_url_for_version_entry(package_name, entry)
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
-            from . import package_download_to_path
 
             await package_download_to_path(self._client, url, temporary_destination)
             temporary_destination.replace(destination)
@@ -1033,7 +1036,6 @@ class CondaMetadataTui(App[None]):
         self, package_name: str, entry: VersionEntry, file_path: str
     ) -> bytes:
         url = await self._package_url_for_version_entry(package_name, entry)
-        from . import fetch_raw_package_file_from_url
 
         return await fetch_raw_package_file_from_url(self._client, url, file_path)
 

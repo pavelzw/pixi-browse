@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import yaml
 from rattler.networking import Client
-from rattler.package import RunExportsJson
+from rattler.package import AboutJson, PathsJson, RunExportsJson
+from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import PackageFile, VersionDetailsData, VersionPreviewKey
@@ -60,8 +61,6 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        from . import PathsJson
-
         paths_json = await PathsJson.from_remote_url(self._client, url)
         paths = [
             PackageFile(
@@ -79,8 +78,6 @@ class VersionDataLoader:
         cached = self.about_urls_cache.get(preview_key)
         if cached is not None:
             return cached
-
-        from . import AboutJson, fetch_raw_package_file_from_url
 
         about_json = await AboutJson.from_remote_url(self._client, url)
         recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
@@ -133,8 +130,6 @@ class VersionDataLoader:
         return about_urls
 
     async def get_run_exports(self, url: str) -> RunExportsJson:
-        from . import RunExportsJson
-
         return await RunExportsJson.from_remote_url(self._client, url)
 
     async def load_version_details(
