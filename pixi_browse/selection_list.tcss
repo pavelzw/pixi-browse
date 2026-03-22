@@ -96,6 +96,6 @@ Screen {
 
 #footer {
     height: 1;
-    margin: 0 0 1 0;
+    margin: 0;
     color: $text-muted;
 }
