@@ -538,7 +538,7 @@ class HelpScreen(ModalScreen[None]):
         max-width: 90%;
         height: auto;
         max-height: 90%;
-        border: round $accent;
+        border: round #ec4899;
         background: $surface;
         padding: 1 2;
     }
