@@ -12,10 +12,16 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, OptionList, Static
 
-from pixi_browse.models import DependencyTab, VersionDetailsData
+from pixi_browse.models import (
+    CompareLine,
+    CompareSelection,
+    DependencyTab,
+    VersionCompareData,
+    VersionDetailsData,
+)
 from pixi_browse.rendering import format_human_byte_size
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
@@ -146,6 +152,69 @@ class DetailSection(Vertical):
 
     def page_step(self) -> int:
         scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        return max(1, scroll.size.height)
+
+
+class CompareSection(Vertical):
+    def __init__(self, title: str, index: int) -> None:
+        super().__init__(classes="detail-section")
+        self._index = index
+        del title
+        self.auto_links = False
+        self.styles.border_title_align = "left"
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(
+            id=f"compare-scroll-{self._index}", classes="detail-scroll"
+        ):
+            yield Static(id=f"compare-body-{self._index}", classes="detail-body")
+
+    def on_click(self, event: Click) -> None:
+        style = event.style
+        meta = style.meta if style is not None else None
+        click_meta = meta.get("@click") if meta is not None else None
+        if click_meta is not None:
+            action_name, args = click_meta
+            if action_name == "screen.select_compare_dependency_tab":
+                self.screen.query_one(
+                    "#compare-details-view", CompareDetailsView
+                ).select_dependency_tab(*args)
+                event.stop()
+                return
+
+        self.screen.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).set_active_section(self._index)
+        event.stop()
+
+    def update_header(self, title: str | Text) -> None:
+        self.border_title = title
+
+    def update_body(self, body: str | Text) -> None:
+        self.query_one(f"#compare-body-{self._index}", Static).update(body)
+
+    def set_active(self, active: bool) -> None:
+        self.set_class(active, "-active")
+        self.set_class(not active, "-collapsed")
+
+    def scroll_body_home(self) -> None:
+        self.query_one(f"#compare-scroll-{self._index}", VerticalScroll).scroll_home(
+            animate=False,
+            immediate=True,
+            x_axis=False,
+        )
+
+    def scroll_body_end(self) -> None:
+        self.query_one(f"#compare-scroll-{self._index}", VerticalScroll).scroll_end(
+            animate=False
+        )
+
+    def scroll_body_by(self, delta: float) -> None:
+        scroll = self.query_one(f"#compare-scroll-{self._index}", VerticalScroll)
+        scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
+
+    def page_step(self) -> int:
+        scroll = self.query_one(f"#compare-scroll-{self._index}", VerticalScroll)
         return max(1, scroll.size.height)
 
 
@@ -784,6 +853,306 @@ class MainPanel(Vertical):
 
             cast(CondaMetadataTui, self.app)._focus_sidebar()
             event.stop()
+
+
+class CompareDetailsView(Vertical):
+    can_focus = True
+    _vim_g_pending = False
+
+    def __init__(self, compare_data: VersionCompareData) -> None:
+        super().__init__(id="compare-details-view")
+        self._compare_data = compare_data
+        self._active_section = 0
+        self._dependency_tab_index = 0
+
+    def compose(self) -> ComposeResult:
+        yield CompareSection("Metadata", 0)
+        yield CompareSection("Dependencies", 1)
+        yield CompareSection("Files", 2)
+
+    def on_mount(self) -> None:
+        self._refresh_sections()
+
+    def set_active_section(self, index: int) -> None:
+        self._active_section = max(0, min(index, 2))
+        self._apply_section_state()
+
+    def cycle_active_section(self, direction: int) -> None:
+        self._active_section = (self._active_section + direction) % 3
+        self._apply_section_state()
+
+    def select_dependency_tab(self, tab: DependencyTab) -> None:
+        self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
+        self._refresh_dependency_section()
+
+    def cycle_dependency_tab(self, direction: int) -> None:
+        self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
+            DEPENDENCY_TABS
+        )
+        self._refresh_dependency_section()
+
+    def scroll_active(self, delta: float) -> None:
+        self._section(self._active_section).scroll_body_by(delta)
+
+    def scroll_home_active(self) -> None:
+        self._section(self._active_section).scroll_body_home()
+
+    def scroll_end_active(self) -> None:
+        self._section(self._active_section).scroll_body_end()
+
+    def active_page_step(self) -> int:
+        return self._section(self._active_section).page_step()
+
+    def _section(self, index: int) -> CompareSection:
+        return list(self.query(CompareSection))[index]
+
+    def _active_dependency_tab(self) -> DependencyTab:
+        return DEPENDENCY_TABS[self._dependency_tab_index]
+
+    def _apply_section_state(self) -> None:
+        for index, section in enumerate(self.query(CompareSection)):
+            section.set_active(index == self._active_section)
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(1).update_header(self._render_dependency_header())
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+
+    def _refresh_sections(self) -> None:
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(0).update_body(self._render_metadata_body())
+        self._refresh_dependency_section()
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+        self._section(2).update_body(self._render_file_body())
+        self._apply_section_state()
+
+    def _refresh_dependency_section(self) -> None:
+        section = self._section(1)
+        section.update_header(self._render_dependency_header())
+        section.update_body(self._render_dependency_body(self._active_dependency_tab()))
+
+    def _render_section_header(self, index: int, label: str) -> Text:
+        return Text(
+            f"[{index + 1}] {label}",
+            style=(
+                ACTIVE_SECTION_TITLE_STYLE
+                if index == self._active_section
+                else INACTIVE_SECTION_TITLE_STYLE
+            ),
+        )
+
+    def _render_dependency_header(self) -> Text:
+        header = self._render_section_header(1, "")
+        header.append_text(self._render_dependency_tabs())
+        return header
+
+    def _render_dependency_tabs(self) -> Text:
+        labels = {
+            "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
+            "constraints": f"Constraints ({len(self._compare_data.constraints)})",
+            "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
+        }
+        text = Text()
+        for index, tab in enumerate(DEPENDENCY_TABS):
+            if index:
+                text.append(" - ", style=INACTIVE_TAB_STYLE)
+            text.append_text(
+                self._render_clickable_dependency_tab(
+                    tab, labels[tab], active=tab == self._active_dependency_tab()
+                )
+            )
+        return text
+
+    @staticmethod
+    def _render_clickable_dependency_tab(
+        tab: DependencyTab, label: str, *, active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(ACTIVE_TAB_STYLE if active else INACTIVE_TAB_STYLE)
+        text.stylize(
+            Style(meta={"@click": ("screen.select_compare_dependency_tab", (tab,))})
+        )
+        return text
+
+    @staticmethod
+    def _append_line(body: Text, prefix: str, value: str, *, style: str) -> None:
+        body.append(prefix, style=style)
+        body.append(value, style=style)
+        body.append("\n")
+
+    def _render_metadata_body(self) -> Text:
+        body = Text()
+        if not self._compare_data.metadata_diffs:
+            body.append("No metadata changes.", style="dim")
+            return body
+
+        for index, diff in enumerate(self._compare_data.metadata_diffs):
+            if index:
+                body.append("\n")
+            body.append(f"{diff.label}\n", style="bold")
+            self._append_line(body, "- ", diff.before, style="red")
+            self._append_line(body, "+ ", diff.after, style="green")
+        return body
+
+    def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareLine, ...]:
+        if tab == "dependencies":
+            return self._compare_data.dependencies
+        if tab == "constraints":
+            return self._compare_data.constraints
+        return self._compare_data.run_exports
+
+    def _render_dependency_body(self, tab: DependencyTab) -> Text:
+        body = Text()
+        lines = self._dependency_lines(tab)
+        if not lines:
+            body.append("No dependency changes.", style="dim")
+            return body
+
+        for line in lines:
+            style = "green" if line.kind == "added" else "red"
+            prefix = "+ " if line.kind == "added" else "- "
+            self._append_line(body, prefix, line.value, style=style)
+        return body
+
+    def _render_file_body(self) -> Text:
+        body = Text()
+        if not self._compare_data.files:
+            body.append("No file changes.", style="dim")
+            return body
+
+        for line in self._compare_data.files:
+            if line.kind == "added":
+                style = "green"
+                prefix = "+ "
+            elif line.kind == "removed":
+                style = "red"
+                prefix = "- "
+            else:
+                style = "yellow"
+                prefix = "~ "
+            self._append_line(body, prefix, line.value, style=style)
+        return body
+
+    def on_key(self, event: Key) -> None:
+        page_height = self.active_page_step()
+        character = event.character
+
+        if event.key == "tab":
+            self.cycle_active_section(1)
+            event.stop()
+            return
+        if event.key in {"shift+tab", "backtab"}:
+            self.cycle_active_section(-1)
+            event.stop()
+            return
+        if character in {"1", "2", "3"}:
+            self.set_active_section(int(character) - 1)
+            event.stop()
+            return
+        if character == "[" and self._active_section == 1:
+            self.cycle_dependency_tab(-1)
+            event.stop()
+            return
+        if character == "]" and self._active_section == 1:
+            self.cycle_dependency_tab(1)
+            event.stop()
+            return
+        if character == "g":
+            if self._vim_g_pending:
+                self.scroll_home_active()
+                self._vim_g_pending = False
+            else:
+                self._vim_g_pending = True
+            event.stop()
+            return
+        if character == "G":
+            self.scroll_end_active()
+            self._vim_g_pending = False
+            event.stop()
+            return
+
+        self._vim_g_pending = False
+
+        if event.key in {"up", "k"}:
+            self.scroll_active(-1)
+            event.stop()
+            return
+        if event.key in {"down", "j"}:
+            self.scroll_active(1)
+            event.stop()
+            return
+        if event.key in {"pageup", "ctrl+u"}:
+            self.scroll_active(-page_height)
+            event.stop()
+            return
+        if event.key in {"pagedown", "ctrl+d"}:
+            self.scroll_active(page_height)
+            event.stop()
+            return
+        if event.key == "home":
+            self.scroll_home_active()
+            event.stop()
+            return
+        if event.key == "end":
+            self.scroll_end_active()
+            event.stop()
+
+
+class CompareScreen(Screen[None]):
+    DEFAULT_CSS = """
+    #compare-root {
+        height: 1fr;
+        padding: 0;
+    }
+
+    #compare-title {
+        height: auto;
+        padding: 0 0 1 0;
+        text-style: bold;
+    }
+    """
+
+    BINDINGS = [
+        Binding("tab", "next_section", show=False, priority=True),
+        Binding("shift+tab", "previous_section", show=False, priority=True),
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, compare_data: VersionCompareData) -> None:
+        super().__init__()
+        self._compare_data = compare_data
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="compare-root"):
+            yield Static(self._title_text(), id="compare-title", markup=False)
+            yield CompareDetailsView(self._compare_data)
+
+    def on_mount(self) -> None:
+        self.query_one("#compare-details-view", CompareDetailsView).focus()
+
+    def _title_text(self) -> str:
+        left = self._selection_label(self._compare_data.left_selection)
+        right = self._selection_label(self._compare_data.right_selection)
+        return f"Compare\n{left}\nvs\n{right}"
+
+    @staticmethod
+    def _selection_label(selection: CompareSelection) -> str:
+        entry = selection.entry
+        return (
+            f"{selection.package_name} {entry.version} {entry.build} [{entry.subdir}]"
+        )
+
+    def action_next_section(self) -> None:
+        self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).cycle_active_section(1)
+
+    def action_previous_section(self) -> None:
+        self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).cycle_active_section(-1)
+
+    async def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(result)
 
 
 class SidebarPanel(Vertical):

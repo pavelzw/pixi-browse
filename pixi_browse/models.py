@@ -9,6 +9,8 @@ ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
+PackageFilePathType = Literal["hardlink", "softlink", "directory"]
+CompareLineKind = Literal["added", "removed", "changed"]
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,55 @@ class VersionRow:
 class PackageFile:
     path: str
     size_in_bytes: int | None = None
+    sha256: bytes | None = None
+    no_link: bool | None = None
+    path_type: PackageFilePathType | None = None
+
+
+@dataclass(frozen=True)
+class MetadataField:
+    label: str
+    value: str
+
+
+@dataclass(frozen=True)
+class VersionArtifactData:
+    metadata_fields: tuple[MetadataField, ...]
+    dependencies: tuple[str, ...]
+    constraints: tuple[str, ...]
+    run_exports: tuple[str, ...]
+    files: tuple[str, ...]
+    file_paths: tuple[PackageFile, ...] = ()
+
+
+@dataclass(frozen=True)
+class CompareSelection:
+    package_name: str
+    entry: VersionEntry
+
+
+@dataclass(frozen=True)
+class MetadataDiff:
+    label: str
+    before: str
+    after: str
+
+
+@dataclass(frozen=True)
+class CompareLine:
+    value: str
+    kind: CompareLineKind
+
+
+@dataclass(frozen=True)
+class VersionCompareData:
+    left_selection: CompareSelection
+    right_selection: CompareSelection
+    metadata_diffs: tuple[MetadataDiff, ...]
+    dependencies: tuple[CompareLine, ...]
+    constraints: tuple[CompareLine, ...]
+    run_exports: tuple[CompareLine, ...]
+    files: tuple[CompareLine, ...]
 
 
 @dataclass(frozen=True)

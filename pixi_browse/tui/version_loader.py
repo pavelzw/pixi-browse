@@ -6,8 +6,17 @@ from rattler.package import AboutJson, PathsJson, RunExportsJson
 from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.repo_data import RepoDataRecord
 
-from pixi_browse.models import PackageFile, VersionDetailsData, VersionPreviewKey
-from pixi_browse.rendering import build_version_details_data
+from pixi_browse.models import (
+    PackageFile,
+    PackageFilePathType,
+    VersionArtifactData,
+    VersionDetailsData,
+    VersionPreviewKey,
+)
+from pixi_browse.rendering import (
+    build_version_artifact_data,
+    build_version_details_data,
+)
 
 from .state import AboutUrls
 
@@ -17,11 +26,13 @@ class VersionDataLoader:
         self._client = client
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
+        self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
         self.details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
 
     def clear_caches(self) -> None:
         self.about_urls_cache.clear()
         self.paths_cache.clear()
+        self.artifact_data_cache.clear()
         self.details_cache.clear()
 
     def restore_caches(
@@ -29,14 +40,27 @@ class VersionDataLoader:
         *,
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
+        artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
         details_cache: dict[VersionPreviewKey, VersionDetailsData],
     ) -> None:
         self.about_urls_cache.clear()
         self.about_urls_cache.update(about_urls_cache)
         self.paths_cache.clear()
         self.paths_cache.update(paths_cache)
+        self.artifact_data_cache.clear()
+        self.artifact_data_cache.update(artifact_data_cache)
         self.details_cache.clear()
         self.details_cache.update(details_cache)
+
+    @staticmethod
+    def _path_type_name(path_type: object) -> PackageFilePathType | None:
+        if getattr(path_type, "hardlink", False):
+            return "hardlink"
+        if getattr(path_type, "softlink", False):
+            return "softlink"
+        if getattr(path_type, "directory", False):
+            return "directory"
+        return None
 
     @staticmethod
     def extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
@@ -66,6 +90,9 @@ class VersionDataLoader:
             PackageFile(
                 path=str(path.relative_path),
                 size_in_bytes=path.size_in_bytes,
+                sha256=path.sha256,
+                no_link=path.no_link,
+                path_type=self._path_type_name(path.path_type),
             )
             for path in paths_json.paths
         ]
@@ -143,6 +170,52 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
+        artifact_data = await self.load_version_artifact_data(
+            package_name,
+            record,
+            preview_key=preview_key,
+        )
+        about_urls = self.about_urls_cache.get(preview_key, AboutUrls())
+        run_exports: RunExportsJson | None = None
+        try:
+            run_exports = await self.get_run_exports(str(record.url))
+        except Exception:
+            pass
+
+        details = build_version_details_data(
+            package_name,
+            record,
+            package_paths=artifact_data.file_paths,
+            package_paths_error=(
+                artifact_data.files[0].removeprefix("Unavailable: ")
+                if artifact_data.files
+                and len(artifact_data.files) == 1
+                and artifact_data.files[0].startswith("Unavailable: ")
+                else None
+            ),
+            repository_urls=about_urls.repository,
+            documentation_urls=about_urls.documentation,
+            homepage_urls=about_urls.homepage,
+            recipe_maintainers=about_urls.recipe_maintainers,
+            provenance_remote_url=about_urls.provenance_remote_url,
+            provenance_sha=about_urls.provenance_sha,
+            rattler_build_version=about_urls.rattler_build_version,
+            run_exports=run_exports,
+        )
+        self.details_cache[preview_key] = details
+        return details
+
+    async def load_version_artifact_data(
+        self,
+        package_name: str,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        cached = self.artifact_data_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
         package_paths: list[PackageFile] | None = None
         package_paths_error: str | None = None
         about_urls = AboutUrls()
@@ -163,7 +236,7 @@ class VersionDataLoader:
         except Exception:
             pass
 
-        details = build_version_details_data(
+        artifact_data = build_version_artifact_data(
             package_name,
             record,
             package_paths=package_paths,
@@ -177,5 +250,5 @@ class VersionDataLoader:
             rattler_build_version=about_urls.rattler_build_version,
             run_exports=run_exports,
         )
-        self.details_cache[preview_key] = details
-        return details
+        self.artifact_data_cache[preview_key] = artifact_data
+        return artifact_data

@@ -18,8 +18,10 @@ from textual.events import Paste
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.models import PackageFile, VersionDetailsData
+from pixi_browse.models import CompareSelection, PackageFile, VersionDetailsData
 from pixi_browse.rendering import (
+    build_version_artifact_data,
+    build_version_compare_data,
     build_version_details_data,
     format_clickable_github_handle,
     format_clickable_github_handle_list,
@@ -280,6 +282,111 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
     assert len(details.run_exports) == 3
 
 
+def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (
+    None
+):
+    left_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+        depends=["python >=3.12", "numpy >=1.0"],
+        constrains=["libdemo >=1"],
+    )
+    right_record = _make_repo_data_record(
+        version="1.2.4",
+        build="py313h456_0",
+        file_name="demo-1.2.4-py313h456_0.conda",
+        depends=["python >=3.13", "pydantic >=2"],
+        constrains=[],
+    )
+
+    left_artifact = build_version_artifact_data(
+        "demo",
+        left_record,
+        package_paths=(
+            PackageFile(
+                "bin/demo",
+                1234,
+                bytes.fromhex("00" * 32),
+                False,
+                "hardlink",
+            ),
+            PackageFile(
+                "info/about.json",
+                256,
+                bytes.fromhex("11" * 32),
+                False,
+                "hardlink",
+            ),
+        ),
+        run_exports=RunExportsJson(weak=["python_abi 3.12.* *_cp312"]),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        right_record,
+        package_paths=(
+            PackageFile(
+                "bin/demo",
+                2048,
+                bytes.fromhex("22" * 32),
+                False,
+                "hardlink",
+            ),
+            PackageFile(
+                "lib/demo.py",
+                512,
+                bytes.fromhex("33" * 32),
+                False,
+                "hardlink",
+            ),
+        ),
+        run_exports=RunExportsJson(weak=["python_abi 3.13.* *_cp313"]),
+    )
+
+    compare_data = build_version_compare_data(
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        left_artifact,
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.4"),
+                build="py313h456_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.4-py313h456_0.conda",
+            ),
+        ),
+        right_artifact,
+    )
+
+    assert any(diff.label == "Version" for diff in compare_data.metadata_diffs)
+    assert [line.kind for line in compare_data.dependencies] == [
+        "removed",
+        "added",
+        "removed",
+        "added",
+    ]
+    assert compare_data.dependencies[0].value == "python >=3.12"
+    assert compare_data.dependencies[1].value == "python >=3.13"
+    assert compare_data.dependencies[2].value == "numpy >=1.0"
+    assert compare_data.dependencies[3].value == "pydantic >=2"
+    assert compare_data.files[0].kind == "changed"
+    assert compare_data.files[0].value.startswith("bin/demo (content; size ")
+    assert compare_data.files[1].value == "info/about.json"
+    assert compare_data.files[1].kind == "removed"
+    assert compare_data.files[2].value == "lib/demo.py"
+    assert compare_data.files[2].kind == "added"
+
+
 def test_render_selected_version_details_includes_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
@@ -441,15 +548,43 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
+    class _FakePathType:
+        def __init__(self, name: str) -> None:
+            self.hardlink = name == "hardlink"
+            self.softlink = name == "softlink"
+            self.directory = name == "directory"
+
     class _FakePathEntry:
-        def __init__(self, relative_path: str, size_in_bytes: int | None) -> None:
+        def __init__(
+            self,
+            relative_path: str,
+            size_in_bytes: int | None,
+            sha256: bytes | None,
+            no_link: bool,
+            path_type: str,
+        ) -> None:
             self.relative_path = relative_path
             self.size_in_bytes = size_in_bytes
+            self.sha256 = sha256
+            self.no_link = no_link
+            self.path_type = _FakePathType(path_type)
 
     class _FakePathsJson:
         paths = [
-            _FakePathEntry("bin/demo", 1234),
-            _FakePathEntry("lib/python3.13/site-packages/demo.py", None),
+            _FakePathEntry(
+                "bin/demo",
+                1234,
+                bytes.fromhex("00" * 32),
+                False,
+                "hardlink",
+            ),
+            _FakePathEntry(
+                "lib/python3.13/site-packages/demo.py",
+                None,
+                None,
+                True,
+                "softlink",
+            ),
         ]
 
     async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
@@ -467,8 +602,20 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
 
     assert paths == [
-        PackageFile("bin/demo", 1234),
-        PackageFile("lib/python3.13/site-packages/demo.py", None),
+        PackageFile(
+            "bin/demo",
+            1234,
+            bytes.fromhex("00" * 32),
+            False,
+            "hardlink",
+        ),
+        PackageFile(
+            "lib/python3.13/site-packages/demo.py",
+            None,
+            None,
+            True,
+            "softlink",
+        ),
     ]
     assert cached_paths == paths
     assert calls == [url]
@@ -2457,6 +2604,89 @@ def test_action_channel_key_c_starts_channel_edit_mode() -> None:
     assert app._channel_draft == "custom-channel"
 
 
+def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    notifications: list[tuple[str, str | None, str | None]] = []
+
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, title=None, severity=None: notifications.append(
+            (message, title, severity)
+        ),
+    )
+
+    app.action_compare_key_c()
+
+    assert app._compare_selection == selection
+    assert notifications == [
+        (
+            "Stored demo 1.2.3 py313h123_0 [noarch] as compare A.",
+            "Compare",
+            None,
+        )
+    ]
+
+
+def test_action_compare_key_c_queues_compare_screen_on_second_selection(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    first = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    second = CompareSelection(
+        "other",
+        VersionEntry(
+            version=Version("2.0.0"),
+            build="py313h999_0",
+            build_number=0,
+            subdir="linux-64",
+            file_name="other-2.0.0-py313h999_0.conda",
+        ),
+    )
+    app._compare_selection = first
+    worker_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: second)
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app.action_compare_key_c()
+
+    assert worker_calls == [
+        {
+            "group": "version-compare",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._channel_edit_mode = True
@@ -2826,7 +3056,7 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -2854,7 +3084,7 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -3253,11 +3483,11 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     assert main_panel.subtitle_history == []
     assert status.updates[-1] == "0 entries across 0 platform."
     assert (
-        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Downloading {entry.file_name}... | Help: ?"
+        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Downloading {entry.file_name}... | Help: ?"
         in footer.updates
     )
     assert (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
         in footer.updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]
