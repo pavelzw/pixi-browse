@@ -1004,9 +1004,9 @@ def test_matchspec_screen_updates_inline_error_message(monkeypatch) -> None:
 
     class _FakeStatic:
         def __init__(self) -> None:
-            self.updates: list[str] = []
+            self.updates: list[Text] = []
 
-        def update(self, value: str) -> None:
+        def update(self, value: Text) -> None:
             self.updates.append(value)
 
     error_widget = _FakeStatic()
@@ -1020,8 +1020,8 @@ def test_matchspec_screen_updates_inline_error_message(monkeypatch) -> None:
     screen._update_validation_error("numpy[")
     screen._update_validation_error("python*")
 
-    assert error_widget.updates[0] != ""
-    assert error_widget.updates[-1] == ""
+    assert error_widget.updates[0].plain != ""
+    assert error_widget.updates[-1].plain == ""
 
 
 def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:

@@ -753,7 +753,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         return MatchSpec(query, exact_names_only=False)
 
     def _show_error(self, message: str) -> None:
-        self.query_one("#matchspec-error", Static).update(message)
+        self.query_one("#matchspec-error", Static).update(Text(message))
 
     def _update_validation_error(self, value: str) -> None:
         try:
