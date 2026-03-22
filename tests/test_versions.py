@@ -2507,9 +2507,10 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
     assert option_list.focused is True
 
 
-def test_apply_channel_selection_reapplies_active_matchspec(monkeypatch) -> None:
+def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._matchspec_query = "demo >=1"
+    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
 
     class _FakeOptionList:
         def __init__(self) -> None:
@@ -2529,7 +2530,6 @@ def test_apply_channel_selection_reapplies_active_matchspec(monkeypatch) -> None
             self.focused = True
 
     option_list = _FakeOptionList()
-    reapplications: list[str] = []
     notifications: list[str] = []
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
@@ -2539,23 +2539,18 @@ def test_apply_channel_selection_reapplies_active_matchspec(monkeypatch) -> None
     async def _fake_load_packages() -> bool:
         return True
 
-    async def _fake_reapply_active_matchspec() -> None:
-        reapplications.append(app._matchspec_query)
-
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     monkeypatch.setattr(app, "_show_main_placeholder", lambda value: None)
     monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
     monkeypatch.setattr(app, "_load_packages", _fake_load_packages)
-    monkeypatch.setattr(
-        app, "_reapply_active_matchspec", _fake_reapply_active_matchspec
-    )
     monkeypatch.setattr(
         app, "notify", lambda message, **kwargs: notifications.append(message)
     )
 
     asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
 
-    assert reapplications == ["demo >=1"]
+    assert app._matchspec_query == ""
+    assert app._matchspec_records_by_package == {}
     assert notifications == ["Switched to channel: prefix.dev/conda-forge"]
 
 

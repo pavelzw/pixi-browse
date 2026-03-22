@@ -378,6 +378,7 @@ class CondaMetadataTui(App[None]):
         self._channel_package_names = []
         self._all_package_names = []
         self._visible_package_names = []
+        self._matchspec_query = ""
         self._matchspec_records_by_package = {}
         self._clear_record_caches()
 
@@ -592,20 +593,6 @@ class CondaMetadataTui(App[None]):
                 severity="error",
             )
             return
-
-        if self._matchspec_query:
-            try:
-                await self._reapply_active_matchspec()
-            except (GatewayError, RuntimeError) as exc:
-                self._restore_channel_state(previous_state)
-                self._restore_ui_from_snapshot(previous_state)
-                package_list.focus()
-                self.notify(
-                    f"Failed to load channel: {channel_name} ({exc!s})",
-                    title="Channel",
-                    severity="error",
-                )
-                return
 
         self.notify(f"Switched to channel: {channel_name}", title="Channel")
 
