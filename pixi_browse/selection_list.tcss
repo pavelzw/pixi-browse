@@ -42,12 +42,12 @@ Screen {
 }
 
 #sidebar-list > .option-list--option-highlighted {
-    color: #ffffff;
-    background: #ec4899;
+    color: $text;
+    background: #fbcfe8;
     text-style: bold;
 }
 
-#sidebar-list:focus > .option-list--option-highlighted {
+#sidebar.-active-pane #sidebar-list > .option-list--option-highlighted {
     color: #ffffff;
     background: #ec4899;
     text-style: bold;
