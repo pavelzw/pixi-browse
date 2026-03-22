@@ -842,7 +842,7 @@ class CompareDetailsView(Vertical):
             "Dependencies",
             1,
             on_activate=self.set_active_section,
-            on_select_dependency_tab=self.select_dependency_tab,
+            on_select_dependency_tab=self._select_dependency_tab_from_click,
             id_prefix="compare",
         )
         yield DetailSection(
@@ -863,9 +863,17 @@ class CompareDetailsView(Vertical):
         self._active_section = (self._active_section + direction) % 3
         self._apply_section_state()
 
-    def select_dependency_tab(self, tab: DependencyTab) -> None:
+    def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
+        self.select_dependency_tab(tab, focus_view=True)
+
+    def select_dependency_tab(
+        self, tab: DependencyTab, *, focus_view: bool = False
+    ) -> None:
+        self.set_active_section(1)
         self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
         self._refresh_dependency_section()
+        if focus_view:
+            self.focus()
 
     def cycle_dependency_tab(self, direction: int) -> None:
         self._dependency_tab_index = (self._dependency_tab_index + direction) % len(

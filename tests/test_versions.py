@@ -2621,6 +2621,57 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
     assert focused == ["main"]
 
 
+def test_compare_select_dependency_tab_focuses_compare_view(monkeypatch) -> None:
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    active_sections: list[int] = []
+    refreshed: list[str] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+    monkeypatch.setattr(
+        view, "_refresh_dependency_section", lambda: refreshed.append("refresh")
+    )
+    monkeypatch.setattr(view, "focus", lambda: focused.append("compare"))
+
+    view.select_dependency_tab("constraints", focus_view=True)
+
+    assert active_sections == [1]
+    assert refreshed == ["refresh"]
+    assert focused == ["compare"]
+
+
 def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._selected_package = "demo"
