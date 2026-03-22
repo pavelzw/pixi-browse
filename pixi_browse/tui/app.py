@@ -39,7 +39,14 @@ from pixi_browse.search import fuzzy_score
 
 from .state import AboutUrls, ChannelStateSnapshot
 from .version_loader import VersionDataLoader
-from .widgets import DEPENDENCY_TABS, HelpScreen, MainPanel
+from .widgets import (
+    ACTIVE_SECTION_TITLE_STYLE,
+    DEPENDENCY_TABS,
+    INACTIVE_SECTION_TITLE_STYLE,
+    HelpScreen,
+    MainPanel,
+    SidebarPanel,
+)
 
 
 class CondaMetadataTui(App[None]):
@@ -47,7 +54,8 @@ class CondaMetadataTui(App[None]):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
-        Binding("f", "filter_key_f", "Filter"),
+        Binding("tab", "tab_key", show=False, priority=True),
+        Binding("shift+tab", "backtab_key", show=False, priority=True),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
         Binding("slash", "filter_key_slash", show=False),
@@ -102,14 +110,15 @@ class CondaMetadataTui(App[None]):
         self._last_package_highlight: int | None = None
         self._last_package_scroll_y = 0.0
         self._sidebar_vim_g_pending = False
+        self._sidebar_selection_by_keyboard = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
-            with Vertical(id="sidebar"):
-                yield Static("Packages", id="sidebar-title")
+            with SidebarPanel(id="sidebar"):
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
             yield MainPanel(id="main-panel")
+        yield Static(self._footer_text(), id="footer")
 
     async def on_mount(self) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -320,7 +329,6 @@ class CondaMetadataTui(App[None]):
 
         self._mode = "platforms"
         self._draft_selected_platform_names = set(self._selected_platform_names)
-        self.query_one("#sidebar-title", Static).update("Platforms")
         self._render_platform_options()
         self._update_platform_selection_status()
         self._update_platform_indicator()
@@ -431,20 +439,12 @@ class CondaMetadataTui(App[None]):
         package_list.disabled = False
 
         if self._mode == "packages":
-            self.query_one("#sidebar-title", Static).update("Packages")
             self._render_package_options()
             self._update_package_selection_status()
         elif self._mode == "versions":
-            title = (
-                f"Versions: {self._selected_package}"
-                if self._selected_package is not None
-                else "Versions"
-            )
-            self.query_one("#sidebar-title", Static).update(title)
             self._render_version_options()
             self._update_versions_status()
         else:
-            self.query_one("#sidebar-title", Static).update("Platforms")
             self._render_platform_options()
             self._update_platform_selection_status()
 
@@ -499,7 +499,6 @@ class CondaMetadataTui(App[None]):
             return
 
         self._mode = "packages"
-        self.query_one("#sidebar-title", Static).update("Packages")
         self._filter_packages()
         self._update_filter_indicator()
         self.query_one("#sidebar-list", OptionList).focus()
@@ -519,7 +518,6 @@ class CondaMetadataTui(App[None]):
 
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = True
-        self.query_one("#sidebar-title", Static).update("Packages")
         self._show_main_placeholder(f"# {escape(channel_name)}\n\nLoading repodata...")
         self._update_filter_indicator()
 
@@ -609,15 +607,20 @@ class CondaMetadataTui(App[None]):
 
     def _focus_main_panel(self) -> None:
         self.query_one("#main-panel", MainPanel).focus()
+        self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
         self.query_one("#sidebar-list", OptionList).focus()
+        self._update_filter_indicator()
 
     def _sidebar_is_focused(self) -> bool:
         return self.focused is self.query_one("#sidebar-list", OptionList)
 
     def _main_panel_is_focused(self) -> bool:
         return self.focused is self.query_one("#main-panel", MainPanel)
+
+    def _main_panel_shows_version_details(self) -> bool:
+        return self.query_one("#main-panel", MainPanel).showing_version_details()
 
     def _reset_main_panel_scroll(self) -> None:
         self.query_one("#main-panel", MainPanel).reset_scroll()
@@ -693,7 +696,7 @@ class CondaMetadataTui(App[None]):
             "App",
             [
                 ("?", "Show this help"),
-                ("/ or f", "Start package filter"),
+                ("/", "Start package filter"),
                 ("p", "Open platform selector"),
                 ("c", "Edit channel"),
                 ("d", "Download selected artifact in versions view"),
@@ -945,7 +948,6 @@ class CondaMetadataTui(App[None]):
         self._clear_version_state()
         self._previewed_version_key = None
         self._pending_preview_version_key = None
-        self.query_one("#sidebar-title", Static).update("Packages")
         self._filter_packages()
         self._update_filter_indicator()
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -980,7 +982,6 @@ class CondaMetadataTui(App[None]):
         }
         self._collapsed_version_subdirs.clear()
         self._mode = "versions"
-        self.query_one("#sidebar-title", Static).update(f"Versions: {package_name}")
         self._update_filter_indicator()
         self._render_version_options()
         self._update_versions_status()
@@ -1021,77 +1022,59 @@ class CondaMetadataTui(App[None]):
             reverse=True,
         )
 
-    def _filter_indicator_text(self) -> Text:
-        indicator = Text()
-        if self._filter_mode:
-            indicator.append("f", style="bold red")
-            indicator.append(f" {self._search_query}_", style="bold")
-        else:
-            indicator.append("filter", style="dim")
-            indicator.stylize("bold red", 0, 1)
-        return indicator
-
-    def _platform_indicator_text(self) -> Text:
-        indicator = Text("platform", style="dim")
-        indicator.stylize("bold red", 0, 1)
-        platforms = (
-            sorted(
-                self._draft_selected_platform_names,
-                key=platform_sort_key,
-            )
-            if self._mode == "platforms"
-            and self._draft_selected_platform_names is not None
-            else sorted(self._selected_platform_names, key=platform_sort_key)
-        )
-        platform_names = [str(platform) for platform in platforms]
-        if platform_names:
-            if len(platform_names) <= 2:
-                summary = "+".join(platform_names)
-            else:
-                summary = f"{platform_names[0]}+{len(platform_names) - 1}"
-            indicator.append(f" {summary}", style="bold")
-        return indicator
-
-    def _channel_indicator_text(self) -> Text:
-        indicator = Text("")
-        indicator.append("c", style="bold red")
-        indicator.append("hannel", style="dim")
+    def _footer_text(self) -> str:
         if self._channel_edit_mode:
-            indicator.append(f" {self._channel_draft}_", style="bold")
+            return f"Channel: {self._channel_draft}_"
+
+        if self._mode == "packages" and self._filter_mode:
+            return f"Search: {self._search_query}_"
+
+        footer = "Search: / | Platform: p | Channel: c"
+        if self._mode == "versions":
+            footer += f" | {self._download_indicator_text().plain}"
+        footer += " | Help: ?"
+        return footer
+
+    def _sidebar_title_text(self, *, selected: bool) -> Text:
+        if self._mode == "versions":
+            label = (
+                f"Versions: {self._selected_package}"
+                if self._selected_package is not None
+                else "Versions"
+            )
+        elif self._mode == "platforms":
+            label = "Platforms"
         else:
-            indicator.append(f" {self._channel_name}", style="bold")
-        return indicator
+            label = "Packages"
+        return Text(
+            f"[0] {label}",
+            style=ACTIVE_SECTION_TITLE_STYLE
+            if selected
+            else INACTIVE_SECTION_TITLE_STYLE,
+        )
 
     def _download_indicator_text(self) -> Text:
         if self._download_indicator_override is not None:
-            return Text(self._download_indicator_override)
+            return Text(self._download_indicator_override, style="dim")
 
-        indicator = Text("download", style="dim")
-        indicator.stylize("bold red", 0, 1)
-        return indicator
-
-    def _help_indicator_text(self) -> Text:
-        indicator = Text("? Help", style="dim")
-        indicator.stylize("bold red", 0, 1)
+        indicator = Text("Download: d", style="dim")
+        indicator.stylize("bold red", len("Download: "), len("Download: d"))
         return indicator
 
     def _set_download_indicator(self, value: str | None) -> None:
         self._download_indicator_override = value
+        self.query_one("#footer", Static).update(self._footer_text())
+        if self._mode == "versions":
+            self._update_versions_status()
+            return
         self._update_download_indicator()
 
     def _update_download_indicator(self) -> None:
-        main_panel = self.query_one("#main-panel")
+        main_panel = self.query_one("#main-panel", MainPanel)
         main_panel.styles.border_title_align = "left"
-        main_panel.border_title = self._channel_indicator_text()
+        main_panel.border_title = ""
         main_panel.styles.border_subtitle_align = "right"
-        if self._mode == "versions":
-            main_panel.border_subtitle = Text.assemble(
-                self._download_indicator_text(),
-                "  ",
-                self._help_indicator_text(),
-            )
-        else:
-            main_panel.border_subtitle = self._help_indicator_text()
+        main_panel.border_subtitle = ""
 
     def _selected_platforms_text(self) -> str:
         return ", ".join(
@@ -1128,22 +1111,11 @@ class CondaMetadataTui(App[None]):
 
     def _update_filter_indicator(self) -> None:
         sidebar = self.query_one("#sidebar", Vertical)
-        filter_indicator = self._filter_indicator_text()
-        right_indicator = self._platform_indicator_text()
-
-        spacing = 1
-        sidebar_width = sidebar.size.width
-        if sidebar_width > 0:
-            title_width = max(1, sidebar_width - 2)
-            spacing = max(
-                1,
-                title_width - len(filter_indicator.plain) - len(right_indicator.plain),
-            )
-
-        sidebar.border_title = Text.assemble(
-            filter_indicator, " " * spacing, right_indicator
+        sidebar.border_title = self._sidebar_title_text(
+            selected=self._sidebar_is_focused()
         )
         sidebar.border_subtitle = ""
+        self.query_one("#footer", Static).update(self._footer_text())
         self._update_download_indicator()
 
     def _update_platform_indicator(self) -> None:
@@ -1189,20 +1161,6 @@ class CondaMetadataTui(App[None]):
             exit_on_error=False,
         )
 
-    def action_filter_key_f(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("f")
-            return
-
-        if self._mode != "packages":
-            return
-
-        if not self._filter_mode:
-            self._set_filter_mode(True, reset_query=True)
-            return
-
-        self._append_filter_char("f")
-
     def action_filter_key_slash(self) -> None:
         if self._channel_edit_mode:
             self._append_channel_char("/")
@@ -1235,8 +1193,7 @@ class CondaMetadataTui(App[None]):
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("c")
             return
-        self._set_channel_edit_mode(True, reset_draft=False)
-        self._channel_draft = ""
+        self._set_channel_edit_mode(True, reset_draft=True)
         self._update_filter_indicator()
 
     def action_show_help(self) -> None:
@@ -1253,6 +1210,24 @@ class CondaMetadataTui(App[None]):
         self._set_active_main_section(1)
         self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
+
+    def action_tab_key(self) -> None:
+        if self._mode != "versions":
+            return
+        if not self._main_panel_shows_version_details():
+            return
+        if not self._main_panel_is_focused():
+            return
+        self._cycle_active_main_section(1)
+
+    def action_backtab_key(self) -> None:
+        if self._mode != "versions":
+            return
+        if not self._main_panel_shows_version_details():
+            return
+        if not self._main_panel_is_focused():
+            return
+        self._cycle_active_main_section(-1)
 
     def action_quit_or_type_q(self) -> None:
         if self._channel_edit_mode:
@@ -1283,7 +1258,7 @@ class CondaMetadataTui(App[None]):
     def on_key(self, event: Key) -> None:
         if self._channel_edit_mode:
             self._reset_sidebar_vim_pending()
-            if event.key in {"f", "p", "c", "slash", "q"}:
+            if event.key in {"p", "c", "slash", "q"}:
                 return
 
             if event.key == "enter":
@@ -1312,6 +1287,10 @@ class CondaMetadataTui(App[None]):
         if self._sidebar_is_focused() and not (
             self._mode == "packages" and self._filter_mode
         ):
+            if event.key == "enter":
+                self._reset_sidebar_vim_pending()
+                self._sidebar_selection_by_keyboard = True
+                return
             if event.character == "j":
                 self._reset_sidebar_vim_pending()
                 self._move_sidebar_highlight(1)
@@ -1353,20 +1332,53 @@ class CondaMetadataTui(App[None]):
 
         self._reset_sidebar_vim_pending()
 
-        if self._mode == "versions" and event.key == "tab":
+        if (
+            self._mode == "versions"
+            and self._main_panel_shows_version_details()
+            and self._main_panel_is_focused()
+            and event.key == "tab"
+        ):
             self._cycle_active_main_section(1)
-            self._focus_main_panel()
             event.stop()
             return
 
-        if self._mode == "versions" and event.key in {"shift+tab", "backtab"}:
+        if (
+            self._mode == "versions"
+            and self._main_panel_shows_version_details()
+            and self._main_panel_is_focused()
+            and event.key in {"shift+tab", "backtab"}
+        ):
             self._cycle_active_main_section(-1)
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and (
+                not self._main_panel_shows_version_details()
+                or not self._main_panel_is_focused()
+            )
+            and event.key in {"tab", "shift+tab", "backtab"}
+        ):
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and self._main_panel_shows_version_details()
+            and event.character in {"1", "2", "3"}
+        ):
+            self._set_active_main_section(int(event.character) - 1)
             self._focus_main_panel()
             event.stop()
             return
 
-        if self._mode == "versions" and event.character in {"1", "2", "3"}:
-            self._set_active_main_section(int(event.character) - 1)
+        if event.character == "0" and self._mode in {"packages", "versions"}:
+            self._focus_sidebar()
+            event.stop()
+            return
+
+        if event.character == "1" and self._mode in {"packages", "versions"}:
             self._focus_main_panel()
             event.stop()
             return
@@ -1433,7 +1445,7 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or self._mode != "packages":
             return
 
-        if event.key in {"f", "p", "c", "slash", "q"}:
+        if event.key in {"p", "c", "slash", "q"}:
             return
 
         if event.key == "backspace":
@@ -1575,6 +1587,9 @@ class CondaMetadataTui(App[None]):
     async def on_option_list_option_selected(
         self, event: OptionList.OptionSelected
     ) -> None:
+        selection_by_keyboard = self._sidebar_selection_by_keyboard
+        self._sidebar_selection_by_keyboard = False
+
         if event.option_list.id != "sidebar-list":
             return
 
@@ -1616,4 +1631,5 @@ class CondaMetadataTui(App[None]):
         version = row.entry
         package_name = self._selected_package or "<unknown>"
         self._request_selected_version_preview(package_name, version)
-        self._focus_main_panel()
+        if selection_by_keyboard:
+            self._focus_main_panel()

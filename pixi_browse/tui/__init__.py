@@ -17,10 +17,10 @@ from .widgets import (
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
-    TAB_HINT_STYLE,
     DetailSection,
     HelpScreen,
     MainPanel,
+    SidebarPanel,
     VersionDetailsView,
 )
 
@@ -39,7 +39,7 @@ __all__ = [
     "MainPanel",
     "PathsJson",
     "RunExportsJson",
-    "TAB_HINT_STYLE",
+    "SidebarPanel",
     "VersionDetailsView",
     "create_gateway",
     "fetch_raw_package_file_from_url",

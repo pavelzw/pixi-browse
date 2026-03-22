@@ -26,10 +26,14 @@ from pixi_browse.rendering import (
     render_selected_version_details,
 )
 from pixi_browse.tui import (
+    ACTIVE_SECTION_TITLE_STYLE,
+    INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
+    INACTIVE_TAB_STYLE,
     DetailSection,
     HelpScreen,
     MainPanel,
+    SidebarPanel,
     VersionDetailsView,
 )
 from pixi_browse.tui.state import AboutUrls
@@ -553,23 +557,16 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
 def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     app = CondaMetadataTui()
     focused: list[str] = []
-    title_updates: list[str] = []
 
     class _FakeOptionList:
         highlighted = 0
         scroll_y = 0.0
 
-    class _FakeStatic:
-        def update(self, value: str) -> None:
-            title_updates.append(value)
-
     option_list = _FakeOptionList()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
-        if selector == "#sidebar-list":
-            return option_list
-        assert selector == "#sidebar-title"
-        return _FakeStatic()
+        assert selector == "#sidebar-list"
+        return option_list
 
     async def _fake_get_package_records(package_name: str) -> list[_Record]:
         assert package_name == "demo"
@@ -593,7 +590,46 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     asyncio.run(app._open_versions("demo"))
 
     assert focused == []
-    assert title_updates == ["Versions: demo"]
+    assert app._sidebar_title_text(selected=False).plain == "[0] Versions: demo"
+
+
+def test_open_platform_selector_no_longer_queries_removed_sidebar_title(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+
+    class _FakeOptionList:
+        highlighted = 3
+        scroll_y = 7.0
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    rendered: list[str] = []
+    statuses: list[str] = []
+    indicators: list[str] = []
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_render_platform_options", lambda: rendered.append("ok"))
+    monkeypatch.setattr(
+        app, "_update_platform_selection_status", lambda: statuses.append("ok")
+    )
+    monkeypatch.setattr(
+        app, "_update_platform_indicator", lambda: indicators.append("ok")
+    )
+
+    app._open_platform_selector()
+
+    assert app._mode == "platforms"
+    assert app._last_package_highlight == 3
+    assert app._last_package_scroll_y == 7.0
+    assert rendered == ["ok"]
+    assert statuses == ["ok"]
+    assert indicators == ["ok"]
 
 
 def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
@@ -614,6 +650,37 @@ def test_on_key_l_focuses_main_panel_from_sidebar(monkeypatch) -> None:
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
 
     event = _FakeKeyEvent("l", "l")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_one_focuses_main_panel_in_packages_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("1", "1")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_one_focuses_main_panel_in_versions_preview(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("1", "1")
     app.on_key(event)  # type: ignore[arg-type]
 
     assert focused == ["main"]
@@ -978,6 +1045,81 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
     assert app._pending_preview_version_key == preview_key
 
 
+def test_selecting_version_entry_keeps_focus_in_sidebar(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    preview_calls: list[tuple[str, VersionEntry]] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version: preview_calls.append((package_name, version)),
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert preview_calls == [("demo", entry)]
+    assert focused == []
+
+
+def test_selecting_version_entry_with_keyboard_focuses_main_panel(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    app._sidebar_selection_by_keyboard = True
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
+    preview_calls: list[tuple[str, VersionEntry]] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_request_selected_version_preview",
+        lambda package_name, version: preview_calls.append((package_name, version)),
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert preview_calls == [("demo", entry)]
+    assert focused == ["main"]
+
+
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -988,6 +1130,8 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
         app, "_set_active_main_section", lambda value: selected_sections.append(value)
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
 
     event = _FakeKeyEvent("2", "2")
@@ -995,6 +1139,38 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
 
     assert selected_sections == [1]
     assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_zero_focuses_sidebar_in_versions_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    event = _FakeKeyEvent("0", "0")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
+    assert event.stopped is True
+
+
+def test_on_key_zero_focuses_sidebar_in_packages_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    focused: list[str] = []
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    event = _FakeKeyEvent("0", "0")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
     assert event.stopped is True
 
 
@@ -1014,6 +1190,8 @@ def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
         lambda value: tab_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
     monkeypatch.setattr(
         app,
@@ -1044,7 +1222,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
         if isinstance(span.style, Style)
     )
     assert any(
-        span.style.bold is False
+        span.style == INACTIVE_TAB_STYLE
         for span in text.spans
         if isinstance(span.style, Style)
         and span.style.meta
@@ -1071,15 +1249,17 @@ def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
 
 def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
     view = VersionDetailsView()
+    view._pane_selected = False
 
     view._active_section = 0
     inactive_header = view._render_dependency_header()
 
+    view._pane_selected = True
     view._active_section = 1
     active_header = view._render_dependency_header()
 
     assert "[ / ]" not in inactive_header.plain
-    assert "[ / ]" in active_header.plain
+    assert "[ / ]" not in active_header.plain
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
@@ -1103,6 +1283,46 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
         for span in header.spans
         if isinstance(span.style, Style)
     )
+    assert header.style == INACTIVE_SECTION_TITLE_STYLE
+
+
+def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> None:
+    view = VersionDetailsView()
+    view._active_section = 0
+    view._dependency_tab_index = 1
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("dep",),
+        constraints=("constraint",),
+        run_exports=("run export",),
+        files=("file",),
+    )
+
+    header = view._render_dependency_header()
+
+    assert any(
+        span.style == INACTIVE_TAB_STYLE
+        and header.plain[span.start : span.end] == "Run exports (1)"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+
+
+def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> None:
+    view = VersionDetailsView()
+    view._pane_selected = True
+    view._active_section = 1
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("dep",),
+        constraints=(),
+        run_exports=(),
+        files=("file",),
+    )
+
+    header = view._render_dependency_header()
+
+    assert header.style == ACTIVE_SECTION_TITLE_STYLE
 
 
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
@@ -1144,6 +1364,8 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
     monkeypatch.setattr(
         app,
         "query_one",
@@ -1159,7 +1381,6 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
-    focused: list[str] = []
     section_directions: list[int] = []
 
     monkeypatch.setattr(
@@ -1168,20 +1389,19 @@ def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
         lambda value: section_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
 
     event = _FakeKeyEvent("tab")
     app.on_key(event)  # type: ignore[arg-type]
 
     assert section_directions == [1]
-    assert focused == ["main"]
     assert event.stopped is True
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
-    focused: list[str] = []
     section_directions: list[int] = []
 
     monkeypatch.setattr(
@@ -1190,13 +1410,80 @@ def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) ->
         lambda value: section_directions.append(value),
     )
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
 
     event = _FakeKeyEvent("shift+tab")
     app.on_key(event)  # type: ignore[arg-type]
 
     assert section_directions == [-1]
-    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_on_key_tab_does_nothing_when_sidebar_is_active(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
+    assert event.stopped is True
+
+
+def test_on_key_tab_does_not_switch_panes_when_details_exist_but_main_is_inactive(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
+    assert event.stopped is True
+
+
+def test_on_key_tab_does_nothing_in_versions_preview_with_main_focus(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    section_directions: list[int] = []
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_active_main_section",
+        lambda value: section_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+
+    event = _FakeKeyEvent("tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert section_directions == []
     assert event.stopped is True
 
 
@@ -1354,7 +1641,48 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == [("constraints", True)]
+    assert selected_tabs == [("constraints", False)]
+    assert event.stopped is True
+
+
+def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
+    panel = MainPanel()
+    focused: list[str] = []
+
+    monkeypatch.setattr(panel, "focus", lambda: focused.append("main"))
+
+    event = _FakeClickEvent()
+    panel.on_click(event)  # type: ignore[arg-type]
+
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
+def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
+    panel = SidebarPanel()
+    focused: list[str] = []
+
+    class _FakeSidebarList:
+        def focus(self) -> None:
+            focused.append("sidebar")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeSidebarList:
+            assert selector == "#sidebar-list"
+            return _FakeSidebarList()
+
+    monkeypatch.setattr(
+        SidebarPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+
+    event = _FakeClickEvent()
+    panel.on_click(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
     assert event.stopped is True
 
 
@@ -1370,10 +1698,10 @@ def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
         )
     ]
     app._version_subdirs = ["noarch"]
-    updates: list[str] = []
+    updates: list[Text | str] = []
 
     class _FakeStatus:
-        def update(self, value: str) -> None:
+        def update(self, value: Text | str) -> None:
             updates.append(value)
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatus:
@@ -1384,9 +1712,7 @@ def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
     app._update_versions_status()
 
     assert len(updates) == 1
-    assert updates == [
-        "1 entries across 1 platform.",
-    ]
+    assert updates == ["1 entries across 1 platform."]
 
 
 def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
@@ -1402,6 +1728,9 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
             self.border_title: Text | str = ""
             self.border_subtitle: Text | str = ""
 
+        def showing_version_details(self) -> bool:
+            return False
+
     main_panel = _FakeMainPanel()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeMainPanel:
@@ -1412,20 +1741,8 @@ def test_update_download_indicator_in_versions_mode(monkeypatch) -> None:
     app._update_download_indicator()
 
     assert main_panel.styles.border_subtitle_align == "right"
-    assert isinstance(main_panel.border_title, Text)
-    assert main_panel.border_title.plain == "channel conda-forge"
-    assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "download  ? Help"
-    assert any(
-        str(span.style) == "bold red"
-        and main_panel.border_subtitle.plain[span.start : span.end] == "d"
-        for span in main_panel.border_subtitle.spans
-    )
-    assert any(
-        str(span.style) == "bold red"
-        and main_panel.border_subtitle.plain[span.start : span.end] == "?"
-        for span in main_panel.border_subtitle.spans
-    )
+    assert main_panel.border_title == ""
+    assert main_panel.border_subtitle == ""
 
 
 def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None:
@@ -1441,6 +1758,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
             self.border_title: Text | str = ""
             self.border_subtitle: Text | str = "existing"
 
+        def showing_version_details(self) -> bool:
+            return False
+
     main_panel = _FakeMainPanel()
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeMainPanel:
@@ -1450,11 +1770,9 @@ def test_update_download_indicator_cleared_outside_versions(monkeypatch) -> None
     monkeypatch.setattr(app, "query_one", _fake_query_one)
     app._update_download_indicator()
 
-    assert isinstance(main_panel.border_title, Text)
-    assert main_panel.border_title.plain == "channel conda-forge"
+    assert main_panel.border_title == ""
     assert main_panel.styles.border_subtitle_align == "right"
-    assert isinstance(main_panel.border_subtitle, Text)
-    assert main_panel.border_subtitle.plain == "? Help"
+    assert main_panel.border_subtitle == ""
 
 
 def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) -> None:
@@ -1473,17 +1791,41 @@ def test_action_channel_key_c_appends_filter_char_in_filter_mode(monkeypatch) ->
     assert appended == ["c"]
 
 
+def test_on_key_f_appends_filter_text_when_filter_mode_is_active(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    app._filter_mode = True
+    app._search_query = ""
+    filtered: list[str] = []
+    updated: list[str] = []
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
+    monkeypatch.setattr(
+        app, "_update_filter_indicator", lambda: updated.append("updated")
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+
+    event = _FakeKeyEvent("f", "f")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._search_query == "f"
+    assert filtered == ["filtered"]
+    assert updated == ["updated"]
+    assert event.stopped is True
+
+
 def test_action_channel_key_c_starts_channel_edit_mode() -> None:
     app = CondaMetadataTui()
     app._mode = "packages"
     app._filter_mode = False
     app._channel_name = "custom-channel"
+    app._channel_draft = "stale-draft"
     app._update_filter_indicator = lambda: None  # type: ignore[method-assign]
 
     app.action_channel_key_c()
 
     assert app._channel_edit_mode is True
-    assert app._channel_draft == ""
+    assert app._channel_draft == "custom-channel"
 
 
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
@@ -1510,14 +1852,48 @@ def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     ]
 
 
-def test_channel_indicator_text_shows_edit_draft() -> None:
+def test_footer_text_matches_redesigned_shortcuts() -> None:
+    app = CondaMetadataTui()
+
+    assert app._footer_text() == "Search: / | Platform: p | Channel: c | Help: ?"
+
+
+def test_footer_text_shows_download_hint_in_versions_mode() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+
+    assert (
+        app._footer_text()
+        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+    )
+
+
+def test_footer_text_shows_live_search_query_in_filter_mode() -> None:
+    app = CondaMetadataTui()
+    app._filter_mode = True
+    app._search_query = "polars"
+
+    assert app._footer_text() == "Search: polars_"
+
+
+def test_footer_text_shows_live_channel_draft_in_channel_edit_mode() -> None:
     app = CondaMetadataTui()
     app._channel_edit_mode = True
     app._channel_draft = "prefix.dev/conda-forge"
 
-    indicator = app._channel_indicator_text()
+    assert app._footer_text() == "Channel: prefix.dev/conda-forge_"
 
-    assert indicator.plain == "channel prefix.dev/conda-forge_"
+
+def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._filter_mode = True
+    app._search_query = "polars"
+
+    assert (
+        app._footer_text()
+        == "Search: / | Platform: p | Channel: c | Download: d | Help: ?"
+    )
 
 
 def test_on_paste_appends_sanitized_text_in_channel_edit_mode() -> None:
@@ -1633,26 +2009,38 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
                 self.subtitle_history.append(value)
 
     class _FakeStatus:
-        updates: list[str]
+        updates: list[Text | str]
 
         def __init__(self) -> None:
             self.updates = []
 
-        def update(self, value: str) -> None:
+        def update(self, value: Text | str) -> None:
+            self.updates.append(value)
+
+    class _FakeFooter:
+        updates: list[Text | str]
+
+        def __init__(self) -> None:
+            self.updates = []
+
+        def update(self, value: Text | str) -> None:
             self.updates.append(value)
 
     main_panel = _FakeMainPanel()
     status = _FakeStatus()
+    footer = _FakeFooter()
     notifications: list[str] = []
     captured_downloads: list[tuple[object, str, object]] = []
 
     def _fake_query_one(
         selector: str, _widget_type: object = None
-    ) -> _FakeMainPanel | _FakeStatus:
+    ) -> _FakeMainPanel | _FakeStatus | _FakeFooter:
         if selector == "#main-panel":
             return main_panel
-        assert selector == "#status"
-        return status
+        if selector == "#status":
+            return status
+        assert selector == "#footer"
+        return footer
 
     async def _fake_get_record_for_version_entry(
         package_name: str, _entry: VersionEntry
@@ -1697,6 +2085,13 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     ]
     assert destination.read_bytes() == b"artifact-bytes"
     assert app._download_in_progress is False
-    assert f"Downloading {entry.file_name}...  ? Help" in main_panel.subtitle_history
-    assert "download  ? Help" in main_panel.subtitle_history
+    assert main_panel.subtitle_history == []
+    assert status.updates[-1] == "0 entries across 0 platform."
+    assert (
+        f"Search: / | Platform: p | Channel: c | Downloading {entry.file_name}... | Help: ?"
+        in footer.updates
+    )
+    assert (
+        "Search: / | Platform: p | Channel: c | Download: d | Help: ?" in footer.updates
+    )
     assert notifications == [f"Downloaded successfully to {destination}"]

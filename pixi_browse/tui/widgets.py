@@ -16,12 +16,11 @@ DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "constraints",
     "run_exports",
 )
-ACTIVE_SECTION_TITLE_STYLE = Style(color="bright_blue", bold=True)
-INACTIVE_SECTION_TITLE_STYLE = Style(dim=True)
-ACTIVE_TAB_STYLE = Style(color="bright_blue", bold=True)
-INACTIVE_SELECTED_TAB_STYLE = Style(color="blue", bold=False)
-INACTIVE_TAB_STYLE = Style(color="default", bold=False)
-TAB_HINT_STYLE = Style(color="default", dim=True)
+ACTIVE_SECTION_TITLE_STYLE = Style(color="#ec4899", bold=True)
+INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
+ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
+INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
+INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 
 
 class DetailSection(Vertical):
@@ -47,7 +46,7 @@ class DetailSection(Vertical):
                     "#version-details-view", VersionDetailsView
                 ).select_dependency_tab(
                     *args,
-                    focus_main_panel=True,
+                    focus_main_panel=False,
                 )
                 event.stop()
                 return
@@ -96,6 +95,7 @@ class VersionDetailsView(Vertical):
         self._details: VersionDetailsData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
+        self._pane_selected = False
 
     def compose(self) -> ComposeResult:
         yield DetailSection("Metadata", 0)
@@ -109,6 +109,10 @@ class VersionDetailsView(Vertical):
 
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, 2))
+        self._apply_section_state()
+
+    def set_pane_selected(self, selected: bool) -> None:
+        self._pane_selected = selected
         self._apply_section_state()
 
     def activate_section(self, index: int, *, focus_main_panel: bool = False) -> None:
@@ -222,7 +226,7 @@ class VersionDetailsView(Vertical):
                     tab,
                     labels[tab],
                     active=tab == self._active_dependency_tab(),
-                    pane_active=self._active_section == 1,
+                    pane_active=self._pane_selected and self._active_section == 1,
                 )
             )
         return tab_text
@@ -230,7 +234,7 @@ class VersionDetailsView(Vertical):
     def _render_section_header(self, index: int, label: str) -> Text:
         style = (
             ACTIVE_SECTION_TITLE_STYLE
-            if index == self._active_section
+            if self._pane_selected and index == self._active_section
             else INACTIVE_SECTION_TITLE_STYLE
         )
         return Text(f"[{index + 1}] {label}", style=style)
@@ -238,8 +242,6 @@ class VersionDetailsView(Vertical):
     def _render_dependency_header(self) -> Text:
         header = self._render_section_header(1, "")
         header.append_text(self._render_dependency_tabs())
-        if self._active_section == 1:
-            header.append("  [ / ]", style=TAB_HINT_STYLE)
         return header
 
     @staticmethod
@@ -287,18 +289,57 @@ class MainPanel(Vertical):
         self.show_placeholder(
             "Main panel placeholder.\n\nSelect a package in the sidebar."
         )
+        self._set_placeholder_title(selected=False)
+
+    def on_click(self, event: Click) -> None:
+        self.focus()
+        event.stop()
 
     def show_placeholder(self, content: str | Text) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = True
+        self._set_placeholder_title(selected=self.has_focus)
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
     def show_version_details(self, details: VersionDetailsData) -> None:
-        self.query_one("#main-placeholder-scroll", VerticalScroll).display = False
+        placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
+        placeholder.display = False
+        placeholder.border_title = ""
         version_details = self.query_one("#version-details-view", VersionDetailsView)
         version_details.set_details(details)
+        version_details.set_pane_selected(self.has_focus)
         version_details.display = True
+
+    def _set_placeholder_title(self, *, selected: bool) -> None:
+        self.query_one("#main-placeholder-scroll", VerticalScroll).border_title = Text(
+            "[1] Details",
+            style=ACTIVE_SECTION_TITLE_STYLE
+            if selected
+            else INACTIVE_SECTION_TITLE_STYLE,
+        )
+
+    def on_focus(self) -> None:
+        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
+        if callable(update_filter_indicator):
+            update_filter_indicator()
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).set_pane_selected(True)
+        else:
+            self._set_placeholder_title(selected=True)
+
+    def on_blur(self) -> None:
+        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
+        if callable(update_filter_indicator):
+            update_filter_indicator()
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).set_pane_selected(False)
+        else:
+            self._set_placeholder_title(selected=False)
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -369,6 +410,9 @@ class MainPanel(Vertical):
 
     def _showing_version_details(self) -> bool:
         return self.query_one("#version-details-view", VersionDetailsView).display
+
+    def showing_version_details(self) -> bool:
+        return self._showing_version_details()
 
     def current_page_step(self) -> int:
         if self._showing_version_details():
@@ -458,6 +502,12 @@ class MainPanel(Vertical):
         if character == "h":
             self.app.query_one("#sidebar-list").focus()
             event.stop()
+
+
+class SidebarPanel(Vertical):
+    def on_click(self, event: Click) -> None:
+        self.app.query_one("#sidebar-list").focus()
+        event.stop()
 
 
 class HelpScreen(ModalScreen[None]):

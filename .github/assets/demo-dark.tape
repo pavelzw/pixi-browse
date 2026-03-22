@@ -47,6 +47,7 @@ Sleep 1s
 
 Type "c"
 Sleep 1s
+Backspace 11
 Type@250ms "bioconda" Enter
 Sleep 3s
 
