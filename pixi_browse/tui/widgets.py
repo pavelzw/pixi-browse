@@ -707,6 +707,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
 
     #matchspec-input > .input--selection {
         background: #ec4899;
+        color: #ffffff;
     }
 
     #matchspec-error {
