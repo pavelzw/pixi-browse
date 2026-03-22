@@ -1,4 +1,5 @@
 from click.utils import strip_ansi
+from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 from typer.testing import CliRunner
 
@@ -14,6 +15,7 @@ def test_help_includes_expected_options() -> None:
 
     assert result.exit_code == 0
     assert "--channel" in output
+    assert "--matchspec" in output
     assert "--platform" in output
     assert "--version" in output
 
@@ -37,7 +39,9 @@ def test_cli_passes_channel_and_platforms(monkeypatch) -> None:
             *,
             default_channel: str = "conda-forge",
             default_platforms: list[Platform] | None = None,
+            default_matchspec: MatchSpec | None = None,
         ) -> None:
+            del default_matchspec
             captured["channel"] = default_channel
             captured["platforms"] = {
                 str(platform) for platform in (default_platforms or [])
@@ -70,6 +74,42 @@ def test_cli_passes_channel_and_platforms(monkeypatch) -> None:
     }
 
 
+def test_cli_passes_matchspec(monkeypatch) -> None:
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    class _FakeTui:
+        def __init__(
+            self,
+            *,
+            default_channel: str = "conda-forge",
+            default_platforms: list[Platform] | None = None,
+            default_matchspec: MatchSpec | None = None,
+        ) -> None:
+            del default_platforms
+            captured["channel"] = default_channel
+            captured["matchspec"] = (
+                None if default_matchspec is None else str(default_matchspec)
+            )
+
+        def run(self) -> None:
+            captured["run_called"] = True
+
+    monkeypatch.setattr(entrypoint, "CondaMetadataTui", _FakeTui)
+
+    result = runner.invoke(
+        entrypoint.cli,
+        ["-c", "conda-forge", "-m", "numpy >=2"],
+    )
+
+    assert result.exit_code == 0
+    assert captured == {
+        "channel": "conda-forge",
+        "matchspec": "numpy >=2",
+        "run_called": True,
+    }
+
+
 def test_cli_exits_for_invalid_platform(monkeypatch) -> None:
     runner = CliRunner()
     captured: dict[str, object] = {}
@@ -88,4 +128,24 @@ def test_cli_exits_for_invalid_platform(monkeypatch) -> None:
     assert result.exit_code == 1
     assert "bad-platform" in result.output
     assert "not a known platform" in result.output
+    assert captured == {}
+
+
+def test_cli_exits_for_invalid_matchspec(monkeypatch) -> None:
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    class _FakeTui:
+        def __init__(self, **kwargs: object) -> None:
+            captured["kwargs"] = kwargs
+
+        def run(self) -> None:
+            captured["run_called"] = True
+
+    monkeypatch.setattr(entrypoint, "CondaMetadataTui", _FakeTui)
+
+    result = runner.invoke(entrypoint.cli, ["-m", "numpy["])
+
+    assert result.exit_code == 1
+    assert result.output.strip()
     assert captured == {}

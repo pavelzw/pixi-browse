@@ -617,6 +617,41 @@ def test_update_platform_selection_status_shows_select_all_shortcut(
     assert not message.spans
 
 
+def test_on_mount_applies_default_matchspec_after_loading_packages(monkeypatch) -> None:
+    matchspec = MatchSpec("numpy >=2", exact_names_only=False)
+    app = CondaMetadataTui(default_matchspec=matchspec)
+    applied: list[MatchSpec | None] = []
+
+    class _FakeOptionList:
+        def __init__(self) -> None:
+            self.disabled = False
+
+        def focus(self) -> None:
+            return None
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    async def _fake_load_packages() -> bool:
+        return True
+
+    async def _fake_apply_matchspec_query(value: MatchSpec | None) -> None:
+        applied.append(value)
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_load_packages", _fake_load_packages)
+    monkeypatch.setattr(app, "_apply_matchspec_query", _fake_apply_matchspec_query)
+
+    asyncio.run(app.on_mount())
+
+    assert option_list.disabled is True
+    assert applied == [matchspec]
+
+
 def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     app = CondaMetadataTui()
     focused: list[str] = []
