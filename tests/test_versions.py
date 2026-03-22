@@ -3426,8 +3426,8 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     asyncio.run(app._open_compare_screen(first_selection, second_selection))
 
     assert len(pushed) == 1
-    assert pushed[0].left_selection == second_selection
-    assert pushed[0].right_selection == first_selection
+    assert pushed[0].left_selection == first_selection
+    assert pushed[0].right_selection == second_selection
 
 
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:

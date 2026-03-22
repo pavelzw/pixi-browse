@@ -998,7 +998,6 @@ class CondaMetadataTui(App[None]):
                 pair[1].file_name,
                 pair[1].name.source,
             ),
-            reverse=True,
         )
         (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
             ordered_pairs
