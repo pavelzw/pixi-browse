@@ -319,6 +319,12 @@ class CondaMetadataTui(App[None]):
         )
         package_list.highlighted = 0
 
+    def _render_sidebar_loading_option(self, label: str) -> None:
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.clear_options()
+        package_list.add_option(label)
+        package_list.highlighted = 0
+
     def _open_platform_selector(self) -> None:
         if self._mode != "packages":
             return
@@ -517,6 +523,7 @@ class CondaMetadataTui(App[None]):
         self._clear_channel_loaded_state()
 
         package_list = self.query_one("#sidebar-list", OptionList)
+        self._render_sidebar_loading_option("Loading packages...")
         package_list.disabled = True
         self._show_main_placeholder(f"# {escape(channel_name)}\n\nLoading repodata...")
         self._update_filter_indicator()

@@ -20,12 +20,24 @@ Screen {
 
 #sidebar-list {
     height: 1fr;
-    border: solid $surface;
+    border: none;
     padding: 0 0 0 1;
     color: $text;
+    background: $background;
     scrollbar-size-vertical: 1;
     text-wrap: nowrap;
     text-overflow: ellipsis;
+}
+
+#sidebar-list:disabled {
+    color: $text;
+    background: $background;
+}
+
+#sidebar-list:disabled > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
 }
 
 #sidebar-list > .option-list--option-highlighted {

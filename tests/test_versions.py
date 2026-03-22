@@ -1852,6 +1852,65 @@ def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     ]
 
 
+def test_apply_channel_selection_renders_sidebar_loading_placeholder(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_name = "conda-forge"
+
+    class _FakeOptionList:
+        def __init__(self) -> None:
+            self.disabled = False
+            self.options: list[str] = []
+            self.highlighted: int | None = None
+            self.focused = False
+
+        def clear_options(self) -> None:
+            self.options.clear()
+
+        def add_option(self, option: str) -> None:
+            self.options.append(option)
+
+        def focus(self) -> None:
+            self.focused = True
+
+    option_list = _FakeOptionList()
+    placeholder_updates: list[str] = []
+    notifications: list[str] = []
+    restored: list[object] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    async def _fake_load_packages() -> bool:
+        assert option_list.options == ["Loading packages..."]
+        assert option_list.highlighted == 0
+        assert option_list.disabled is True
+        return False
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_snapshot_channel_state", lambda: "snapshot")
+    monkeypatch.setattr(app, "_clear_channel_loaded_state", lambda: None)
+    monkeypatch.setattr(app, "_show_main_placeholder", placeholder_updates.append)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_load_packages", _fake_load_packages)
+    monkeypatch.setattr(app, "_restore_channel_state", restored.append)
+    monkeypatch.setattr(app, "_restore_ui_from_snapshot", restored.append)
+    monkeypatch.setattr(
+        app, "notify", lambda message, **kwargs: notifications.append(message)
+    )
+
+    import asyncio
+
+    asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
+
+    assert placeholder_updates == ["# prefix.dev/conda-forge\n\nLoading repodata..."]
+    assert restored == ["snapshot", "snapshot"]
+    assert notifications == ["Failed to load channel: prefix.dev/conda-forge"]
+    assert option_list.focused is True
+
+
 def test_footer_text_matches_redesigned_shortcuts() -> None:
     app = CondaMetadataTui()
 
