@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import cast
 
+from rattler.exceptions import InvalidMatchSpecError
+from rattler.match_spec import MatchSpec
 from rich.style import Style
 from rich.text import Text
+from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 from pixi_browse.models import DependencyTab, VersionDetailsData
 
@@ -23,6 +27,14 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+
+
+@dataclass(frozen=True)
+class Empty:
+    pass
+
+
+EMPTY_MATCHSPEC_RESULT = Empty()
 
 
 class DetailSection(Vertical):
@@ -524,6 +536,100 @@ class SidebarPanel(Vertical):
         app._set_selected_pane("sidebar")
         app.query_one("#sidebar-list").focus()
         event.stop()
+
+
+class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
+    DEFAULT_CSS = """
+    MatchSpecScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #matchspec-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #matchspec-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #matchspec-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #matchspec-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, initial_value: str = "") -> None:
+        super().__init__()
+        self._initial_value = initial_value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="matchspec-dialog"):
+            yield Static("MatchSpec", id="matchspec-title")
+            yield Input(
+                value=self._initial_value,
+                placeholder="numpy >=2",
+                id="matchspec-input",
+            )
+            yield Static("Leave empty to query everything.", id="matchspec-help")
+            yield Static("", id="matchspec-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#matchspec-input", Input).focus()
+
+    @staticmethod
+    def validate_matchspec(value: str) -> MatchSpec | Empty:
+        query = value.strip()
+        if not query:
+            return EMPTY_MATCHSPEC_RESULT
+        return MatchSpec(query, exact_names_only=False)
+
+    def _show_error(self, message: str) -> None:
+        self.query_one("#matchspec-error", Static).update(message)
+
+    def _update_validation_error(self, value: str) -> None:
+        try:
+            self.validate_matchspec(value)
+        except InvalidMatchSpecError as exc:
+            self._show_error(str(exc))
+            return
+
+        self._show_error("")
+
+    @on(Input.Changed, "#matchspec-input")
+    def _validate_input(self, event: Input.Changed) -> None:
+        self._update_validation_error(event.value)
+
+    @on(Input.Submitted)
+    def _submit(self, event: Input.Submitted) -> None:
+        event.stop()
+        try:
+            result = self.validate_matchspec(event.value)
+        except InvalidMatchSpecError as exc:
+            self._show_error(str(exc))
+            return
+
+        self.dismiss(result)
+
+    async def action_dismiss(self, result: MatchSpec | Empty | None = None) -> None:
+        self.dismiss(result)
 
 
 class HelpScreen(ModalScreen[None]):

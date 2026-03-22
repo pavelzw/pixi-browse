@@ -6,7 +6,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, cast
 
-from rattler.exceptions import GatewayError
+from rattler.exceptions import GatewayError, InvalidMatchSpecError
+from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
@@ -31,8 +32,10 @@ from pixi_browse.models import (
 from pixi_browse.platform_utils import platform_sort_key
 from pixi_browse.rendering import render_package_preview
 from pixi_browse.repodata import (
+    MatchSpecQueryResult,
     discover_available_platforms,
     fetch_package_names,
+    query_matchspec_records,
     query_package_records,
 )
 from pixi_browse.search import fuzzy_score
@@ -43,8 +46,10 @@ from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
+    Empty,
     HelpScreen,
     MainPanel,
+    MatchSpecScreen,
     SidebarPanel,
 )
 
@@ -58,6 +63,7 @@ class CondaMetadataTui(App[None]):
         Binding("shift+tab", "backtab_key", show=False, priority=True),
         Binding("p", "platform_key_p", "Platform"),
         Binding("c", "channel_key_c", "Channel"),
+        Binding("m", "matchspec_key_m", "MatchSpec"),
         Binding("slash", "filter_key_slash", show=False),
         Binding("escape", "escape", "Back", show=False),
         Binding("q", "quit_or_type_q", "Quit"),
@@ -86,8 +92,11 @@ class CondaMetadataTui(App[None]):
         self._channel_name = channel_name
         self._mode: ViewMode = "packages"
         self._search_query = ""
+        self._channel_package_names: list[str] = []
         self._all_package_names: list[str] = []
         self._visible_package_names: list[str] = []
+        self._matchspec_query = ""
+        self._matchspec_records_by_package: dict[str, list[RepoDataRecord]] = {}
         self._current_versions: list[VersionEntry] = []
         self._version_subdirs: list[str] = []
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
@@ -136,11 +145,12 @@ class CondaMetadataTui(App[None]):
             status.update(
                 f"Downloading repodata for {self._selected_platforms_text()} (sharded)..."
             )
-            self._all_package_names = await self._fetch_package_names_with_gateway()
+            self._channel_package_names = await self._fetch_package_names_with_gateway()
         except (GatewayError, RuntimeError) as exc:
             status.update(f"Failed to load repodata: {exc!s}")
             return False
 
+        self._all_package_names = list(self._channel_package_names)
         self._visible_package_names = list(self._all_package_names)
         self._render_package_options()
 
@@ -365,9 +375,39 @@ class CondaMetadataTui(App[None]):
         self._reset_preview_state()
         self._platforms = []
         self._available_platform_names = []
+        self._channel_package_names = []
         self._all_package_names = []
         self._visible_package_names = []
+        self._matchspec_records_by_package = {}
         self._clear_record_caches()
+
+    def _reset_matchspec_selection(self) -> None:
+        self._matchspec_query = ""
+        self._matchspec_records_by_package = {}
+        self._mode = "packages"
+        self._draft_selected_platform_names = None
+        self._clear_version_state()
+        self._reset_preview_state()
+        self._all_package_names = list(self._channel_package_names)
+
+    async def _query_matchspec_records(
+        self, matchspec: MatchSpec
+    ) -> MatchSpecQueryResult:
+        return await query_matchspec_records(
+            gateway=self._gateway,
+            channel_name=self._channel_name,
+            platforms=self._platforms,
+            matchspec=matchspec,
+            record_sort_key=self._record_sort_key,
+        )
+
+    async def _reapply_active_matchspec(self) -> None:
+        if not self._matchspec_query:
+            return
+        result = await self._query_matchspec_records(
+            MatchSpec(self._matchspec_query, exact_names_only=False)
+        )
+        await self._apply_matchspec_result(self._matchspec_query, result)
 
     def _snapshot_channel_state(self) -> ChannelStateSnapshot:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -395,8 +435,14 @@ class CondaMetadataTui(App[None]):
             platforms=list(self._platforms),
             available_platform_names=list(self._available_platform_names),
             selected_platform_names=set(self._selected_platform_names),
+            channel_package_names=list(self._channel_package_names),
             all_package_names=list(self._all_package_names),
             visible_package_names=list(self._visible_package_names),
+            matchspec_query=self._matchspec_query,
+            matchspec_records_by_package={
+                package_name: list(records)
+                for package_name, records in self._matchspec_records_by_package.items()
+            },
             package_records_cache={
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
@@ -430,8 +476,11 @@ class CondaMetadataTui(App[None]):
         self._platforms = snapshot.platforms
         self._available_platform_names = snapshot.available_platform_names
         self._selected_platform_names = snapshot.selected_platform_names
+        self._channel_package_names = snapshot.channel_package_names
         self._all_package_names = snapshot.all_package_names
         self._visible_package_names = snapshot.visible_package_names
+        self._matchspec_query = snapshot.matchspec_query
+        self._matchspec_records_by_package = snapshot.matchspec_records_by_package
         self._package_records_cache = snapshot.package_records_cache
         self._version_loader.restore_caches(
             about_urls_cache=snapshot.version_about_urls_cache,
@@ -483,7 +532,7 @@ class CondaMetadataTui(App[None]):
             self._back_to_packages()
             return
 
-        previous_platforms = set(self._selected_platform_names)
+        previous_state = self._snapshot_channel_state()
         self._selected_platform_names = set(selected)
         self._draft_selected_platform_names = None
         self._update_platform_indicator()
@@ -495,18 +544,21 @@ class CondaMetadataTui(App[None]):
         self._reset_preview_state()
 
         try:
-            self._all_package_names = await self._fetch_package_names_with_gateway()
+            self._channel_package_names = await self._fetch_package_names_with_gateway()
+            self._all_package_names = list(self._channel_package_names)
+            if self._matchspec_query:
+                await self._reapply_active_matchspec()
+            else:
+                self._mode = "packages"
+                self._filter_packages()
         except (GatewayError, RuntimeError) as exc:
-            self._selected_platform_names = previous_platforms
-            self._update_platform_indicator()
+            self._restore_channel_state(previous_state)
+            self._restore_ui_from_snapshot(previous_state)
             self.query_one("#status", Static).update(
                 f"Failed to load selected platforms: {exc!s}"
             )
-            self._back_to_packages()
             return
 
-        self._mode = "packages"
-        self._filter_packages()
         self._update_filter_indicator()
         self.query_one("#sidebar-list", OptionList).focus()
 
@@ -540,6 +592,20 @@ class CondaMetadataTui(App[None]):
                 severity="error",
             )
             return
+
+        if self._matchspec_query:
+            try:
+                await self._reapply_active_matchspec()
+            except (GatewayError, RuntimeError) as exc:
+                self._restore_channel_state(previous_state)
+                self._restore_ui_from_snapshot(previous_state)
+                package_list.focus()
+                self.notify(
+                    f"Failed to load channel: {channel_name} ({exc!s})",
+                    title="Channel",
+                    severity="error",
+                )
+                return
 
         self.notify(f"Switched to channel: {channel_name}", title="Channel")
 
@@ -594,6 +660,14 @@ class CondaMetadataTui(App[None]):
         )
         self._package_records_cache[package_name] = records
         return records
+
+    async def _get_current_package_records(
+        self, package_name: str
+    ) -> list[RepoDataRecord]:
+        matchspec_records = self._matchspec_records_by_package.get(package_name)
+        if matchspec_records is not None:
+            return matchspec_records
+        return await self._get_package_records(package_name)
 
     def _show_main_placeholder(self, content: str | Text) -> None:
         self.query_one("#main-panel", MainPanel).show_placeholder(content)
@@ -713,6 +787,7 @@ class CondaMetadataTui(App[None]):
                 ("/", "Start package filter"),
                 ("p", "Open platform selector"),
                 ("c", "Edit channel"),
+                ("m", "Query MatchSpec"),
                 ("d", "Download selected artifact in versions view"),
                 ("q", "Quit"),
             ],
@@ -726,7 +801,7 @@ class CondaMetadataTui(App[None]):
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
     ) -> RepoDataRecord | None:
-        for record in await self._get_package_records(package_name):
+        for record in await self._get_current_package_records(package_name):
             if (
                 record.version == entry.version
                 and record.build == entry.build
@@ -909,7 +984,7 @@ class CondaMetadataTui(App[None]):
         self._previewed_package = package_name
 
     async def _load_and_render_package_preview(self, package_name: str) -> None:
-        records = await self._get_package_records(package_name)
+        records = await self._get_current_package_records(package_name)
         if self._mode != "packages":
             return
         if self._pending_preview_package != package_name:
@@ -919,6 +994,10 @@ class CondaMetadataTui(App[None]):
     def _request_package_preview(self, package_name: str) -> None:
         self._pending_preview_package = package_name
         if self._previewed_package == package_name:
+            return
+        matchspec_records = self._matchspec_records_by_package.get(package_name)
+        if matchspec_records is not None:
+            self._update_main_panel_for_package(package_name, matchspec_records)
             return
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
@@ -956,6 +1035,62 @@ class CondaMetadataTui(App[None]):
             self._pending_preview_package = None
             self._show_main_placeholder("No packages match the current selection.")
 
+    async def _apply_matchspec_result(
+        self, query: str, result: MatchSpecQueryResult
+    ) -> None:
+        self._matchspec_query = query
+        self._matchspec_records_by_package = {
+            package_name: list(records)
+            for package_name, records in result.records_by_package.items()
+        }
+        self._mode = "packages"
+        self._draft_selected_platform_names = None
+        self._clear_version_state()
+        self._reset_preview_state()
+        self._all_package_names = list(result.package_names)
+        self._filter_packages()
+        self._update_filter_indicator()
+        if (
+            len(result.package_names) == 1
+            and result.package_names[0] in self._visible_package_names
+        ):
+            await self._open_versions(result.package_names[0])
+            return
+        self._focus_sidebar()
+
+    async def _apply_matchspec_query(self, matchspec: MatchSpec | None) -> None:
+        if matchspec is None:
+            self._reset_matchspec_selection()
+            self._filter_packages()
+            self._update_filter_indicator()
+            self._focus_sidebar()
+            return
+
+        query = str(matchspec)
+
+        previous_state = self._snapshot_channel_state()
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.disabled = True
+        self._render_sidebar_loading_option("Querying MatchSpec...")
+        self._show_main_placeholder(
+            f"# MatchSpec\n\nRunning query for `{escape(query)}`..."
+        )
+        try:
+            result = await self._query_matchspec_records(matchspec)
+        except (GatewayError, RuntimeError) as exc:
+            self._restore_channel_state(previous_state)
+            self._restore_ui_from_snapshot(previous_state)
+            package_list.focus()
+            self.notify(
+                f"Failed to query MatchSpec: {exc!s}",
+                title="MatchSpec",
+                severity="error",
+            )
+            return
+
+        package_list.disabled = False
+        await self._apply_matchspec_result(query, result)
+
     def _back_to_packages(self) -> None:
         self._mode = "packages"
         self._draft_selected_platform_names = None
@@ -982,7 +1117,7 @@ class CondaMetadataTui(App[None]):
 
         self._selected_package = package_name
         self._current_versions = self._build_version_entries(
-            await self._get_package_records(package_name)
+            await self._get_current_package_records(package_name)
         )
         grouped_versions: dict[str, list[VersionEntry]] = defaultdict(list)
         for entry in self._current_versions:
@@ -1043,7 +1178,7 @@ class CondaMetadataTui(App[None]):
         if self._mode == "packages" and self._filter_mode:
             return f"Search: {self._search_query}_"
 
-        footer = "Search: / | Platform: p | Channel: c"
+        footer = "Search: / | Platform: p | Channel: c | MatchSpec: m"
         if self._mode == "versions":
             footer += f" | {self._download_indicator_text().plain}"
         footer += " | Help: ?"
@@ -1213,6 +1348,36 @@ class CondaMetadataTui(App[None]):
             return
         self._set_channel_edit_mode(True, reset_draft=True)
         self._update_filter_indicator()
+
+    def _handle_matchspec_result(self, result: MatchSpec | Empty | None) -> None:
+        if result is None:
+            return
+
+        if isinstance(result, Empty):
+            matchspec: MatchSpec | None = None
+        else:
+            assert isinstance(result, MatchSpec)
+            matchspec = result
+        self.run_worker(
+            self._apply_matchspec_query(matchspec),
+            group="matchspec-selection",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    def action_matchspec_key_m(self) -> None:
+        if self._channel_edit_mode:
+            self._append_channel_char("m")
+            return
+
+        if self._mode == "packages" and self._filter_mode:
+            self._append_filter_char("m")
+            return
+
+        self.push_screen(
+            MatchSpecScreen(self._matchspec_query),
+            self._handle_matchspec_result,
+        )
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
@@ -1593,6 +1758,10 @@ class CondaMetadataTui(App[None]):
         if row.kind == "back":
             self._previewed_version_key = None
             self._pending_preview_version_key = None
+            matchspec_records = self._matchspec_records_by_package.get(package_name)
+            if matchspec_records is not None:
+                self._update_main_panel_for_package(package_name, matchspec_records)
+                return
             cached = self._package_records_cache.get(package_name)
             if cached is not None:
                 self._update_main_panel_for_package(package_name, cached)
