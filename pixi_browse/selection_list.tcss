@@ -22,9 +22,32 @@ Screen {
     height: 1fr;
     border: solid $surface;
     padding: 0 0 0 1;
+    color: $text;
     scrollbar-size-vertical: 1;
     text-wrap: nowrap;
     text-overflow: ellipsis;
+}
+
+#sidebar-list > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
+}
+
+#sidebar-list:focus > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
+}
+
+#sidebar-list > .option-list--option-hover {
+    color: $text;
+    background: #fbcfe8;
+}
+
+#sidebar-list:focus > .option-list--option-hover {
+    color: $text;
+    background: #fbcfe8;
 }
 
 #status {
