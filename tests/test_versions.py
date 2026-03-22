@@ -3367,6 +3367,69 @@ def test_action_compare_key_c_queues_compare_screen_on_second_selection(
     ]
 
 
+def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    first_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    second_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.4"),
+            build="py313h456_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.4-py313h456_0.conda",
+        ),
+    )
+    first_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    second_record = _make_repo_data_record(
+        version="1.2.4",
+        build="py313h456_0",
+        file_name="demo-1.2.4-py313h456_0.conda",
+    )
+    first_artifact = build_version_artifact_data("demo", first_record)
+    second_artifact = build_version_artifact_data("demo", second_record)
+    pushed: list[VersionCompareData] = []
+
+    async def _fake_load_compare_artifact(
+        selection: CompareSelection,
+    ) -> tuple[RepoDataRecord, object] | None:
+        if selection == first_selection:
+            return first_record, first_artifact
+        if selection == second_selection:
+            return second_record, second_artifact
+        raise AssertionError(f"unexpected selection {selection}")
+
+    monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
+    monkeypatch.setattr(app, "_compare_selection", first_selection)
+    monkeypatch.setattr(app, "_compare_screen_open", False)
+    monkeypatch.setattr(app, "_update_footer_if_available", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen._compare_data),
+    )
+    monkeypatch.setattr(app, "notify", lambda *args, **kwargs: None)
+
+    asyncio.run(app._open_compare_screen(first_selection, second_selection))
+
+    assert len(pushed) == 1
+    assert pushed[0].left_selection == second_selection
+    assert pushed[0].right_selection == first_selection
+
+
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._channel_edit_mode = True

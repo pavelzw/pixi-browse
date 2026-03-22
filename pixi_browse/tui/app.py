@@ -947,33 +947,62 @@ class CondaMetadataTui(App[None]):
             preview_key=preview_key,
         )
 
+    async def _load_compare_artifact(
+        self, selection: CompareSelection
+    ) -> tuple[RepoDataRecord, VersionArtifactData] | None:
+        record = await self._get_record_for_version_entry(
+            selection.package_name, selection.entry
+        )
+        if record is None:
+            return None
+        artifact = await self._version_loader.load_version_artifact_data(
+            selection.package_name,
+            record,
+            preview_key=self._version_preview_key(
+                selection.package_name, selection.entry
+            ),
+        )
+        return record, artifact
+
     def _handle_compare_screen_dismissed(self, _result: None) -> None:
         self._clear_compare_state()
 
     async def _open_compare_screen(
         self, left_selection: CompareSelection, right_selection: CompareSelection
     ) -> None:
-        left_artifact = await self._load_version_artifact_data(
-            left_selection.package_name,
-            left_selection.entry,
-        )
-        right_artifact = await self._load_version_artifact_data(
-            right_selection.package_name,
-            right_selection.entry,
-        )
+        left_result = await self._load_compare_artifact(left_selection)
+        right_result = await self._load_compare_artifact(right_selection)
 
-        if left_artifact is None or right_artifact is None:
+        if left_result is None or right_result is None:
             self.notify(
                 "Unable to load one of the selected artifacts for comparison.",
                 title="Compare",
                 severity="error",
             )
             return
+        (left_record, left_artifact) = left_result
+        (right_record, right_artifact) = right_result
 
         if self._compare_selection != left_selection:
             return
         if self._compare_screen_open:
             return
+
+        ordered_pairs = [
+            (left_selection, left_record, left_artifact),
+            (right_selection, right_record, right_artifact),
+        ]
+        ordered_pairs.sort(
+            key=lambda pair: (
+                *self._record_sort_key(pair[1]),
+                pair[1].file_name,
+                pair[1].name.source,
+            ),
+            reverse=True,
+        )
+        (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
+            ordered_pairs
+        )
 
         compare_data = build_version_compare_data(
             left_selection,
