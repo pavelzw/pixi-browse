@@ -16,10 +16,10 @@ DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "constraints",
     "run_exports",
 )
-ACTIVE_SECTION_TITLE_STYLE = Style(color="bright_blue", bold=True)
+ACTIVE_SECTION_TITLE_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
-ACTIVE_TAB_STYLE = Style(color="bright_blue", bold=True)
-INACTIVE_SELECTED_TAB_STYLE = Style(color="bright_blue", bold=False)
+ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
+INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 
 

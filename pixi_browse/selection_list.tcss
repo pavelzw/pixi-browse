@@ -15,7 +15,7 @@ Screen {
 }
 
 #sidebar:focus-within {
-    border: round $accent;
+    border: round #ec4899;
 }
 
 #sidebar-list {
@@ -51,7 +51,7 @@ Screen {
 }
 
 #main-panel:focus #main-placeholder-scroll {
-    border: round $accent;
+    border: round #ec4899;
 }
 
 #main-placeholder {
@@ -81,7 +81,7 @@ Screen {
 }
 
 #main-panel:focus .detail-section.-active {
-    border: round $accent;
+    border: round #ec4899;
 }
 
 .detail-scroll {
