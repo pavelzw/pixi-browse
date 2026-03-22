@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import yaml
 from rattler.networking import Client
-from rattler.package import RunExportsJson
+from rattler.package import AboutJson, PathsJson, RunExportsJson
+from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.repo_data import RepoDataRecord
 
-from pixi_browse.models import VersionDetailsData, VersionPreviewKey
+from pixi_browse.models import PackageFile, VersionDetailsData, VersionPreviewKey
 from pixi_browse.rendering import build_version_details_data
 
 from .state import AboutUrls
@@ -15,7 +16,7 @@ class VersionDataLoader:
     def __init__(self, *, client: Client) -> None:
         self._client = client
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
-        self.paths_cache: dict[VersionPreviewKey, list[str]] = {}
+        self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
 
     def clear_caches(self) -> None:
@@ -27,7 +28,7 @@ class VersionDataLoader:
         self,
         *,
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
-        paths_cache: dict[VersionPreviewKey, list[str]],
+        paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         details_cache: dict[VersionPreviewKey, VersionDetailsData],
     ) -> None:
         self.about_urls_cache.clear()
@@ -55,15 +56,19 @@ class VersionDataLoader:
 
     async def get_package_paths(
         self, preview_key: VersionPreviewKey, url: str
-    ) -> list[str]:
+    ) -> list[PackageFile]:
         cached = self.paths_cache.get(preview_key)
         if cached is not None:
             return cached
 
-        from . import PathsJson
-
         paths_json = await PathsJson.from_remote_url(self._client, url)
-        paths = [str(path.relative_path) for path in paths_json.paths]
+        paths = [
+            PackageFile(
+                path=str(path.relative_path),
+                size_in_bytes=path.size_in_bytes,
+            )
+            for path in paths_json.paths
+        ]
         self.paths_cache[preview_key] = paths
         return paths
 
@@ -73,8 +78,6 @@ class VersionDataLoader:
         cached = self.about_urls_cache.get(preview_key)
         if cached is not None:
             return cached
-
-        from . import AboutJson, fetch_raw_package_file_from_url
 
         about_json = await AboutJson.from_remote_url(self._client, url)
         recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
@@ -127,8 +130,6 @@ class VersionDataLoader:
         return about_urls
 
     async def get_run_exports(self, url: str) -> RunExportsJson:
-        from . import RunExportsJson
-
         return await RunExportsJson.from_remote_url(self._client, url)
 
     async def load_version_details(
@@ -142,7 +143,7 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        package_paths: list[str] | None = None
+        package_paths: list[PackageFile] | None = None
         package_paths_error: str | None = None
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None

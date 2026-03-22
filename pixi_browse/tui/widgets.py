@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, cast
 
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
@@ -16,6 +16,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
 from pixi_browse.models import DependencyTab, VersionDetailsData
+from pixi_browse.rendering import format_human_byte_size
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -40,10 +41,20 @@ class DependencyListEntry:
     matchspec: str | None
 
 
+@dataclass(frozen=True)
+class FileListEntry:
+    label: str
+    path: str | None
+    size_in_bytes: int | None = None
+
+
 EMPTY_MATCHSPEC_RESULT = Empty()
 
 
-class DependencyOptionList(OptionList):
+FileAction = Literal["download", "preview"]
+
+
+class DetailOptionList(OptionList):
     can_focus = False
 
 
@@ -65,7 +76,7 @@ class DetailSection(Vertical):
 
     def compose(self) -> ComposeResult:
         if self._use_option_list:
-            yield DependencyOptionList(
+            yield DetailOptionList(
                 id=f"detail-option-list-{self._index}",
                 classes="detail-option-list",
                 markup=False,
@@ -106,7 +117,7 @@ class DetailSection(Vertical):
 
     def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
         option_list = self.query_one(
-            f"#detail-option-list-{self._index}", DependencyOptionList
+            f"#detail-option-list-{self._index}", DetailOptionList
         )
         option_list.clear_options()
         option_list.add_options(labels)
@@ -147,9 +158,11 @@ class VersionDetailsView(Vertical):
         self._dependency_entries: dict[
             DependencyTab, tuple[DependencyListEntry, ...]
         ] = {tab: () for tab in DEPENDENCY_TABS}
+        self._file_entries: tuple[FileListEntry, ...] = ()
         self._dependency_highlighted: dict[DependencyTab, int] = {
             tab: 0 for tab in DEPENDENCY_TABS
         }
+        self._file_highlighted = 0
         # Duplicate this state so we can avoid updating on every Textual
         # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
@@ -157,11 +170,12 @@ class VersionDetailsView(Vertical):
     def compose(self) -> ComposeResult:
         yield DetailSection("Metadata", 0)
         yield DetailSection("Dependencies", 1, show_tabs=True, use_option_list=True)
-        yield DetailSection("Files", 2)
+        yield DetailSection("Files", 2, use_option_list=True)
 
     def set_details(self, details: VersionDetailsData) -> None:
         self._details = details
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
+        self._file_highlighted = 0
         self.display = True
         self._refresh_sections()
 
@@ -204,6 +218,9 @@ class VersionDetailsView(Vertical):
         if self.dependency_section_is_active():
             self._set_dependency_highlight(0)
             return
+        if self.file_section_is_active():
+            self._set_file_highlight(0)
+            return
         self._section(self._active_section).scroll_body_home()
 
     def scroll_end_active(self) -> None:
@@ -212,22 +229,36 @@ class VersionDetailsView(Vertical):
             if entries:
                 self._set_dependency_highlight(len(entries) - 1)
             return
+        if self.file_section_is_active():
+            file_entries = self._current_file_entries()
+            if file_entries:
+                self._set_file_highlight(len(file_entries) - 1)
+            return
         self._section(self._active_section).scroll_body_end()
 
     def scroll_active(self, delta: float) -> None:
         if self.dependency_section_is_active():
             self._move_dependency_highlight(int(delta))
             return
+        if self.file_section_is_active():
+            self._move_file_highlight(int(delta))
+            return
         self._section(self._active_section).scroll_body_by(delta)
 
     def active_page_step(self) -> int:
         if self.dependency_section_is_active():
-            option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+            option_list = self.query_one("#detail-option-list-1", DetailOptionList)
+            return max(1, option_list.size.height)
+        if self.file_section_is_active():
+            option_list = self.query_one("#detail-option-list-2", DetailOptionList)
             return max(1, option_list.size.height)
         return self._section(self._active_section).page_step()
 
     def dependency_section_is_active(self) -> bool:
         return self._active_section == 1
+
+    def file_section_is_active(self) -> bool:
+        return self._active_section == 2
 
     def dependency_matchspec_at(self, index: int) -> str | None:
         entries = self._current_dependency_entries()
@@ -236,11 +267,37 @@ class VersionDetailsView(Vertical):
         return entries[index].matchspec
 
     def selected_dependency_matchspec(self) -> str | None:
-        option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+        option_list = self.query_one("#detail-option-list-1", DetailOptionList)
         highlighted = option_list.highlighted
         if highlighted is None:
             return None
         return self.dependency_matchspec_at(highlighted)
+
+    def file_path_at(self, index: int) -> str | None:
+        entries = self._current_file_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].path
+
+    def selected_file_path(self) -> str | None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_path_at(highlighted)
+
+    def file_size_at(self, index: int) -> int | None:
+        entries = self._current_file_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].size_in_bytes
+
+    def selected_file_size_in_bytes(self) -> int | None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_size_at(highlighted)
 
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
@@ -267,7 +324,11 @@ class VersionDetailsView(Vertical):
         self._refresh_dependency_section()
 
         self._section(2).update_header(self._render_section_header(2, "Files"))
-        self._section(2).update_body("\n".join(self._details.files))
+        self._file_entries = self._file_entries_for_details()
+        self._section(2).update_options(
+            [entry.label for entry in self._file_entries],
+            highlighted=self._file_highlighted,
+        )
 
         self._apply_section_state()
 
@@ -318,7 +379,7 @@ class VersionDetailsView(Vertical):
         )
 
     def _move_dependency_highlight(self, delta: int) -> None:
-        option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+        option_list = self.query_one("#detail-option-list-1", DetailOptionList)
         highlighted = option_list.highlighted or 0
         self._set_dependency_highlight(highlighted + delta)
 
@@ -330,7 +391,45 @@ class VersionDetailsView(Vertical):
         active_tab = self._active_dependency_tab()
         self._dependency_highlighted[active_tab] = highlighted
         self.query_one(
-            "#detail-option-list-1", DependencyOptionList
+            "#detail-option-list-1", DetailOptionList
+        ).highlighted = highlighted
+
+    def _current_file_entries(self) -> tuple[FileListEntry, ...]:
+        return self._file_entries
+
+    def _file_entries_for_details(self) -> tuple[FileListEntry, ...]:
+        assert self._details is not None
+        if self._details.file_paths:
+            return tuple(
+                FileListEntry(
+                    label=(
+                        f"{package_file.path}"
+                        f" ({format_human_byte_size(package_file.size_in_bytes)})"
+                        if package_file.size_in_bytes is not None
+                        else package_file.path
+                    ),
+                    path=package_file.path,
+                    size_in_bytes=package_file.size_in_bytes,
+                )
+                for package_file in self._details.file_paths
+            )
+        return tuple(
+            FileListEntry(label=line, path=None) for line in self._details.files
+        )
+
+    def _move_file_highlight(self, delta: int) -> None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted or 0
+        self._set_file_highlight(highlighted + delta)
+
+    def _set_file_highlight(self, index: int) -> None:
+        entries = self._current_file_entries()
+        if not entries:
+            return
+        highlighted = max(0, min(index, len(entries) - 1))
+        self._file_highlighted = highlighted
+        self.query_one(
+            "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
     def _render_dependency_tabs(self) -> Text:
@@ -502,6 +601,11 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).dependency_section_is_active()
 
+    def file_section_is_active(self) -> bool:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).file_section_is_active()
+
     def selected_dependency_matchspec(self) -> str | None:
         return self.query_one(
             "#version-details-view", VersionDetailsView
@@ -511,6 +615,26 @@ class MainPanel(Vertical):
         return self.query_one(
             "#version-details-view", VersionDetailsView
         ).dependency_matchspec_at(index)
+
+    def selected_file_path(self) -> str | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_file_path()
+
+    def selected_file_size_in_bytes(self) -> int | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_file_size_in_bytes()
+
+    def file_path_at(self, index: int) -> str | None:
+        return self.query_one("#version-details-view", VersionDetailsView).file_path_at(
+            index
+        )
+
+    def file_size_at(self, index: int) -> int | None:
+        return self.query_one("#version-details-view", VersionDetailsView).file_size_at(
+            index
+        )
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -781,6 +905,179 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
 
     async def action_dismiss(self, result: MatchSpec | Empty | None = None) -> None:
         self.dismiss(result)
+
+
+class FileActionScreen(ModalScreen[FileAction | None]):
+    DEFAULT_CSS = """
+    FileActionScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #file-action-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #file-action-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #file-action-path {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #file-action-list {
+        border: none;
+        background: $background;
+        padding: 0 0 0 1;
+    }
+
+    #file-action-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #file-action-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    _ACTIONS: tuple[tuple[FileAction, str], ...] = (
+        ("preview", "Preview"),
+        ("download", "Download as file"),
+    )
+
+    def __init__(self, file_path: str) -> None:
+        super().__init__()
+        self._file_path = file_path
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-action-dialog"):
+            yield Static("File Action", id="file-action-title")
+            yield Static(self._file_path, id="file-action-path", markup=False)
+            yield OptionList(
+                *(label for _, label in self._ACTIONS),
+                id="file-action-list",
+                markup=False,
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#file-action-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#file-action-list")
+    def _select_action(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        action, _label = self._ACTIONS[event.option_index]
+        self.dismiss(action)
+
+    async def action_dismiss(self, result: FileAction | None = None) -> None:
+        self.dismiss(result)
+
+
+class FilePreviewScreen(ModalScreen[None]):
+    DEFAULT_CSS = """
+    FilePreviewScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #file-preview-dialog {
+        width: 120;
+        max-width: 95%;
+        height: 90%;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #file-preview-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #file-preview-scroll {
+        height: 1fr;
+        border: round #ec4899;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+    }
+
+    #file-preview-body {
+        color: $text;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+        Binding("up,k", "scroll_up", show=False),
+        Binding("down,j", "scroll_down", show=False),
+        Binding("pageup,ctrl+u", "page_up", show=False),
+        Binding("pagedown,ctrl+d", "page_down", show=False),
+        Binding("home", "scroll_home", show=False),
+        Binding("end", "scroll_end", show=False),
+        Binding("g", "scroll_home", show=False),
+        Binding("G", "scroll_end", show=False),
+    ]
+
+    def __init__(self, title: str, content: str) -> None:
+        super().__init__()
+        self._title = title
+        self._content = content
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-preview-dialog"):
+            yield Static(self._title, id="file-preview-title", markup=False)
+            with VerticalScroll(id="file-preview-scroll"):
+                yield Static(self._content, id="file-preview-body", markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#file-preview-scroll", VerticalScroll).focus()
+
+    def _scroll(self) -> VerticalScroll:
+        return self.query_one("#file-preview-scroll", VerticalScroll)
+
+    def action_scroll_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=max(0, scroll.scroll_y - 1), animate=False)
+
+    def action_scroll_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + 1, animate=False)
+
+    def action_page_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(
+            y=max(0, scroll.scroll_y - max(1, scroll.size.height)), animate=False
+        )
+
+    def action_page_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + max(1, scroll.size.height), animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._scroll().scroll_home(animate=False, immediate=True, x_axis=False)
+
+    def action_scroll_end(self) -> None:
+        self._scroll().scroll_end(animate=False)
+
+    async def action_dismiss(self, result: None = None) -> None:
+        del result
+        self.dismiss(None)
 
 
 class HelpScreen(ModalScreen[None]):
