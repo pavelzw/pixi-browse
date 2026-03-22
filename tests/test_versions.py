@@ -613,7 +613,7 @@ def test_update_platform_selection_status_shows_select_all_shortcut(
     assert status.messages
     message = status.messages[-1]
     assert isinstance(message, Text)
-    assert message.plain.endswith("Select all platforms: a")
+    assert message.plain.endswith("All platforms: a")
     assert not message.spans
 
 
