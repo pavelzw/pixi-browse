@@ -1404,6 +1404,7 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and event.character == "["
+            and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(-1)
@@ -1414,6 +1415,7 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and event.character == "]"
+            and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(1)

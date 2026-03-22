@@ -1177,6 +1177,7 @@ def test_on_key_zero_focuses_sidebar_in_packages_mode(monkeypatch) -> None:
 def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
+    app._selected_pane = "main"
     focused: list[str] = []
     tab_directions: list[int] = []
 
@@ -1358,6 +1359,7 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 ) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
+    app._selected_pane = "main"
 
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
@@ -1375,6 +1377,39 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     event = _FakeKeyEvent("]", "]")
     app.on_key(event)  # type: ignore[arg-type]
 
+    assert event.stopped is False
+
+
+def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_pane = "sidebar"
+    cycled: list[int] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "_cycle_main_dependency_tab",
+        lambda value: cycled.append(value),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("[", "[")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert cycled == []
     assert event.stopped is False
 
 
