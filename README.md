@@ -44,7 +44,7 @@ uvx pixi-browse
 ## Usage
 
 ```bash
-# Browse conda-forge (default)
+# Browse conda-forge across all platforms (default)
 pixi-browse
 
 # Browse a different channel

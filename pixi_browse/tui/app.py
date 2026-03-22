@@ -183,21 +183,7 @@ class CondaMetadataTui(App[None]):
         if self._selected_platform_names:
             return
 
-        self._selected_platform_names = self._default_platform_selection()
-
-    def _default_platform_selection(self) -> set[Platform]:
-        current_platform = Platform.current()
-        noarch_platform = Platform("noarch")
-        if current_platform in self._available_platform_names:
-            defaults = {current_platform}
-            if noarch_platform in self._available_platform_names:
-                defaults.add(noarch_platform)
-            return defaults
-
-        if noarch_platform in self._available_platform_names:
-            return {noarch_platform}
-
-        return {self._available_platform_names[0]}
+        self._selected_platform_names = set(self._available_platform_names)
 
     async def _fetch_package_names_with_gateway(self) -> list[str]:
         await self._ensure_available_platforms()
@@ -1254,16 +1240,12 @@ class CondaMetadataTui(App[None]):
 
         message = Text()
         message.append(
-            f"{selected_count} platforms selected. Press Space to select/deselect a platform. Press Enter to apply.\n"
+            f"{selected_count} platforms selected.\nSelect/deselect: Space\nApply: Enter\n"
         )
         if selected == all_platforms:
-            message.append("Select def")
-            message.append("a", style="bold red")
-            message.append("ult platforms")
+            message.append("All platforms selected")
         else:
-            message.append("Select ")
-            message.append("a", style="bold red")
-            message.append("ll platforms")
+            message.append("All platforms: a")
 
         self.query_one("#status", Static).update(message)
 
@@ -1606,24 +1588,21 @@ class CondaMetadataTui(App[None]):
             if not self._available_platform_names:
                 return
             all_platforms = set(self._available_platform_names)
-            defaults = self._default_platform_selection()
             draft = self._draft_selected_platform_names
             if draft is None:
                 draft = set(self._selected_platform_names)
 
-            if draft == all_platforms:
-                self._draft_selected_platform_names = set(defaults)
-            else:
+            if draft != all_platforms:
                 self._draft_selected_platform_names = set(all_platforms)
-            package_list = self.query_one("#sidebar-list", OptionList)
-            highlighted = package_list.highlighted
-            self._render_platform_options()
-            if highlighted is not None:
-                self.query_one("#sidebar-list", OptionList).highlighted = min(
-                    highlighted, len(self._available_platform_names) - 1
-                )
-            self._update_platform_indicator()
-            self._update_platform_selection_status()
+                package_list = self.query_one("#sidebar-list", OptionList)
+                highlighted = package_list.highlighted
+                self._render_platform_options()
+                if highlighted is not None:
+                    self.query_one("#sidebar-list", OptionList).highlighted = min(
+                        highlighted, len(self._available_platform_names) - 1
+                    )
+                self._update_platform_indicator()
+                self._update_platform_selection_status()
             event.stop()
             return
 
