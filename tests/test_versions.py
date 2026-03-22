@@ -553,12 +553,68 @@ def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
 
     asyncio.run(app._ensure_available_platforms())
 
-    expected = {Platform("noarch")}
-    current_platform = Platform.current()
-    if current_platform in app._available_platform_names:
-        expected.add(current_platform)
+    assert app._selected_platform_names == {Platform("linux-64"), Platform("noarch")}
 
-    assert app._selected_platform_names == expected
+
+def test_update_platform_selection_status_shows_all_selected_message(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._selected_platform_names = {Platform("linux-64"), Platform("noarch")}
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.messages: list[object] = []
+
+        def update(self, value: object) -> None:
+            self.messages.append(value)
+
+    status = _FakeStatus()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatus:
+        assert selector == "#status"
+        return status
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+
+    app._update_platform_selection_status()
+
+    assert status.messages
+    message = status.messages[-1]
+    assert isinstance(message, Text)
+    assert message.plain.endswith("All platforms selected")
+
+
+def test_update_platform_selection_status_shows_select_all_shortcut(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._selected_platform_names = {Platform("linux-64")}
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.messages: list[object] = []
+
+        def update(self, value: object) -> None:
+            self.messages.append(value)
+
+    status = _FakeStatus()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatus:
+        assert selector == "#status"
+        return status
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+
+    app._update_platform_selection_status()
+
+    assert status.messages
+    message = status.messages[-1]
+    assert isinstance(message, Text)
+    assert message.plain.endswith("Select all platforms: a")
+    assert not message.spans
 
 
 def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
