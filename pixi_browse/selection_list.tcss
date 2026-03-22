@@ -42,8 +42,8 @@ Screen {
 }
 
 #sidebar-list > .option-list--option-highlighted {
-    color: $text;
-    background: #fbcfe8;
+    color: #f9a8d4;
+    background: #4a2233;
     text-style: bold;
 }
 
@@ -54,13 +54,13 @@ Screen {
 }
 
 #sidebar-list > .option-list--option-hover {
-    color: $text;
-    background: #fbcfe8;
+    color: #f9a8d4;
+    background: #4a2233;
 }
 
 #sidebar-list:focus > .option-list--option-hover {
-    color: $text;
-    background: #fbcfe8;
+    color: #f9a8d4;
+    background: #4a2233;
 }
 
 #status {
