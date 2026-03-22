@@ -6,7 +6,10 @@ from typing import Literal, cast
 
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
+from rich import box
+from rich.console import RenderableType
 from rich.style import Style
+from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
@@ -17,7 +20,7 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, OptionList, Static
 
 from pixi_browse.models import (
-    CompareLine,
+    CompareRow,
     CompareSelection,
     DependencyTab,
     VersionCompareData,
@@ -121,7 +124,7 @@ class DetailSection(Vertical):
     def update_header(self, title: str | Text) -> None:
         self.border_title = title
 
-    def update_body(self, body: str | Text) -> None:
+    def update_body(self, body: RenderableType) -> None:
         self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
 
     def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
@@ -958,64 +961,87 @@ class CompareDetailsView(Vertical):
         )
         return text
 
-    @staticmethod
-    def _append_line(body: Text, prefix: str, value: str, *, style: str) -> None:
-        body.append(prefix, style=style)
-        body.append(value, style=style)
-        body.append("\n")
-
-    def _render_metadata_body(self) -> Text:
-        body = Text()
-        if not self._compare_data.metadata_diffs:
-            body.append("No metadata changes.", style="dim")
-            return body
-
-        for index, diff in enumerate(self._compare_data.metadata_diffs):
-            if index:
-                body.append("\n")
-            body.append(f"{diff.label}\n", style="bold")
-            self._append_line(body, "- ", diff.before, style="red")
-            self._append_line(body, "+ ", diff.after, style="green")
-        return body
-
-    def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareLine, ...]:
+    def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareRow, ...]:
         if tab == "dependencies":
             return self._compare_data.dependencies
         if tab == "constraints":
             return self._compare_data.constraints
         return self._compare_data.run_exports
 
-    def _render_dependency_body(self, tab: DependencyTab) -> Text:
-        body = Text()
-        lines = self._dependency_lines(tab)
-        if not lines:
-            body.append("No dependency changes.", style="dim")
-            return body
+    def _render_metadata_body(self) -> RenderableType:
+        return self._render_compare_table(
+            self._compare_data.metadata_rows,
+            label_title="Field",
+            empty_message="No metadata available.",
+            show_label_column=True,
+        )
 
-        for line in lines:
-            style = "green" if line.kind == "added" else "red"
-            prefix = "+ " if line.kind == "added" else "- "
-            self._append_line(body, prefix, line.value, style=style)
-        return body
+    def _render_dependency_body(self, tab: DependencyTab) -> RenderableType:
+        return self._render_compare_table(
+            self._dependency_lines(tab),
+            empty_message="No dependency data.",
+            show_label_column=False,
+        )
 
-    def _render_file_body(self) -> Text:
-        body = Text()
+    def _render_file_body(self) -> RenderableType:
         if not self._compare_data.files:
-            body.append("No file changes.", style="dim")
-            return body
+            return Text("No files listed.", style="dim")
 
-        for line in self._compare_data.files:
-            if line.kind == "added":
-                style = "green"
-                prefix = "+ "
-            elif line.kind == "removed":
-                style = "red"
-                prefix = "- "
-            else:
-                style = "yellow"
-                prefix = "~ "
-            self._append_line(body, prefix, line.value, style=style)
+        body = Text()
+        for index, row in enumerate(self._compare_data.files):
+            if index:
+                body.append("\n")
+            body.append(row.label, style=self._file_row_style(row))
         return body
+
+    @staticmethod
+    def _row_style(row: CompareRow) -> tuple[str, str]:
+        if row.changed:
+            return "red", "green"
+        return "white", "white"
+
+    @staticmethod
+    def _file_row_style(row: CompareRow) -> str:
+        if not row.changed:
+            return "white"
+        if row.left and row.right:
+            return "yellow"
+        if row.left:
+            return "red"
+        return "green"
+
+    def _render_compare_table(
+        self,
+        rows: tuple[CompareRow, ...],
+        *,
+        empty_message: str,
+        show_label_column: bool,
+        label_title: str = "",
+    ) -> RenderableType:
+        if not rows:
+            return Text(empty_message, style="dim")
+
+        table = Table(
+            box=box.SIMPLE,
+            expand=True,
+            show_edge=False,
+            pad_edge=False,
+            collapse_padding=True,
+        )
+        if show_label_column:
+            table.add_column(label_title, style="bold", ratio=1)
+        table.add_column("Left", ratio=2)
+        table.add_column("Right", ratio=2)
+
+        for row in rows:
+            left_style, right_style = self._row_style(row)
+            cells: list[RenderableType] = []
+            if show_label_column:
+                cells.append(row.label)
+            cells.append(Text(row.left, style=left_style))
+            cells.append(Text(row.right, style=right_style))
+            table.add_row(*cells)
+        return table
 
     def on_key(self, event: Key) -> None:
         page_height = self.active_page_step()

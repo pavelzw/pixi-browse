@@ -3,6 +3,7 @@ import shutil
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from rattler.exceptions import InvalidMatchSpecError
@@ -12,6 +13,7 @@ from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
+from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Paste
@@ -19,6 +21,7 @@ from textual.events import Paste
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
 from pixi_browse.models import (
+    CompareRow,
     CompareSelection,
     PackageFile,
     VersionCompareData,
@@ -374,23 +377,46 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
         right_artifact,
     )
 
-    assert any(diff.label == "Version" for diff in compare_data.metadata_diffs)
-    assert [line.kind for line in compare_data.dependencies] == [
-        "removed",
-        "added",
-        "removed",
-        "added",
-    ]
-    assert compare_data.dependencies[0].value == "python >=3.12"
-    assert compare_data.dependencies[1].value == "python >=3.13"
-    assert compare_data.dependencies[2].value == "numpy >=1.0"
-    assert compare_data.dependencies[3].value == "pydantic >=2"
-    assert compare_data.files[0].kind == "changed"
-    assert compare_data.files[0].value.startswith("bin/demo (content; size ")
-    assert compare_data.files[1].value == "info/about.json"
-    assert compare_data.files[1].kind == "removed"
-    assert compare_data.files[2].value == "lib/demo.py"
-    assert compare_data.files[2].kind == "added"
+    version_row = next(
+        row for row in compare_data.metadata_rows if row.label == "Version"
+    )
+    assert version_row.left == "1.2.3"
+    assert version_row.right == "1.2.4"
+    assert version_row.changed is True
+
+    python_row = next(row for row in compare_data.dependencies if row.label == "python")
+    assert python_row.left == "python >=3.12"
+    assert python_row.right == "python >=3.13"
+    assert python_row.changed is True
+
+    numpy_row = next(row for row in compare_data.dependencies if row.label == "numpy")
+    assert numpy_row.left == "numpy >=1.0"
+    assert numpy_row.right == ""
+    assert numpy_row.changed is True
+
+    pydantic_row = next(
+        row for row in compare_data.dependencies if row.label == "pydantic"
+    )
+    assert pydantic_row.left == ""
+    assert pydantic_row.right == "pydantic >=2"
+    assert pydantic_row.changed is True
+
+    bin_demo_row = next(row for row in compare_data.files if row.label == "bin/demo")
+    assert "1.2 KiB" in bin_demo_row.left
+    assert "2.0 KiB" in bin_demo_row.right
+    assert bin_demo_row.changed is True
+
+    about_row = next(
+        row for row in compare_data.files if row.label == "info/about.json"
+    )
+    assert about_row.left.startswith("info/about.json")
+    assert about_row.right == ""
+    assert about_row.changed is True
+
+    lib_demo_row = next(row for row in compare_data.files if row.label == "lib/demo.py")
+    assert lib_demo_row.left == ""
+    assert lib_demo_row.right.startswith("lib/demo.py")
+    assert lib_demo_row.changed is True
 
 
 def test_render_selected_version_details_includes_about_urls() -> None:
@@ -1693,7 +1719,7 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
                 file_name="demo-1.0.1-py313h123_0.conda",
             ),
         ),
-        metadata_diffs=(),
+        metadata_rows=(),
         dependencies=(),
         constraints=(),
         run_exports=(),
@@ -1720,6 +1746,200 @@ def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
 
     assert "[ / ]" not in inactive_header.plain
     assert "[ / ]" not in active_header.plain
+
+
+def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_green() -> (
+    None
+):
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(
+                CompareRow(
+                    label="Name",
+                    left="demo",
+                    right="demo",
+                    changed=False,
+                ),
+                CompareRow(
+                    label="Version",
+                    left="1.0.0",
+                    right="1.0.1",
+                    changed=True,
+                ),
+            ),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    table = cast(Table, view._render_metadata_body())
+
+    assert table.columns[0].header == "Field"
+    assert table.columns[1].header == "Left"
+    assert table.columns[2].header == "Right"
+    assert table.rows[0].style is None
+    assert cast(Text, table.columns[1]._cells[0]).style == "white"
+    assert cast(Text, table.columns[2]._cells[0]).style == "white"
+    assert cast(Text, table.columns[1]._cells[1]).style == "red"
+    assert cast(Text, table.columns[2]._cells[1]).style == "green"
+
+
+def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -> None:
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(
+                CompareRow(
+                    label="numpy",
+                    left="numpy >=1.0",
+                    right="",
+                    changed=True,
+                ),
+                CompareRow(
+                    label="pydantic",
+                    left="",
+                    right="pydantic >=2",
+                    changed=True,
+                ),
+            ),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    table = cast(Table, view._render_dependency_body("dependencies"))
+
+    assert len(table.columns) == 2
+    assert table.columns[0].header == "Left"
+    assert table.columns[1].header == "Right"
+    assert cast(Text, table.columns[0]._cells[0]).plain == "numpy >=1.0"
+    assert cast(Text, table.columns[1]._cells[0]).plain == ""
+    assert cast(Text, table.columns[0]._cells[1]).plain == ""
+    assert cast(Text, table.columns[1]._cells[1]).plain == "pydantic >=2"
+
+
+def test_compare_file_body_uses_single_column_with_status_colors() -> None:
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(
+                CompareRow(
+                    label="same.txt",
+                    left="same.txt",
+                    right="same.txt",
+                    changed=False,
+                ),
+                CompareRow(
+                    label="changed.txt",
+                    left="changed.txt",
+                    right="changed.txt",
+                    changed=True,
+                ),
+                CompareRow(
+                    label="left-only.txt",
+                    left="left-only.txt",
+                    right="",
+                    changed=True,
+                ),
+                CompareRow(
+                    label="right-only.txt",
+                    left="",
+                    right="right-only.txt",
+                    changed=True,
+                ),
+            ),
+        )
+    )
+
+    body = cast(Text, view._render_file_body())
+
+    assert body.plain == "same.txt\nchanged.txt\nleft-only.txt\nright-only.txt"
+    assert any(
+        body.plain[span.start : span.end] == "same.txt" and span.style == "white"
+        for span in body.spans
+        if isinstance(span.style, str)
+    )
+    assert any(
+        body.plain[span.start : span.end] == "changed.txt" and span.style == "yellow"
+        for span in body.spans
+        if isinstance(span.style, str)
+    )
+    assert any(
+        body.plain[span.start : span.end] == "left-only.txt" and span.style == "red"
+        for span in body.spans
+        if isinstance(span.style, str)
+    )
+    assert any(
+        body.plain[span.start : span.end] == "right-only.txt" and span.style == "green"
+        for span in body.spans
+        if isinstance(span.style, str)
+    )
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:

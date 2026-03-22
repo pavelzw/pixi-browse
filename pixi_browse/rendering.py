@@ -14,9 +14,8 @@ from rattler.version import VersionWithSource
 from rich.markup import escape
 
 from pixi_browse.models import (
-    CompareLine,
+    CompareRow,
     CompareSelection,
-    MetadataDiff,
     MetadataField,
     PackageFile,
     VersionArtifactData,
@@ -423,7 +422,7 @@ def _matchspec_key_for_line(line: str, *, run_export: bool) -> str | None:
 
 def _diff_dependency_group(
     left: Sequence[str], right: Sequence[str], *, run_export: bool
-) -> tuple[CompareLine, ...]:
+) -> tuple[CompareRow, ...]:
     left_grouped: dict[str, list[str]] = {}
     right_grouped: dict[str, list[str]] = {}
     ordered_keys: list[str] = []
@@ -448,7 +447,7 @@ def _diff_dependency_group(
         if key not in ordered_keys:
             ordered_keys.append(key)
 
-    lines: list[CompareLine] = []
+    rows: list[CompareRow] = []
     for key in ordered_keys:
         left_lines = list(left_grouped.get(key, ()))
         right_lines = list(right_grouped.get(key, ()))
@@ -456,42 +455,58 @@ def _diff_dependency_group(
         while left_lines and right_lines:
             left_line = left_lines.pop(0)
             right_line = right_lines.pop(0)
-            if left_line == right_line:
-                continue
-            lines.append(CompareLine(left_line, "removed"))
-            lines.append(CompareLine(right_line, "added"))
+            rows.append(
+                CompareRow(
+                    label=key,
+                    left=left_line,
+                    right=right_line,
+                    changed=left_line != right_line,
+                )
+            )
 
-        lines.extend(CompareLine(line, "removed") for line in left_lines)
-        lines.extend(CompareLine(line, "added") for line in right_lines)
+        rows.extend(
+            CompareRow(label=key, left=line, right="", changed=True)
+            for line in left_lines
+        )
+        rows.extend(
+            CompareRow(label=key, left="", right=line, changed=True)
+            for line in right_lines
+        )
 
     remaining_right = list(unmatched_right)
     for line in unmatched_left:
         if line in remaining_right:
             remaining_right.remove(line)
-            continue
-        lines.append(CompareLine(line, "removed"))
-    lines.extend(CompareLine(line, "added") for line in remaining_right)
-    return tuple(lines)
+            rows.append(CompareRow(label=line, left=line, right=line, changed=False))
+        else:
+            rows.append(
+                CompareRow(
+                    label=line,
+                    left=line,
+                    right="",
+                    changed=True,
+                )
+            )
+    rows.extend(
+        CompareRow(label=line, left="", right=line, changed=True)
+        for line in remaining_right
+    )
+    return tuple(rows)
 
 
-def _package_file_change_details(left: PackageFile, right: PackageFile) -> list[str]:
+def _package_file_summary(package_file: PackageFile) -> str:
     details: list[str] = []
-    if left.sha256 != right.sha256:
-        details.append("content")
-    if left.size_in_bytes != right.size_in_bytes:
-        details.append(
-            f"size {format_human_byte_size(left.size_in_bytes)} -> {format_human_byte_size(right.size_in_bytes)}"
-        )
-    if left.path_type != right.path_type:
-        details.append(
-            f"type {left.path_type or 'unknown'} -> {right.path_type or 'unknown'}"
-        )
-    if left.no_link != right.no_link:
-        details.append(
-            f"no_link {left.no_link if left.no_link is not None else 'unknown'} -> "
-            f"{right.no_link if right.no_link is not None else 'unknown'}"
-        )
-    return details
+    if package_file.size_in_bytes is not None:
+        details.append(format_human_byte_size(package_file.size_in_bytes))
+    if package_file.path_type is not None:
+        details.append(package_file.path_type)
+    if package_file.no_link is not None:
+        details.append(f"no_link={package_file.no_link}")
+    if package_file.sha256 is not None:
+        details.append(f"sha256={package_file.sha256.hex()[:8]}")
+    if not details:
+        return package_file.path
+    return f"{package_file.path} ({', '.join(details)})"
 
 
 def _files_differ(left: PackageFile, right: PackageFile) -> bool:
@@ -507,29 +522,46 @@ def _files_differ(left: PackageFile, right: PackageFile) -> bool:
 
 def _diff_file_paths(
     left_files: Sequence[PackageFile], right_files: Sequence[PackageFile]
-) -> tuple[CompareLine, ...]:
+) -> tuple[CompareRow, ...]:
     left_by_path = {package_file.path: package_file for package_file in left_files}
     right_by_path = {package_file.path: package_file for package_file in right_files}
     ordered_paths = list(left_by_path)
     ordered_paths.extend(path for path in right_by_path if path not in left_by_path)
 
-    lines: list[CompareLine] = []
+    rows: list[CompareRow] = []
     for path in ordered_paths:
         left_file = left_by_path.get(path)
         right_file = right_by_path.get(path)
         if left_file is None and right_file is not None:
-            lines.append(CompareLine(path, "added"))
+            rows.append(
+                CompareRow(
+                    label=path,
+                    left="",
+                    right=_package_file_summary(right_file),
+                    changed=True,
+                )
+            )
             continue
         if right_file is None and left_file is not None:
-            lines.append(CompareLine(path, "removed"))
+            rows.append(
+                CompareRow(
+                    label=path,
+                    left=_package_file_summary(left_file),
+                    right="",
+                    changed=True,
+                )
+            )
             continue
         assert left_file is not None and right_file is not None
-        if not _files_differ(left_file, right_file):
-            continue
-        details = _package_file_change_details(left_file, right_file)
-        value = f"{path} ({'; '.join(details)})" if details else path
-        lines.append(CompareLine(value, "changed"))
-    return tuple(lines)
+        rows.append(
+            CompareRow(
+                label=path,
+                left=_package_file_summary(left_file),
+                right=_package_file_summary(right_file),
+                changed=_files_differ(left_file, right_file),
+            )
+        )
+    return tuple(rows)
 
 
 def build_version_compare_data(
@@ -550,21 +582,23 @@ def build_version_compare_data(
         for field in right_artifact.metadata_fields
         if field.label not in left_metadata
     )
-    metadata_diffs = tuple(
-        MetadataDiff(
-            label,
-            left_metadata.get(label, "not available"),
-            right_metadata.get(label, "not available"),
+    metadata_rows = tuple(
+        CompareRow(
+            label=label,
+            left=left_metadata.get(label, "not available"),
+            right=right_metadata.get(label, "not available"),
+            changed=(
+                left_metadata.get(label, "not available")
+                != right_metadata.get(label, "not available")
+            ),
         )
         for label in ordered_labels
-        if left_metadata.get(label, "not available")
-        != right_metadata.get(label, "not available")
     )
 
     return VersionCompareData(
         left_selection=left_selection,
         right_selection=right_selection,
-        metadata_diffs=metadata_diffs,
+        metadata_rows=metadata_rows,
         dependencies=_diff_dependency_group(
             left_artifact.dependencies,
             right_artifact.dependencies,

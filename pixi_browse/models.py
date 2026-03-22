@@ -68,20 +68,22 @@ class MetadataDiff:
 
 
 @dataclass(frozen=True)
-class CompareLine:
-    value: str
-    kind: CompareLineKind
+class CompareRow:
+    label: str
+    left: str
+    right: str
+    changed: bool
 
 
 @dataclass(frozen=True)
 class VersionCompareData:
     left_selection: CompareSelection
     right_selection: CompareSelection
-    metadata_diffs: tuple[MetadataDiff, ...]
-    dependencies: tuple[CompareLine, ...]
-    constraints: tuple[CompareLine, ...]
-    run_exports: tuple[CompareLine, ...]
-    files: tuple[CompareLine, ...]
+    metadata_rows: tuple[CompareRow, ...]
+    dependencies: tuple[CompareRow, ...]
+    constraints: tuple[CompareRow, ...]
+    run_exports: tuple[CompareRow, ...]
+    files: tuple[CompareRow, ...]
 
 
 @dataclass(frozen=True)
