@@ -1683,12 +1683,24 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
 def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
     panel = MainPanel()
     focused: list[str] = []
+    selected: list[str] = []
+
+    class _FakeApp:
+        def _set_selected_pane(self, pane: str) -> None:
+            selected.append(pane)
+
+    monkeypatch.setattr(
+        MainPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
 
     monkeypatch.setattr(panel, "focus", lambda: focused.append("main"))
 
     event = _FakeClickEvent()
     panel.on_click(event)  # type: ignore[arg-type]
 
+    assert selected == ["main"]
     assert focused == ["main"]
     assert event.stopped is True
 
@@ -1696,12 +1708,16 @@ def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
 def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
     panel = SidebarPanel()
     focused: list[str] = []
+    selected: list[str] = []
 
     class _FakeSidebarList:
         def focus(self) -> None:
             focused.append("sidebar")
 
     class _FakeApp:
+        def _set_selected_pane(self, pane: str) -> None:
+            selected.append(pane)
+
         def query_one(
             self, selector: str, _widget_type: object = None
         ) -> _FakeSidebarList:
@@ -1717,6 +1733,7 @@ def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
     event = _FakeClickEvent()
     panel.on_click(event)  # type: ignore[arg-type]
 
+    assert selected == ["sidebar"]
     assert focused == ["sidebar"]
     assert event.stopped is True
 

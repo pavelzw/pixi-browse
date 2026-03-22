@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
 from rich.style import Style
 from rich.text import Text
-from textual._context import NoActiveAppError
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -297,12 +298,9 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
-        try:
-            select_pane = getattr(self.app, "_set_selected_pane", None)
-        except NoActiveAppError:
-            select_pane = None
-        if callable(select_pane):
-            select_pane("main")
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._set_selected_pane("main")
         self.focus()
         event.stop()
 
@@ -340,30 +338,16 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        try:
-            select_pane = getattr(self.app, "_set_selected_pane", None)
-        except NoActiveAppError:
-            select_pane = None
-        if callable(select_pane):
-            select_pane("main")
-        try:
-            update_filter_indicator = getattr(
-                self.app, "_update_filter_indicator", None
-            )
-        except NoActiveAppError:
-            update_filter_indicator = None
-        if callable(update_filter_indicator):
-            update_filter_indicator()
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        app = cast(CondaMetadataTui, self.app)
+        app._set_selected_pane("main")
+        app._update_filter_indicator()
 
     def on_blur(self) -> None:
-        try:
-            update_filter_indicator = getattr(
-                self.app, "_update_filter_indicator", None
-            )
-        except NoActiveAppError:
-            update_filter_indicator = None
-        if callable(update_filter_indicator):
-            update_filter_indicator()
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._update_filter_indicator()
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -524,26 +508,19 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            try:
-                focus_sidebar = getattr(self.app, "_focus_sidebar", None)
-            except NoActiveAppError:
-                focus_sidebar = None
-            if callable(focus_sidebar):
-                focus_sidebar()
-            else:
-                self.app.query_one("#sidebar-list").focus()
+            from pixi_browse.tui.app import CondaMetadataTui
+
+            cast(CondaMetadataTui, self.app)._focus_sidebar()
             event.stop()
 
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        try:
-            select_pane = getattr(self.app, "_set_selected_pane", None)
-        except NoActiveAppError:
-            select_pane = None
-        if callable(select_pane):
-            select_pane("sidebar")
-        self.app.query_one("#sidebar-list").focus()
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        app = cast(CondaMetadataTui, self.app)
+        app._set_selected_pane("sidebar")
+        app.query_one("#sidebar-list").focus()
         event.stop()
 
 
