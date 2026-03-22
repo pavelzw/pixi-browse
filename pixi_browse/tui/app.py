@@ -57,36 +57,6 @@ from .widgets import (
 )
 
 _PREVIEW_MAX_BYTES = 256 * 1024
-_BINARY_PREVIEW_SUFFIXES = frozenset(
-    {
-        ".a",
-        ".bin",
-        ".bmp",
-        ".class",
-        ".dat",
-        ".dll",
-        ".dylib",
-        ".exe",
-        ".gif",
-        ".ico",
-        ".jar",
-        ".jpeg",
-        ".jpg",
-        ".lib",
-        ".o",
-        ".obj",
-        ".pdf",
-        ".png",
-        ".pyc",
-        ".pyd",
-        ".so",
-        ".ttf",
-        ".wav",
-        ".woff",
-        ".woff2",
-        ".zip",
-    }
-)
 
 
 class CondaMetadataTui(App[None]):
@@ -1079,13 +1049,17 @@ class CondaMetadataTui(App[None]):
                 "Use Download as file instead."
             )
 
-        suffix = Path(file_path).suffix.lower()
-        if suffix in _BINARY_PREVIEW_SUFFIXES or b"\0" in package_bytes:
+        if b"\0" in package_bytes:
             return (
                 "Binary file preview is not supported.\n\nUse Download as file instead."
             )
 
-        return package_bytes.decode("utf-8", errors="replace")
+        try:
+            return package_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return (
+                "Binary file preview is not supported.\n\nUse Download as file instead."
+            )
 
     @staticmethod
     def _preview_title(file_path: str, package_bytes: bytes) -> str:

@@ -3021,6 +3021,14 @@ def test_preview_content_rejects_binary_files() -> None:
     assert "Binary file preview is not supported." in rendered
 
 
+def test_preview_content_rejects_invalid_utf8_without_null_bytes() -> None:
+    rendered = CondaMetadataTui._preview_content(
+        "info/about.json", b"\xff\xfe\x80invalid"
+    )
+
+    assert "Binary file preview is not supported." in rendered
+
+
 def test_preview_content_rejects_large_files() -> None:
     rendered = CondaMetadataTui._preview_content("info/about.json", b"x" * 300_000)
 
