@@ -37,6 +37,7 @@ from pixi_browse.tui import (
     INACTIVE_TAB_STYLE,
     DetailSection,
     Empty,
+    FilePreviewScreen,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
@@ -2971,7 +2972,7 @@ def test_download_selected_package_file_writes_relative_path(
     assert notifications == [f"Downloaded file to {destination}"]
 
 
-def test_preview_selected_package_file_uses_pager(monkeypatch) -> None:
+def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     app = CondaMetadataTui()
     entry = VersionEntry(
         version=Version("1.2.3"),
@@ -2980,7 +2981,7 @@ def test_preview_selected_package_file_uses_pager(monkeypatch) -> None:
         subdir="noarch",
         file_name="demo-1.2.3-py313h123_0.conda",
     )
-    commands: list[list[str]] = []
+    pushed: list[FilePreviewScreen] = []
 
     async def _fake_fetch(
         package_name: str, selected_entry: VersionEntry, file_path: str
@@ -2990,63 +2991,34 @@ def test_preview_selected_package_file_uses_pager(monkeypatch) -> None:
         assert file_path == "info/about.json"
         return b'{"name": "demo"}\n'
 
-    class _SuspendContext:
-        def __enter__(self) -> None:
-            return None
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-            return None
-
     monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
-    monkeypatch.setattr(app, "suspend", lambda: _SuspendContext())
-    monkeypatch.setattr("pixi_browse.tui.app._resolve_pager_command", lambda: ["less"])
-    monkeypatch.setattr(
-        "pixi_browse.tui.app.subprocess.run",
-        lambda command, check: commands.append(command),
-    )
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
 
     asyncio.run(app._preview_selected_package_file("demo", entry, "info/about.json"))
 
-    assert commands
-    assert commands[0][0] == "less"
-    assert commands[0][-1].endswith(".json")
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], FilePreviewScreen)
+    assert pushed[0]._title == "info/about.json (17 B)"
+    assert pushed[0]._content == '{"name": "demo"}\n'
 
 
-def test_copy_selected_package_file_to_clipboard(monkeypatch) -> None:
-    app = CondaMetadataTui()
-    entry = VersionEntry(
-        version=Version("1.2.3"),
-        build="py313h123_0",
-        build_number=0,
-        subdir="noarch",
-        file_name="demo-1.2.3-py313h123_0.conda",
-    )
-    copied: list[str] = []
-    notifications: list[str] = []
+def test_preview_content_rejects_binary_files() -> None:
+    rendered = CondaMetadataTui._preview_content("lib/demo.so", b"\0binary")
 
-    async def _fake_fetch(
-        package_name: str, selected_entry: VersionEntry, file_path: str
-    ) -> bytes:
-        assert package_name == "demo"
-        assert selected_entry == entry
-        assert file_path == "info/index.json"
-        return b'{"subdir": "noarch"}\n'
+    assert "Binary file preview is not supported." in rendered
 
-    def _fake_notify(message: str, **kwargs: object) -> None:
-        del kwargs
-        notifications.append(message)
 
-    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
-    monkeypatch.setattr("pixi_browse.tui.app._copy_text_to_clipboard", copied.append)
-    monkeypatch.setattr(app, "notify", _fake_notify)
+def test_preview_content_rejects_large_files() -> None:
+    rendered = CondaMetadataTui._preview_content("info/about.json", b"x" * 300_000)
 
-    asyncio.run(
-        app._copy_selected_package_file_to_clipboard("demo", entry, "info/index.json")
-    )
+    assert "File too large to preview in-app" in rendered
+    assert "300,000 bytes" in rendered
 
-    assert copied == ['{"subdir": "noarch"}\n']
-    assert notifications == ["Copied info/index.json to clipboard"]
+
+def test_preview_title_uses_human_readable_size() -> None:
+    rendered = CondaMetadataTui._preview_title("lib/libstdc++.so", b"x" * 10_800_000)
+
+    assert rendered == "lib/libstdc++.so (10.3 MiB)"
 
 
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(

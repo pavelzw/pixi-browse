@@ -115,6 +115,26 @@ def format_byte_size(value: Any) -> str:
     return f"{size:.1f} {unit} ({value:,} bytes)"
 
 
+def format_human_byte_size(value: Any) -> str:
+    if value is None:
+        return "not available"
+    if not isinstance(value, int) or value < 0:
+        return format_record_value(value)
+
+    units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+    size = float(value)
+    unit = units[0]
+    for candidate in units:
+        unit = candidate
+        if size < 1024.0 or candidate == units[-1]:
+            break
+        size /= 1024.0
+
+    if unit == "B":
+        return f"{value:,} B"
+    return f"{size:.1f} {unit}"
+
+
 def render_kv_box(rows: list[tuple[str, str]], width: int) -> list[str]:
     if not rows:
         return []

@@ -49,7 +49,7 @@ class FileListEntry:
 EMPTY_MATCHSPEC_RESULT = Empty()
 
 
-FileAction = Literal["download", "preview", "clipboard"]
+FileAction = Literal["download", "preview"]
 
 
 class DetailOptionList(OptionList):
@@ -923,9 +923,8 @@ class FileActionScreen(ModalScreen[FileAction | None]):
     ]
 
     _ACTIONS: tuple[tuple[FileAction, str], ...] = (
-        ("download", "Download as file"),
         ("preview", "Preview"),
-        ("clipboard", "Copy to clipboard"),
+        ("download", "Download as file"),
     )
 
     def __init__(self, file_path: str) -> None:
@@ -953,6 +952,98 @@ class FileActionScreen(ModalScreen[FileAction | None]):
 
     async def action_dismiss(self, result: FileAction | None = None) -> None:
         self.dismiss(result)
+
+
+class FilePreviewScreen(ModalScreen[None]):
+    DEFAULT_CSS = """
+    FilePreviewScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #file-preview-dialog {
+        width: 120;
+        max-width: 95%;
+        height: 90%;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #file-preview-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #file-preview-scroll {
+        height: 1fr;
+        border: round #ec4899;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+    }
+
+    #file-preview-body {
+        color: $text;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+        Binding("up,k", "scroll_up", show=False),
+        Binding("down,j", "scroll_down", show=False),
+        Binding("pageup,ctrl+u", "page_up", show=False),
+        Binding("pagedown,ctrl+d", "page_down", show=False),
+        Binding("home", "scroll_home", show=False),
+        Binding("end", "scroll_end", show=False),
+        Binding("g", "scroll_home", show=False),
+        Binding("G", "scroll_end", show=False),
+    ]
+
+    def __init__(self, title: str, content: str) -> None:
+        super().__init__()
+        self._title = title
+        self._content = content
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-preview-dialog"):
+            yield Static(self._title, id="file-preview-title")
+            with VerticalScroll(id="file-preview-scroll"):
+                yield Static(self._content, id="file-preview-body")
+
+    def on_mount(self) -> None:
+        self.query_one("#file-preview-scroll", VerticalScroll).focus()
+
+    def _scroll(self) -> VerticalScroll:
+        return self.query_one("#file-preview-scroll", VerticalScroll)
+
+    def action_scroll_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=max(0, scroll.scroll_y - 1), animate=False)
+
+    def action_scroll_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + 1, animate=False)
+
+    def action_page_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(
+            y=max(0, scroll.scroll_y - max(1, scroll.size.height)), animate=False
+        )
+
+    def action_page_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + max(1, scroll.size.height), animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._scroll().scroll_home(animate=False, immediate=True, x_axis=False)
+
+    def action_scroll_end(self) -> None:
+        self._scroll().scroll_end(animate=False)
+
+    async def action_dismiss(self, result: None = None) -> None:
+        del result
+        self.dismiss(None)
 
 
 class HelpScreen(ModalScreen[None]):

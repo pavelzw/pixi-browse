@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import os
-import shlex
-import shutil
-import subprocess
-import tempfile
 import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
@@ -35,7 +30,7 @@ from pixi_browse.models import (
     ViewMode,
 )
 from pixi_browse.platform_utils import platform_sort_key
-from pixi_browse.rendering import render_package_preview
+from pixi_browse.rendering import format_human_byte_size, render_package_preview
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
     discover_available_platforms,
@@ -53,44 +48,44 @@ from .widgets import (
     INACTIVE_SECTION_TITLE_STYLE,
     Empty,
     FileActionScreen,
+    FilePreviewScreen,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
 )
 
-
-def _resolve_pager_command() -> list[str]:
-    pager = os.environ.get("PAGER")
-    if pager:
-        command = shlex.split(pager)
-        if command:
-            return command
-
-    for candidate in ("less", "more"):
-        if shutil.which(candidate):
-            return [candidate]
-
-    raise RuntimeError("No pager found. Set $PAGER or install less/more.")
-
-
-def _copy_text_to_clipboard(text: str) -> None:
-    clipboard_commands = [
-        ["pbcopy"],
-        ["wl-copy"],
-        ["xclip", "-selection", "clipboard"],
-        ["xsel", "--clipboard", "--input"],
-        ["clip"],
-    ]
-    for command in clipboard_commands:
-        if shutil.which(command[0]) is None:
-            continue
-        subprocess.run(command, input=text, text=True, check=True)
-        return
-
-    raise RuntimeError(
-        "No clipboard command found. Install pbcopy, wl-copy, xclip, xsel, or clip."
-    )
+_PREVIEW_MAX_BYTES = 256 * 1024
+_BINARY_PREVIEW_SUFFIXES = frozenset(
+    {
+        ".a",
+        ".bin",
+        ".bmp",
+        ".class",
+        ".dat",
+        ".dll",
+        ".dylib",
+        ".exe",
+        ".gif",
+        ".ico",
+        ".jar",
+        ".jpeg",
+        ".jpg",
+        ".lib",
+        ".o",
+        ".obj",
+        ".pdf",
+        ".png",
+        ".pyc",
+        ".pyd",
+        ".so",
+        ".ttf",
+        ".wav",
+        ".woff",
+        ".woff2",
+        ".zip",
+    }
+)
 
 
 class CondaMetadataTui(App[None]):
@@ -1068,6 +1063,27 @@ class CondaMetadataTui(App[None]):
 
         return await fetch_raw_package_file_from_url(self._client, url, file_path)
 
+    @staticmethod
+    def _preview_content(file_path: str, package_bytes: bytes) -> str:
+        if len(package_bytes) > _PREVIEW_MAX_BYTES:
+            return (
+                "File too large to preview in-app "
+                f"({len(package_bytes):,} bytes).\n\n"
+                "Use Download as file instead."
+            )
+
+        suffix = Path(file_path).suffix.lower()
+        if suffix in _BINARY_PREVIEW_SUFFIXES or b"\0" in package_bytes:
+            return (
+                "Binary file preview is not supported.\n\nUse Download as file instead."
+            )
+
+        return package_bytes.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _preview_title(file_path: str, package_bytes: bytes) -> str:
+        return f"{file_path} ({format_human_byte_size(len(package_bytes))})"
+
     async def _download_selected_package_file(
         self, package_name: str, entry: VersionEntry, file_path: str
     ) -> None:
@@ -1098,56 +1114,29 @@ class CondaMetadataTui(App[None]):
     async def _preview_selected_package_file(
         self, package_name: str, entry: VersionEntry, file_path: str
     ) -> None:
-        temporary_file: Path | None = None
         try:
             package_bytes = await self._fetch_package_file_bytes(
                 package_name, entry, file_path
             )
-            suffix = Path(file_path).suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
-                handle.write(package_bytes)
-                temporary_file = Path(handle.name)
-
-            with self.suspend():
-                subprocess.run(
-                    [*_resolve_pager_command(), str(temporary_file)],
-                    check=True,
+            self.push_screen(
+                FilePreviewScreen(
+                    self._preview_title(file_path, package_bytes),
+                    self._preview_content(file_path, package_bytes),
                 )
+            )
         except Exception as exc:
             self.notify(
                 f"Failed to preview {file_path}: {exc!s}",
                 title="Files",
                 severity="error",
             )
-            return
-        finally:
-            if temporary_file is not None:
-                temporary_file.unlink(missing_ok=True)
-
-    async def _copy_selected_package_file_to_clipboard(
-        self, package_name: str, entry: VersionEntry, file_path: str
-    ) -> None:
-        try:
-            package_bytes = await self._fetch_package_file_bytes(
-                package_name, entry, file_path
-            )
-            _copy_text_to_clipboard(package_bytes.decode("utf-8", errors="replace"))
-        except Exception as exc:
-            self.notify(
-                f"Failed to copy {file_path}: {exc!s}",
-                title="Files",
-                severity="error",
-            )
-            return
-
-        self.notify(f"Copied {file_path} to clipboard", title="Files")
 
     async def _run_file_action(
         self,
         package_name: str,
         entry: VersionEntry,
         file_path: str,
-        action: Literal["download", "preview", "clipboard"],
+        action: Literal["download", "preview"],
     ) -> None:
         try:
             if action == "download":
@@ -1160,9 +1149,6 @@ class CondaMetadataTui(App[None]):
                     package_name, entry, file_path
                 )
                 return
-            await self._copy_selected_package_file_to_clipboard(
-                package_name, entry, file_path
-            )
         finally:
             self._file_action_in_progress = False
 
@@ -1171,7 +1157,7 @@ class CondaMetadataTui(App[None]):
         package_name: str,
         entry: VersionEntry,
         file_path: str,
-        action: Literal["download", "preview", "clipboard"] | None,
+        action: Literal["download", "preview"] | None,
     ) -> None:
         if action is None or self._file_action_in_progress:
             return
