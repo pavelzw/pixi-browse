@@ -11,7 +11,7 @@ from rattler.repo_data import RepoDataRecord
 from rattler.version import VersionWithSource
 from rich.markup import escape
 
-from pixi_browse.models import VersionDetailsData
+from pixi_browse.models import PackageFile, VersionDetailsData
 
 
 def format_detail_row(label: str, value: str) -> str:
@@ -115,6 +115,26 @@ def format_byte_size(value: Any) -> str:
     return f"{size:.1f} {unit} ({value:,} bytes)"
 
 
+def format_human_byte_size(value: Any) -> str:
+    if value is None:
+        return "not available"
+    if not isinstance(value, int) or value < 0:
+        return format_record_value(value)
+
+    units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+    size = float(value)
+    unit = units[0]
+    for candidate in units:
+        unit = candidate
+        if size < 1024.0 or candidate == units[-1]:
+            break
+        size /= 1024.0
+
+    if unit == "B":
+        return f"{value:,} B"
+    return f"{size:.1f} {unit}"
+
+
 def render_kv_box(rows: list[tuple[str, str]], width: int) -> list[str]:
     if not rows:
         return []
@@ -208,7 +228,7 @@ def build_version_details_data(
     package_name: str,
     record: RepoDataRecord,
     *,
-    package_paths: Sequence[str] | None = None,
+    package_paths: Sequence[PackageFile] | None = None,
     package_paths_error: str | None = None,
     repository_urls: Sequence[str] | None = None,
     documentation_urls: Sequence[str] | None = None,
@@ -295,7 +315,7 @@ def build_version_details_data(
     if package_paths_error is not None:
         file_lines = [f"Unavailable: {escape(package_paths_error)}"]
     elif package_paths:
-        file_lines = [escape(path) for path in package_paths]
+        file_lines = [escape(package_file.path) for package_file in package_paths]
     else:
         file_lines = ["No files listed."]
 
@@ -317,6 +337,7 @@ def build_version_details_data(
         constraints=constraints,
         run_exports=run_export_lines,
         files=tuple(file_lines),
+        file_paths=tuple(package_paths or ()),
     )
 
 

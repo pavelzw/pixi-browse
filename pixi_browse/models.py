@@ -28,9 +28,16 @@ class VersionRow:
 
 
 @dataclass(frozen=True)
+class PackageFile:
+    path: str
+    size_in_bytes: int | None = None
+
+
+@dataclass(frozen=True)
 class VersionDetailsData:
     metadata_lines: tuple[str, ...]
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
     run_exports: tuple[str, ...]
     files: tuple[str, ...]
+    file_paths: tuple[PackageFile, ...] = ()

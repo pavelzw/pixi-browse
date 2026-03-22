@@ -13,11 +13,12 @@ from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
 from rich.text import Text
+from textual.app import App
 from textual.events import Paste
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.models import VersionDetailsData
+from pixi_browse.models import PackageFile, VersionDetailsData
 from pixi_browse.rendering import (
     build_version_details_data,
     format_clickable_github_handle,
@@ -37,6 +38,8 @@ from pixi_browse.tui import (
     INACTIVE_TAB_STYLE,
     DetailSection,
     Empty,
+    FileActionScreen,
+    FilePreviewScreen,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
@@ -155,7 +158,7 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
         lambda: shared_client,
     )
     monkeypatch.setattr(
-        "pixi_browse.tui.create_gateway",
+        "pixi_browse.tui.app.create_gateway",
         _fake_create_gateway,
     )
 
@@ -439,13 +442,14 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     calls: list[str] = []
 
     class _FakePathEntry:
-        def __init__(self, relative_path: str) -> None:
+        def __init__(self, relative_path: str, size_in_bytes: int | None) -> None:
             self.relative_path = relative_path
+            self.size_in_bytes = size_in_bytes
 
     class _FakePathsJson:
         paths = [
-            _FakePathEntry("bin/demo"),
-            _FakePathEntry("lib/python3.13/site-packages/demo.py"),
+            _FakePathEntry("bin/demo", 1234),
+            _FakePathEntry("lib/python3.13/site-packages/demo.py", None),
         ]
 
     async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
@@ -454,7 +458,7 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
         return _FakePathsJson()
 
     monkeypatch.setattr(
-        "pixi_browse.tui.PathsJson.from_remote_url",
+        "pixi_browse.tui.version_loader.PathsJson.from_remote_url",
         _fake_from_remote_url,
     )
 
@@ -463,8 +467,8 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
 
     assert paths == [
-        "bin/demo",
-        "lib/python3.13/site-packages/demo.py",
+        PackageFile("bin/demo", 1234),
+        PackageFile("lib/python3.13/site-packages/demo.py", None),
     ]
     assert cached_paths == paths
     assert calls == [url]
@@ -499,11 +503,11 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         return b"system_tools:\n  rattler-build: 0.38.0\n"
 
     monkeypatch.setattr(
-        "pixi_browse.tui.AboutJson.from_remote_url",
+        "pixi_browse.tui.version_loader.AboutJson.from_remote_url",
         _fake_from_remote_url,
     )
     monkeypatch.setattr(
-        "pixi_browse.tui.fetch_raw_package_file_from_url",
+        "pixi_browse.tui.version_loader.fetch_raw_package_file_from_url",
         _fake_fetch_raw_package_file_from_url,
     )
 
@@ -1651,6 +1655,23 @@ def test_dependency_list_entry_unescapes_matchspec_text() -> None:
     assert entries[0].matchspec == "demo [version='>=1']"
 
 
+def test_file_list_entry_uses_plain_file_path() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=("site-packages/demo.py",),
+        file_paths=(PackageFile("site-packages/demo.py", 1536),),
+    )
+
+    entries = view._file_entries_for_details()
+
+    assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
+    assert entries[0].path == "site-packages/demo.py"
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -1796,6 +1817,39 @@ def test_on_key_enter_opens_matchspec_screen_for_selected_dependency(
     assert event.stopped is True
 
 
+def test_on_key_enter_opens_file_action_screen_for_selected_file(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_request_file_action_for_selected_file",
+        lambda: opened.append("file"),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("enter")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert opened == ["file"]
+    assert event.stopped is True
+
+
 def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
     app = CondaMetadataTui()
     opened: list[tuple[str, bool]] = []
@@ -1820,6 +1874,76 @@ def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
     callback()
 
     assert opened == [("numpy >=2", False)]
+
+
+def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    opened: list[tuple[str, str, str, int | None]] = []
+    scheduled: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "_open_file_action_screen",
+        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
+            (package_name, selected_entry.file_name, file_path, size_in_bytes)
+        ),
+    )
+    monkeypatch.setattr(
+        app, "call_after_refresh", lambda callback: scheduled.append(callback)
+    )
+
+    app._defer_file_action_screen("demo", entry, "info/about.json", 17)
+
+    assert opened == []
+    assert len(scheduled) == 1
+
+    callback = scheduled[0]
+    assert callable(callback)
+    callback()
+
+    assert opened == [("demo", entry.file_name, "info/about.json", 17)]
+
+
+def test_request_file_action_for_selected_file_is_noop_without_file_path(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    monkeypatch.setattr(app, "_selected_file_path", lambda: None)
+    monkeypatch.setattr(app, "_highlighted_version_entry", lambda: entry)
+    monkeypatch.setattr(
+        app,
+        "_defer_file_action_screen",
+        lambda package_name, selected_entry, file_path, size_in_bytes: (
+            _ for _ in ()
+        ).throw(AssertionError("should not open file action screen")),
+    )
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not notify when no file is selectable")
+        ),
+    )
+
+    app._request_file_action_for_selected_file()
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
@@ -1999,6 +2123,48 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
     assert active_sections == [1]
     assert tabs == ["constraints"]
     assert focused == ["main"]
+
+
+def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._selected_package = "demo"
+    opened: list[tuple[str, str]] = []
+    sections: list[int] = []
+    focused: list[str] = []
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+        highlighted = 0
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = type(
+                "OptionListEvent", (), {"id": "detail-option-list-2"}
+            )()
+            self.option_index = 0
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app,
+        "_request_file_action_for_selected_file",
+        lambda: opened.append(("demo", "info/about.json")),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeOptionList(),
+    )
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert sections == [2]
+    assert focused == ["main"]
+    assert opened == [("demo", "info/about.json")]
 
 
 def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
@@ -2767,6 +2933,209 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
+def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    worker_calls: list[dict[str, object]] = []
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._handle_file_action_result("demo", entry, "info/about.json", None, "download")
+
+    assert worker_calls == [
+        {
+            "group": "file-action",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_download_selected_package_file_writes_relative_path(
+    tmp_path, monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    notifications: list[str] = []
+
+    async def _fake_fetch(
+        package_name: str, selected_entry: VersionEntry, file_path: str
+    ) -> bytes:
+        assert package_name == "demo"
+        assert selected_entry == entry
+        assert file_path == "site-packages/demo.py"
+        return b"print('demo')\n"
+
+    def _fake_notify(message: str, **kwargs: object) -> None:
+        del kwargs
+        notifications.append(message)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
+    monkeypatch.setattr(app, "notify", _fake_notify)
+
+    asyncio.run(
+        app._download_selected_package_file("demo", entry, "site-packages/demo.py")
+    )
+
+    destination = (tmp_path / "site-packages" / "demo.py").resolve()
+    assert destination.read_bytes() == b"print('demo')\n"
+    assert notifications == [f"Downloaded file to {destination}"]
+
+
+def test_file_destination_path_rejects_symlink_escape(tmp_path, monkeypatch) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="Unsafe package file path"):
+        CondaMetadataTui._file_destination_path("link/demo.py")
+
+
+def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    pushed: list[FilePreviewScreen] = []
+
+    async def _fake_fetch(
+        package_name: str, selected_entry: VersionEntry, file_path: str
+    ) -> bytes:
+        assert package_name == "demo"
+        assert selected_entry == entry
+        assert file_path == "info/about.json"
+        return b'{"name": "demo"}\n'
+
+    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
+
+    asyncio.run(app._preview_selected_package_file("demo", entry, "info/about.json"))
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], FilePreviewScreen)
+    assert pushed[0]._title == "info/about.json (17 B)"
+    assert pushed[0]._content == '{"name": "demo"}\n'
+
+
+def test_preview_selected_package_file_skips_fetch_when_cached_size_is_too_large(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    pushed: list[FilePreviewScreen] = []
+
+    monkeypatch.setattr(
+        app,
+        "_fetch_package_file_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not fetch bytes for oversized preview")
+        ),
+    )
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
+
+    asyncio.run(
+        app._preview_selected_package_file(
+            "demo",
+            entry,
+            "info/about.json",
+            size_in_bytes=300_000,
+        )
+    )
+
+    assert len(pushed) == 1
+    assert pushed[0]._title == "info/about.json (293.0 KiB)"
+    assert "File too large to preview in-app" in pushed[0]._content
+    assert "300,000 bytes" in pushed[0]._content
+
+
+def test_preview_content_rejects_binary_files() -> None:
+    rendered = CondaMetadataTui._preview_content("lib/demo.so", b"\0binary")
+
+    assert "Binary file preview is not supported." in rendered
+
+
+def test_preview_content_rejects_invalid_utf8_without_null_bytes() -> None:
+    rendered = CondaMetadataTui._preview_content(
+        "info/about.json", b"\xff\xfe\x80invalid"
+    )
+
+    assert "Binary file preview is not supported." in rendered
+
+
+def test_preview_content_rejects_large_files() -> None:
+    rendered = CondaMetadataTui._preview_content("info/about.json", b"x" * 300_000)
+
+    assert "File too large to preview in-app" in rendered
+    assert "300,000 bytes" in rendered
+
+
+def test_preview_title_uses_human_readable_size() -> None:
+    rendered = CondaMetadataTui._preview_title("lib/libstdc++.so", b"x" * 10_800_000)
+
+    assert rendered == "lib/libstdc++.so (10.3 MiB)"
+
+
+def test_file_preview_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = FilePreviewScreen("info/[about].json", "[demo]\n")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#file-preview-title")._render_markup is False
+            assert screen.query_one("#file-preview-body")._render_markup is False
+
+    asyncio.run(_run())
+
+
+def test_file_action_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = FileActionScreen("info/[about].json")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#file-action-path")._render_markup is False
+
+    asyncio.run(_run())
+
+
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     tmp_path, monkeypatch
 ) -> None:
@@ -2864,7 +3233,7 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
         )
 
     monkeypatch.setattr(
-        "pixi_browse.tui.package_download_to_path",
+        "pixi_browse.tui.app.package_download_to_path",
         _fake_download,
     )
     monkeypatch.setattr(app, "notify", _fake_notify)

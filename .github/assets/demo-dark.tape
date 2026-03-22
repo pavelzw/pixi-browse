@@ -37,10 +37,15 @@ Sleep 1s
 Tab
 Sleep 2s
 # go down
-Ctrl+d
+Down 20
 Sleep 2s
-Ctrl+d
+# preview file
+Enter
 Sleep 2s
+Enter
+Sleep 3s
+Escape
+Sleep 1s
 # go to dependencies view
 Shift+Tab
 # cycle through dependencies/constraints/run exports

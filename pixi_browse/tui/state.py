@@ -6,6 +6,7 @@ from rattler.platform import Platform
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
+    PackageFile,
     VersionDetailsData,
     VersionEntry,
     VersionPreviewKey,
@@ -50,7 +51,7 @@ class ChannelStateSnapshot:
     matchspec_records_by_package: dict[str, list[RepoDataRecord]]
     package_records_cache: dict[str, list[RepoDataRecord]]
     version_about_urls_cache: dict[VersionPreviewKey, AboutUrls]
-    version_paths_cache: dict[VersionPreviewKey, list[str]]
+    version_paths_cache: dict[VersionPreviewKey, list[PackageFile]]
     version_details_cache: dict[VersionPreviewKey, VersionDetailsData]
     last_package_highlight: int | None
     last_package_scroll_y: float
