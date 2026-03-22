@@ -17,6 +17,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Paste
+from textual.widgets import Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
@@ -2581,12 +2582,12 @@ def test_compare_screen_swap_sides_flips_compare_data(monkeypatch) -> None:
         ),
     )
     screen = CompareScreen(compare_data)
-    title_updates: list[str] = []
+    title_updates: list[Text] = []
     detail_updates: list[VersionCompareData] = []
     focused: list[str] = []
 
     class _FakeTitle:
-        def update(self, value: str) -> None:
+        def update(self, value: Text) -> None:
             title_updates.append(value)
 
     class _FakeDetails:
@@ -2616,11 +2617,72 @@ def test_compare_screen_swap_sides_flips_compare_data(monkeypatch) -> None:
     assert screen._compare_data.dependencies[0].right == "python >=3.12"
     assert screen._compare_data.files[0].left == "bin/demo"
     assert screen._compare_data.files[0].right == ""
-    assert title_updates == [
-        "Compare\ndemo 1.0.1 py313h456_0 [linux-64]\nvs\ndemo 1.0.0 py313h123_0 [noarch]"
-    ]
+    assert len(title_updates) == 1
+    assert (
+        title_updates[0].plain
+        == "demo 1.0.1 py313h456_0 [linux-64] vs demo 1.0.0 py313h123_0 [noarch]"
+    )
+    assert any(
+        span.style == "red"
+        and title_updates[0].plain[span.start : span.end]
+        == "demo 1.0.1 py313h456_0 [linux-64]"
+        for span in title_updates[0].spans
+    )
+    assert any(
+        span.style == "green"
+        and title_updates[0].plain[span.start : span.end]
+        == "demo 1.0.0 py313h123_0 [noarch]"
+        for span in title_updates[0].spans
+    )
     assert detail_updates == [screen._compare_data]
     assert focused == ["compare"]
+
+
+def test_compare_screen_renders_footer_with_keybinds() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = CompareScreen(
+                VersionCompareData(
+                    left_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.0"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.0-py313h123_0.conda",
+                        ),
+                    ),
+                    right_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.1"),
+                            build="py313h456_0",
+                            build_number=0,
+                            subdir="linux-64",
+                            file_name="demo-1.0.1-py313h456_0.conda",
+                        ),
+                    ),
+                    metadata_rows=(),
+                    dependencies=(),
+                    constraints=(),
+                    run_exports=(),
+                    files=(),
+                )
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert (
+                str(screen.query_one("#compare-footer", Static).render())
+                == "Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
+            )
+
+    asyncio.run(_run())
 
 
 def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:

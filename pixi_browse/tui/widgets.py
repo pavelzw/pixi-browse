@@ -1134,6 +1134,12 @@ class CompareScreen(Screen[None]):
         padding: 0 0 1 0;
         text-style: bold;
     }
+
+    #compare-footer {
+        height: auto;
+        margin-top: 1;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
@@ -1152,14 +1158,23 @@ class CompareScreen(Screen[None]):
         with Vertical(id="compare-root"):
             yield Static(self._title_text(), id="compare-title", markup=False)
             yield CompareDetailsView(self._compare_data)
+            yield Static(self._footer_text(), id="compare-footer", markup=False)
 
     def on_mount(self) -> None:
         self.query_one("#compare-details-view", CompareDetailsView).focus()
 
-    def _title_text(self) -> str:
+    def _title_text(self) -> Text:
         left = self._selection_label(self._compare_data.left_selection)
         right = self._selection_label(self._compare_data.right_selection)
-        return f"Compare\n{left}\nvs\n{right}"
+        title = Text()
+        title.append(left, style="red")
+        title.append(" vs ", style="white")
+        title.append(right, style="green")
+        return title
+
+    @staticmethod
+    def _footer_text() -> str:
+        return "Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
 
     @staticmethod
     def _selection_label(selection: CompareSelection) -> str:
