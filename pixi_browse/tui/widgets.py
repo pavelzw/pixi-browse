@@ -68,6 +68,7 @@ class DetailSection(Vertical):
             yield DependencyOptionList(
                 id=f"detail-option-list-{self._index}",
                 classes="detail-option-list",
+                markup=False,
             )
             return
 
