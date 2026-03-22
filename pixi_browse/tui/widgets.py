@@ -524,7 +524,14 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            self.app.query_one("#sidebar-list").focus()
+            try:
+                focus_sidebar = getattr(self.app, "_focus_sidebar", None)
+            except NoActiveAppError:
+                focus_sidebar = None
+            if callable(focus_sidebar):
+                focus_sidebar()
+            else:
+                self.app.query_one("#sidebar-list").focus()
             event.stop()
 
 

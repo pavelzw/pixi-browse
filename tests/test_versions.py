@@ -1721,6 +1721,29 @@ def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_main_panel_h_key_uses_app_sidebar_focus(monkeypatch) -> None:
+    panel = MainPanel()
+    focused: list[str] = []
+
+    class _FakeApp:
+        def _focus_sidebar(self) -> None:
+            focused.append("sidebar")
+
+    monkeypatch.setattr(
+        MainPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(panel, "_showing_version_details", lambda: False)
+    monkeypatch.setattr(panel, "current_page_step", lambda: 10)
+
+    event = _FakeKeyEvent("h", "h")
+    panel.on_key(event)  # type: ignore[arg-type]
+
+    assert focused == ["sidebar"]
+    assert event.stopped is True
+
+
 def test_update_versions_status_shows_toggle_hint(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._current_versions = [
