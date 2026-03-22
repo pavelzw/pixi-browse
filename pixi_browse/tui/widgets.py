@@ -697,6 +697,18 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         margin-top: 1;
     }
 
+    #matchspec-input {
+        border: tall #ec4899;
+    }
+
+    #matchspec-input:focus {
+        border: tall #ec4899;
+    }
+
+    #matchspec-input > .input--selection {
+        background: #ec4899;
+    }
+
     #matchspec-error {
         color: $error;
         min-height: 1;
