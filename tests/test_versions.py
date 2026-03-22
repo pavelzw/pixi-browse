@@ -1060,7 +1060,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
     assert "Tab / Shift+Tab" in help_text
     assert "Cycle focused section" in help_text
-    assert "[ / ]             Cycle dependency tabs" in help_text
+    assert "[ / ]             Cycle active section tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
 
@@ -1454,6 +1454,9 @@ def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
         def dependency_section_is_active(self) -> bool:
             return True
 
+        def file_section_is_active(self) -> bool:
+            return False
+
     monkeypatch.setattr(
         app,
         "_cycle_main_dependency_tab",
@@ -1497,6 +1500,22 @@ def test_dependency_header_tabs_are_clickable() -> None:
         if isinstance(span.style, Style)
         and span.style.meta
         != {"@click": ("app.select_dependency_tab", ("constraints",))}
+    )
+
+
+def test_file_header_tabs_are_clickable() -> None:
+    text = VersionDetailsView._render_clickable_file_tab(
+        "info_files",
+        "Info files (1)",
+        active=False,
+        pane_active=False,
+    )
+
+    assert text.plain == "Info files (1)"
+    assert any(
+        span.style.meta == {"@click": ("app.select_file_tab", ("info_files",))}
+        for span in text.spans
+        if isinstance(span.style, Style)
     )
 
 
@@ -1666,10 +1685,51 @@ def test_file_list_entry_uses_plain_file_path() -> None:
         file_paths=(PackageFile("site-packages/demo.py", 1536),),
     )
 
-    entries = view._file_entries_for_details()
+    entries = view._file_entries_for_tab("package_files")
 
     assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
+
+
+def test_file_list_entries_split_package_and_info_tabs() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=("site-packages/demo.py", "info/about.json"),
+        file_paths=(
+            PackageFile("site-packages/demo.py"),
+            PackageFile("info/about.json"),
+        ),
+    )
+
+    package_entries = view._file_entries_for_tab("package_files")
+    info_entries = view._file_entries_for_tab("info_files")
+
+    assert [entry.label for entry in package_entries] == ["site-packages/demo.py"]
+    assert [entry.label for entry in info_entries] == ["info/about.json"]
+
+
+def test_file_header_counts_package_and_info_package_files() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=("site-packages/demo.py", "info/about.json"),
+        file_paths=(
+            PackageFile("site-packages/demo.py", 1536),
+            PackageFile("info/about.json", 512),
+        ),
+    )
+
+    header = view._render_file_header()
+
+    assert "Package files (1)" in header.plain
+    assert "Info files (1)" in header.plain
 
 
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
@@ -1681,6 +1741,9 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
@@ -1698,6 +1761,39 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     assert event.stopped is False
 
 
+def test_on_key_bracket_shortcut_cycles_file_tab_when_files_pane_is_active(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_pane = "main"
+    cycled: list[int] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_cycle_main_file_tab", lambda value: cycled.append(value))
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("]", "]")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert cycled == [1]
+    assert event.stopped is True
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
     monkeypatch,
 ) -> None:
@@ -1709,6 +1805,9 @@ def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
             return True
+
+        def file_section_is_active(self) -> bool:
+            return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
     monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
@@ -1796,6 +1895,9 @@ def test_on_key_enter_opens_matchspec_screen_for_selected_dependency(
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
             return True
+
+        def file_section_is_active(self) -> bool:
+            return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
     monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
@@ -2056,6 +2158,26 @@ def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> No
     assert focused == ["main"]
 
 
+def test_action_select_file_tab_focuses_files_pane(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    sections: list[int] = []
+    tabs: list[str] = []
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+    monkeypatch.setattr(app, "_set_main_file_tab", lambda value: tabs.append(value))
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    app.action_select_file_tab("info_files")
+
+    assert sections == [2]
+    assert tabs == ["info_files"]
+    assert focused == ["main"]
+
+
 def test_activate_section_focuses_main_panel(monkeypatch) -> None:
     view = VersionDetailsView()
     active_sections: list[int] = []
@@ -2122,6 +2244,42 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
 
     assert active_sections == [1]
     assert tabs == ["constraints"]
+    assert focused == ["main"]
+
+
+def test_select_file_tab_focuses_main_panel(monkeypatch) -> None:
+    view = VersionDetailsView()
+    active_sections: list[int] = []
+    tabs: list[str] = []
+    focused: list[str] = []
+
+    class _FakeMainPanel:
+        def focus(self) -> None:
+            focused.append("main")
+
+    class _FakeApp:
+        def query_one(
+            self, selector: str, _widget_type: object = None
+        ) -> _FakeMainPanel:
+            assert selector == "#main-panel"
+            return _FakeMainPanel()
+
+    monkeypatch.setattr(
+        VersionDetailsView,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+    monkeypatch.setattr(view, "set_file_tab", lambda value: tabs.append(value))
+
+    view.select_file_tab("info_files", focus_main_panel=True)
+
+    assert active_sections == [2]
+    assert tabs == ["info_files"]
     assert focused == ["main"]
 
 
@@ -2231,6 +2389,43 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     section.on_click(event)  # type: ignore[arg-type]
 
     assert selected_tabs == [("constraints", False)]
+    assert event.stopped is True
+
+
+def test_clicking_file_tab_dispatches_without_hover_link_action(
+    monkeypatch,
+) -> None:
+    section = DetailSection("Files", 2)
+    selected_tabs: list[tuple[str, bool]] = []
+
+    class _FakeView:
+        def select_file_tab(self, tab: str, *, focus_main_panel: bool = False) -> None:
+            selected_tabs.append((tab, focus_main_panel))
+
+    class _FakeApp:
+        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
+            assert selector == "#version-details-view"
+            return _FakeView()
+
+    monkeypatch.setattr(
+        DetailSection,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+
+    event = _FakeClickEvent(
+        Style(
+            meta={
+                "@click": (
+                    "app.select_file_tab",
+                    ("info_files",),
+                )
+            }
+        )
+    )
+    section.on_click(event)  # type: ignore[arg-type]
+
+    assert selected_tabs == [("info_files", False)]
     assert event.stopped is True
 
 
