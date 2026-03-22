@@ -855,6 +855,10 @@ class CompareDetailsView(Vertical):
     def on_mount(self) -> None:
         self._refresh_sections()
 
+    def set_compare_data(self, compare_data: VersionCompareData) -> None:
+        self._compare_data = compare_data
+        self._refresh_sections()
+
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, 2))
         self._apply_section_state()
@@ -1135,6 +1139,7 @@ class CompareScreen(Screen[None]):
     BINDINGS = [
         Binding("tab", "next_section", show=False, priority=True),
         Binding("shift+tab", "previous_section", show=False, priority=True),
+        Binding("x", "swap_sides", show=False),
         Binding("escape", "dismiss", show=False),
         Binding("q", "dismiss", show=False),
     ]
@@ -1172,6 +1177,40 @@ class CompareScreen(Screen[None]):
         self.query_one(
             "#compare-details-view", CompareDetailsView
         ).cycle_active_section(-1)
+
+    @staticmethod
+    def _swap_rows(rows: tuple[CompareRow, ...]) -> tuple[CompareRow, ...]:
+        return tuple(
+            CompareRow(
+                label=row.label,
+                left=row.right,
+                right=row.left,
+                changed=row.changed,
+            )
+            for row in rows
+        )
+
+    @classmethod
+    def _swapped_compare_data(
+        cls, compare_data: VersionCompareData
+    ) -> VersionCompareData:
+        return VersionCompareData(
+            left_selection=compare_data.right_selection,
+            right_selection=compare_data.left_selection,
+            metadata_rows=cls._swap_rows(compare_data.metadata_rows),
+            dependencies=cls._swap_rows(compare_data.dependencies),
+            constraints=cls._swap_rows(compare_data.constraints),
+            run_exports=cls._swap_rows(compare_data.run_exports),
+            files=cls._swap_rows(compare_data.files),
+        )
+
+    def action_swap_sides(self) -> None:
+        self._compare_data = self._swapped_compare_data(self._compare_data)
+        self.query_one("#compare-title", Static).update(self._title_text())
+        self.query_one("#compare-details-view", CompareDetailsView).set_compare_data(
+            self._compare_data
+        )
+        self.query_one("#compare-details-view", CompareDetailsView).focus()
 
     async def action_dismiss(self, result: None = None) -> None:
         self.dismiss(result)

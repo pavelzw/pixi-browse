@@ -1240,6 +1240,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
     assert "Tab / Shift+Tab" in help_text
     assert "Cycle focused section" in help_text
+    assert "x                 Swap compare left / right" in help_text
     assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
@@ -2530,6 +2531,98 @@ def test_on_key_backtab_cycles_compare_screen_sections(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_compare_screen_swap_sides_flips_compare_data(monkeypatch) -> None:
+    compare_data = VersionCompareData(
+        left_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.0"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.0-py313h123_0.conda",
+            ),
+        ),
+        right_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.1"),
+                build="py313h456_0",
+                build_number=0,
+                subdir="linux-64",
+                file_name="demo-1.0.1-py313h456_0.conda",
+            ),
+        ),
+        metadata_rows=(
+            CompareRow(
+                label="Version",
+                left="1.0.0",
+                right="1.0.1",
+                changed=True,
+            ),
+        ),
+        dependencies=(
+            CompareRow(
+                label="python",
+                left="python >=3.12",
+                right="python >=3.13",
+                changed=True,
+            ),
+        ),
+        constraints=(),
+        run_exports=(),
+        files=(
+            CompareRow(
+                label="bin/demo",
+                left="",
+                right="bin/demo",
+                changed=True,
+            ),
+        ),
+    )
+    screen = CompareScreen(compare_data)
+    title_updates: list[str] = []
+    detail_updates: list[VersionCompareData] = []
+    focused: list[str] = []
+
+    class _FakeTitle:
+        def update(self, value: str) -> None:
+            title_updates.append(value)
+
+    class _FakeDetails:
+        def set_compare_data(self, value: VersionCompareData) -> None:
+            detail_updates.append(value)
+
+        def focus(self) -> None:
+            focused.append("compare")
+
+    def _fake_query_one(
+        selector: str, _widget_type: object = None
+    ) -> _FakeTitle | _FakeDetails:
+        if selector == "#compare-title":
+            return _FakeTitle()
+        assert selector == "#compare-details-view"
+        return _FakeDetails()
+
+    monkeypatch.setattr(screen, "query_one", _fake_query_one)
+
+    screen.action_swap_sides()
+
+    assert screen._compare_data.left_selection == compare_data.right_selection
+    assert screen._compare_data.right_selection == compare_data.left_selection
+    assert screen._compare_data.metadata_rows[0].left == "1.0.1"
+    assert screen._compare_data.metadata_rows[0].right == "1.0.0"
+    assert screen._compare_data.dependencies[0].left == "python >=3.13"
+    assert screen._compare_data.dependencies[0].right == "python >=3.12"
+    assert screen._compare_data.files[0].left == "bin/demo"
+    assert screen._compare_data.files[0].right == ""
+    assert title_updates == [
+        "Compare\ndemo 1.0.1 py313h456_0 [linux-64]\nvs\ndemo 1.0.0 py313h123_0 [noarch]"
+    ]
+    assert detail_updates == [screen._compare_data]
+    assert focused == ["compare"]
+
+
 def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -3434,6 +3527,16 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
     assert (
         app._footer_text()
         == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+    )
+
+
+def test_footer_text_shows_compare_keybinds_when_compare_screen_is_open() -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+
+    assert (
+        app._footer_text()
+        == "Compare: Tab/Shift+Tab panes | Swap: x | Close: q/esc | Help: ?"
     )
 
 
