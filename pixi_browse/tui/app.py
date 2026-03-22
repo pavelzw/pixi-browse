@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
 import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
@@ -47,11 +52,45 @@ from .widgets import (
     DEPENDENCY_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     Empty,
+    FileActionScreen,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
 )
+
+
+def _resolve_pager_command() -> list[str]:
+    pager = os.environ.get("PAGER")
+    if pager:
+        command = shlex.split(pager)
+        if command:
+            return command
+
+    for candidate in ("less", "more"):
+        if shutil.which(candidate):
+            return [candidate]
+
+    raise RuntimeError("No pager found. Set $PAGER or install less/more.")
+
+
+def _copy_text_to_clipboard(text: str) -> None:
+    clipboard_commands = [
+        ["pbcopy"],
+        ["wl-copy"],
+        ["xclip", "-selection", "clipboard"],
+        ["xsel", "--clipboard", "--input"],
+        ["clip"],
+    ]
+    for command in clipboard_commands:
+        if shutil.which(command[0]) is None:
+            continue
+        subprocess.run(command, input=text, text=True, check=True)
+        return
+
+    raise RuntimeError(
+        "No clipboard command found. Install pbcopy, wl-copy, xclip, xsel, or clip."
+    )
 
 
 class CondaMetadataTui(App[None]):
@@ -118,6 +157,7 @@ class CondaMetadataTui(App[None]):
         self._channel_draft = self._channel_name
         self._download_indicator_override: str | None = None
         self._download_in_progress = False
+        self._file_action_in_progress = False
         self._last_package_highlight: int | None = None
         self._last_package_scroll_y = 0.0
         self._sidebar_vim_g_pending = False
@@ -670,6 +710,12 @@ class CondaMetadataTui(App[None]):
     def _dependency_matchspec_at(self, index: int) -> str | None:
         return self.query_one("#main-panel", MainPanel).dependency_matchspec_at(index)
 
+    def _selected_file_path(self) -> str | None:
+        return self.query_one("#main-panel", MainPanel).selected_file_path()
+
+    def _file_path_at(self, index: int) -> str | None:
+        return self.query_one("#main-panel", MainPanel).file_path_at(index)
+
     def _open_matchspec_screen(
         self, initial_value: str, *, select_on_focus: bool = True
     ) -> None:
@@ -808,6 +854,31 @@ class CondaMetadataTui(App[None]):
                 return record
         return None
 
+    async def _package_url_for_version_entry(
+        self, package_name: str, entry: VersionEntry
+    ) -> str:
+        record = await self._get_record_for_version_entry(package_name, entry)
+        if record is not None:
+            return str(record.url)
+
+        channel_base = self._channel_name.rstrip("/")
+        if "://" not in channel_base:
+            channel_base = f"https://conda.anaconda.org/{channel_base}"
+        return f"{channel_base}/{entry.subdir}/{entry.file_name}"
+
+    @staticmethod
+    def _file_destination_path(file_path: str) -> Path:
+        relative_path = Path(file_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise RuntimeError(f"Unsafe package file path: {file_path}")
+        return (Path.cwd() / relative_path).resolve()
+
+    def _highlighted_version_entry(self) -> VersionEntry | None:
+        row = self._highlighted_version_row()
+        if row is None or row.kind != "entry" or row.entry is None:
+            return None
+        return row.entry
+
     def _version_preview_key(
         self, package_name: str, entry: VersionEntry
     ) -> VersionPreviewKey:
@@ -898,15 +969,7 @@ class CondaMetadataTui(App[None]):
 
         temporary_destination: Path | None = None
         try:
-            record = await self._get_record_for_version_entry(package_name, entry)
-            if record is not None:
-                url = str(record.url)
-            else:
-                channel_base = self._channel_name.rstrip("/")
-                if "://" not in channel_base:
-                    channel_base = f"https://conda.anaconda.org/{channel_base}"
-                url = f"{channel_base}/{entry.subdir}/{entry.file_name}"
-
+            url = await self._package_url_for_version_entry(package_name, entry)
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
             from . import package_download_to_path
@@ -961,6 +1024,168 @@ class CondaMetadataTui(App[None]):
             )
         except Exception:
             self._download_in_progress = False
+            raise
+
+    def _open_file_action_screen(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> None:
+        self.push_screen(
+            FileActionScreen(file_path),
+            lambda action: self._handle_file_action_result(
+                package_name, entry, file_path, action
+            ),
+        )
+
+    def _defer_file_action_screen(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> None:
+        self.call_after_refresh(
+            lambda: self._open_file_action_screen(package_name, entry, file_path)
+        )
+
+    def _request_file_action_for_selected_file(self) -> None:
+        if self._mode != "versions" or self._file_action_in_progress:
+            return
+
+        package_name = self._selected_package
+        entry = self._highlighted_version_entry()
+        file_path = self._selected_file_path()
+        if package_name is None or entry is None or file_path is None:
+            self.notify(
+                "Select a package file first.",
+                title="Files",
+                severity="warning",
+            )
+            return
+
+        self._defer_file_action_screen(package_name, entry, file_path)
+
+    async def _fetch_package_file_bytes(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> bytes:
+        url = await self._package_url_for_version_entry(package_name, entry)
+        from . import fetch_raw_package_file_from_url
+
+        return await fetch_raw_package_file_from_url(self._client, url, file_path)
+
+    async def _download_selected_package_file(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> None:
+        temporary_destination: Path | None = None
+        try:
+            destination = self._file_destination_path(file_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary_destination = destination.with_name(f"{destination.name}.part")
+            temporary_destination.write_bytes(
+                await self._fetch_package_file_bytes(package_name, entry, file_path)
+            )
+            temporary_destination.replace(destination)
+        except Exception as exc:
+            if temporary_destination is not None:
+                temporary_destination.unlink(missing_ok=True)
+            self.notify(
+                f"Failed to download {file_path}: {exc!s}",
+                title="Files",
+                severity="error",
+            )
+            return
+
+        self.notify(
+            f"Downloaded file to {destination}",
+            title="Files",
+        )
+
+    async def _preview_selected_package_file(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> None:
+        temporary_file: Path | None = None
+        try:
+            package_bytes = await self._fetch_package_file_bytes(
+                package_name, entry, file_path
+            )
+            suffix = Path(file_path).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                handle.write(package_bytes)
+                temporary_file = Path(handle.name)
+
+            with self.suspend():
+                subprocess.run(
+                    [*_resolve_pager_command(), str(temporary_file)],
+                    check=True,
+                )
+        except Exception as exc:
+            self.notify(
+                f"Failed to preview {file_path}: {exc!s}",
+                title="Files",
+                severity="error",
+            )
+            return
+        finally:
+            if temporary_file is not None:
+                temporary_file.unlink(missing_ok=True)
+
+    async def _copy_selected_package_file_to_clipboard(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> None:
+        try:
+            package_bytes = await self._fetch_package_file_bytes(
+                package_name, entry, file_path
+            )
+            _copy_text_to_clipboard(package_bytes.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            self.notify(
+                f"Failed to copy {file_path}: {exc!s}",
+                title="Files",
+                severity="error",
+            )
+            return
+
+        self.notify(f"Copied {file_path} to clipboard", title="Files")
+
+    async def _run_file_action(
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        action: Literal["download", "preview", "clipboard"],
+    ) -> None:
+        try:
+            if action == "download":
+                await self._download_selected_package_file(
+                    package_name, entry, file_path
+                )
+                return
+            if action == "preview":
+                await self._preview_selected_package_file(
+                    package_name, entry, file_path
+                )
+                return
+            await self._copy_selected_package_file_to_clipboard(
+                package_name, entry, file_path
+            )
+        finally:
+            self._file_action_in_progress = False
+
+    def _handle_file_action_result(
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        action: Literal["download", "preview", "clipboard"] | None,
+    ) -> None:
+        if action is None or self._file_action_in_progress:
+            return
+
+        self._file_action_in_progress = True
+        try:
+            self.run_worker(
+                self._run_file_action(package_name, entry, file_path, action),
+                group="file-action",
+                exclusive=True,
+                exit_on_error=False,
+            )
+        except Exception:
+            self._file_action_in_progress = False
             raise
 
     def _render_package_preview(
@@ -1507,11 +1732,18 @@ class CondaMetadataTui(App[None]):
             and self._main_panel_shows_version_details()
             and self._main_panel_is_focused()
             and event.key == "enter"
-            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
-            matchspec = self._selected_dependency_matchspec()
-            if matchspec is not None:
-                self._defer_matchspec_screen(matchspec)
+            main_panel = self.query_one("#main-panel", MainPanel)
+            if main_panel.dependency_section_is_active():
+                matchspec = self._selected_dependency_matchspec()
+                if matchspec is not None:
+                    self._defer_matchspec_screen(matchspec)
+                event.stop()
+                return
+            if main_panel.file_section_is_active():
+                self._request_file_action_for_selected_file()
+                event.stop()
+                return
             event.stop()
             return
 
@@ -1785,6 +2017,17 @@ class CondaMetadataTui(App[None]):
             self._set_active_main_section(1)
             self._focus_main_panel()
             self._defer_matchspec_screen(matchspec)
+            return
+
+        if event.option_list.id == "detail-option-list-2":
+            file_path = self._file_path_at(event.option_index)
+            entry = self._highlighted_version_entry()
+            package_name = self._selected_package
+            if file_path is None or entry is None or package_name is None:
+                return
+            self._set_active_main_section(2)
+            self._focus_main_panel()
+            self._defer_file_action_screen(package_name, entry, file_path)
             return
 
         if event.option_list.id != "sidebar-list":

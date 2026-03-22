@@ -34,3 +34,4 @@ class VersionDetailsData:
     constraints: tuple[str, ...]
     run_exports: tuple[str, ...]
     files: tuple[str, ...]
+    file_paths: tuple[str, ...] = ()

@@ -1651,6 +1651,23 @@ def test_dependency_list_entry_unescapes_matchspec_text() -> None:
     assert entries[0].matchspec == "demo [version='>=1']"
 
 
+def test_file_list_entry_uses_plain_file_path() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=("site-packages/demo.py",),
+        file_paths=("site-packages/demo.py",),
+    )
+
+    entries = view._file_entries_for_details()
+
+    assert entries[0].label == "site-packages/demo.py"
+    assert entries[0].path == "site-packages/demo.py"
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -1796,6 +1813,39 @@ def test_on_key_enter_opens_matchspec_screen_for_selected_dependency(
     assert event.stopped is True
 
 
+def test_on_key_enter_opens_file_action_screen_for_selected_file(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_request_file_action_for_selected_file",
+        lambda: opened.append("file"),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("enter")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert opened == ["file"]
+    assert event.stopped is True
+
+
 def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
     app = CondaMetadataTui()
     opened: list[tuple[str, bool]] = []
@@ -1820,6 +1870,41 @@ def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
     callback()
 
     assert opened == [("numpy >=2", False)]
+
+
+def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    opened: list[tuple[str, str, str]] = []
+    scheduled: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "_open_file_action_screen",
+        lambda package_name, selected_entry, file_path: opened.append(
+            (package_name, selected_entry.file_name, file_path)
+        ),
+    )
+    monkeypatch.setattr(
+        app, "call_after_refresh", lambda callback: scheduled.append(callback)
+    )
+
+    app._defer_file_action_screen("demo", entry, "info/about.json")
+
+    assert opened == []
+    assert len(scheduled) == 1
+
+    callback = scheduled[0]
+    assert callable(callback)
+    callback()
+
+    assert opened == [("demo", entry.file_name, "info/about.json")]
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
@@ -1999,6 +2084,59 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
     assert active_sections == [1]
     assert tabs == ["constraints"]
     assert focused == ["main"]
+
+
+def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._selected_package = "demo"
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    opened: list[tuple[str, str]] = []
+    sections: list[int] = []
+    focused: list[str] = []
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+        highlighted = 0
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = type(
+                "OptionListEvent", (), {"id": "detail-option-list-2"}
+            )()
+            self.option_index = 0
+
+    monkeypatch.setattr(app, "_file_path_at", lambda index: "info/about.json")
+    monkeypatch.setattr(app, "_highlighted_version_entry", lambda: entry)
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app,
+        "_defer_file_action_screen",
+        lambda package_name, selected_entry, file_path: opened.append(
+            (package_name, file_path)
+        ),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeOptionList(),
+    )
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert sections == [2]
+    assert focused == ["main"]
+    assert opened == [("demo", "info/about.json")]
 
 
 def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
@@ -2765,6 +2903,150 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     app._request_download_for_highlighted_entry()
 
     assert worker_calls == []
+
+
+def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    worker_calls: list[dict[str, object]] = []
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._handle_file_action_result("demo", entry, "info/about.json", "download")
+
+    assert worker_calls == [
+        {
+            "group": "file-action",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_download_selected_package_file_writes_relative_path(
+    tmp_path, monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    notifications: list[str] = []
+
+    async def _fake_fetch(
+        package_name: str, selected_entry: VersionEntry, file_path: str
+    ) -> bytes:
+        assert package_name == "demo"
+        assert selected_entry == entry
+        assert file_path == "site-packages/demo.py"
+        return b"print('demo')\n"
+
+    def _fake_notify(message: str, **kwargs: object) -> None:
+        del kwargs
+        notifications.append(message)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
+    monkeypatch.setattr(app, "notify", _fake_notify)
+
+    asyncio.run(
+        app._download_selected_package_file("demo", entry, "site-packages/demo.py")
+    )
+
+    destination = (tmp_path / "site-packages" / "demo.py").resolve()
+    assert destination.read_bytes() == b"print('demo')\n"
+    assert notifications == [f"Downloaded file to {destination}"]
+
+
+def test_preview_selected_package_file_uses_pager(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    commands: list[list[str]] = []
+
+    async def _fake_fetch(
+        package_name: str, selected_entry: VersionEntry, file_path: str
+    ) -> bytes:
+        assert package_name == "demo"
+        assert selected_entry == entry
+        assert file_path == "info/about.json"
+        return b'{"name": "demo"}\n'
+
+    class _SuspendContext:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            del exc_type, exc, tb
+            return None
+
+    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
+    monkeypatch.setattr(app, "suspend", lambda: _SuspendContext())
+    monkeypatch.setattr("pixi_browse.tui.app._resolve_pager_command", lambda: ["less"])
+    monkeypatch.setattr(
+        "pixi_browse.tui.app.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+
+    asyncio.run(app._preview_selected_package_file("demo", entry, "info/about.json"))
+
+    assert commands
+    assert commands[0][0] == "less"
+    assert commands[0][-1].endswith(".json")
+
+
+def test_copy_selected_package_file_to_clipboard(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    copied: list[str] = []
+    notifications: list[str] = []
+
+    async def _fake_fetch(
+        package_name: str, selected_entry: VersionEntry, file_path: str
+    ) -> bytes:
+        assert package_name == "demo"
+        assert selected_entry == entry
+        assert file_path == "info/index.json"
+        return b'{"subdir": "noarch"}\n'
+
+    def _fake_notify(message: str, **kwargs: object) -> None:
+        del kwargs
+        notifications.append(message)
+
+    monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
+    monkeypatch.setattr("pixi_browse.tui.app._copy_text_to_clipboard", copied.append)
+    monkeypatch.setattr(app, "notify", _fake_notify)
+
+    asyncio.run(
+        app._copy_selected_package_file_to_clipboard("demo", entry, "info/index.json")
+    )
+
+    assert copied == ['{"subdir": "noarch"}\n']
+    assert notifications == ["Copied info/index.json to clipboard"]
 
 
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(

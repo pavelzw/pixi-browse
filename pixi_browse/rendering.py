@@ -317,6 +317,7 @@ def build_version_details_data(
         constraints=constraints,
         run_exports=run_export_lines,
         files=tuple(file_lines),
+        file_paths=tuple(package_paths or ()),
     )
 
 
