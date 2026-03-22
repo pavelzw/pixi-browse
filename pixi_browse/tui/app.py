@@ -1019,17 +1019,14 @@ class CondaMetadataTui(App[None]):
         if self._mode != "versions" or self._file_action_in_progress:
             return
 
-        package_name = self._selected_package
-        entry = self._highlighted_version_entry()
         file_path = self._selected_file_path()
-        if package_name is None or entry is None or file_path is None:
-            self.notify(
-                "Select a package file first.",
-                title="Files",
-                severity="warning",
-            )
+        if file_path is None:
             return
 
+        package_name = self._selected_package
+        entry = self._highlighted_version_entry()
+        assert package_name is not None
+        assert entry is not None
         self._defer_file_action_screen(package_name, entry, file_path)
 
     async def _fetch_package_file_bytes(

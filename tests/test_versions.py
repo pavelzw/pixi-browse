@@ -1911,6 +1911,41 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
     assert opened == [("demo", entry.file_name, "info/about.json")]
 
 
+def test_request_file_action_for_selected_file_is_noop_without_file_path(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    monkeypatch.setattr(app, "_selected_file_path", lambda: None)
+    monkeypatch.setattr(app, "_highlighted_version_entry", lambda: entry)
+    monkeypatch.setattr(
+        app,
+        "_defer_file_action_screen",
+        lambda package_name, selected_entry, file_path: (_ for _ in ()).throw(
+            AssertionError("should not open file action screen")
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not notify when no file is selectable")
+        ),
+    )
+
+    app._request_file_action_for_selected_file()
+
+
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
