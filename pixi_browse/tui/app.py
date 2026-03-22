@@ -1602,7 +1602,7 @@ class CondaMetadataTui(App[None]):
     ) -> None:
         if event.option_list.id != "sidebar-list":
             return
-        if self._selected_pane != "sidebar":
+        if self._sidebar_is_focused() and self._selected_pane != "sidebar":
             self._set_selected_pane("sidebar")
         self._update_main_panel_for_sidebar_highlight(event.option_index)
 

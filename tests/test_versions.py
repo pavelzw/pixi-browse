@@ -1413,6 +1413,40 @@ def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
     assert event.stopped is False
 
 
+def test_sidebar_highlight_does_not_switch_selected_pane_without_sidebar_focus(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._selected_pane = "main"
+    highlighted_updates: list[int] = []
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 3
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "_update_main_panel_for_sidebar_highlight",
+        lambda option_index: highlighted_updates.append(option_index),
+    )
+    monkeypatch.setattr(
+        app,
+        "_update_filter_indicator",
+        lambda: (_ for _ in ()).throw(AssertionError("should not update pane state")),
+    )
+
+    event = _FakeEvent()
+    app.on_option_list_option_highlighted(event)
+
+    assert app._selected_pane == "main"
+    assert highlighted_updates == [3]
+
+
 def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
