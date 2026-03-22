@@ -97,6 +97,8 @@ class VersionDetailsView(Vertical):
         self._details: VersionDetailsData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
+        # Duplicate this state so we can avoid updating on every Textual
+        # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
 
     def compose(self) -> ComposeResult:
