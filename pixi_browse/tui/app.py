@@ -866,7 +866,13 @@ class CondaMetadataTui(App[None]):
         relative_path = Path(file_path)
         if relative_path.is_absolute() or ".." in relative_path.parts:
             raise RuntimeError(f"Unsafe package file path: {file_path}")
-        return (Path.cwd() / relative_path).resolve()
+        cwd = Path.cwd().resolve()
+        destination = (cwd / relative_path).resolve()
+        try:
+            destination.relative_to(cwd)
+        except ValueError as exc:
+            raise RuntimeError(f"Unsafe package file path: {file_path}") from exc
+        return destination
 
     def _highlighted_version_entry(self) -> VersionEntry | None:
         row = self._highlighted_version_row()

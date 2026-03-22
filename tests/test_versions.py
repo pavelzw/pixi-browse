@@ -13,6 +13,7 @@ from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
 from rich.text import Text
+from textual.app import App
 from textual.events import Paste
 
 from pixi_browse import __version__
@@ -37,6 +38,7 @@ from pixi_browse.tui import (
     INACTIVE_TAB_STYLE,
     DetailSection,
     Empty,
+    FileActionScreen,
     FilePreviewScreen,
     HelpScreen,
     MainPanel,
@@ -2972,6 +2974,16 @@ def test_download_selected_package_file_writes_relative_path(
     assert notifications == [f"Downloaded file to {destination}"]
 
 
+def test_file_destination_path_rejects_symlink_escape(tmp_path, monkeypatch) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="Unsafe package file path"):
+        CondaMetadataTui._file_destination_path("link/demo.py")
+
+
 def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     app = CondaMetadataTui()
     entry = VersionEntry(
@@ -3019,6 +3031,39 @@ def test_preview_title_uses_human_readable_size() -> None:
     rendered = CondaMetadataTui._preview_title("lib/libstdc++.so", b"x" * 10_800_000)
 
     assert rendered == "lib/libstdc++.so (10.3 MiB)"
+
+
+def test_file_preview_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = FilePreviewScreen("info/[about].json", "[demo]\n")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#file-preview-title")._render_markup is False
+            assert screen.query_one("#file-preview-body")._render_markup is False
+
+    asyncio.run(_run())
+
+
+def test_file_action_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = FileActionScreen("info/[about].json")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#file-action-path")._render_markup is False
+
+    asyncio.run(_run())
 
 
 def test_download_selected_version_entry_downloads_to_cwd_and_notifies(

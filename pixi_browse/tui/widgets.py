@@ -934,7 +934,7 @@ class FileActionScreen(ModalScreen[FileAction | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
-            yield Static(self._file_path, id="file-action-path")
+            yield Static(self._file_path, id="file-action-path", markup=False)
             yield OptionList(
                 *(label for _, label in self._ACTIONS),
                 id="file-action-list",
@@ -1007,9 +1007,9 @@ class FilePreviewScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-preview-dialog"):
-            yield Static(self._title, id="file-preview-title")
+            yield Static(self._title, id="file-preview-title", markup=False)
             with VerticalScroll(id="file-preview-scroll"):
-                yield Static(self._content, id="file-preview-body")
+                yield Static(self._content, id="file-preview-body", markup=False)
 
     def on_mount(self) -> None:
         self.query_one("#file-preview-scroll", VerticalScroll).focus()
