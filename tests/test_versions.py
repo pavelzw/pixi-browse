@@ -26,6 +26,8 @@ from pixi_browse.rendering import (
     render_selected_version_details,
 )
 from pixi_browse.tui import (
+    ACTIVE_SECTION_TITLE_STYLE,
+    INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
     DetailSection,
@@ -588,7 +590,7 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     asyncio.run(app._open_versions("demo"))
 
     assert focused == []
-    assert app._sidebar_title_text().plain == "[0] Versions: demo"
+    assert app._sidebar_title_text(selected=False).plain == "[0] Versions: demo"
 
 
 def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
@@ -1208,15 +1210,17 @@ def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
 
 def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
     view = VersionDetailsView()
+    view._pane_selected = False
 
     view._active_section = 0
     inactive_header = view._render_dependency_header()
 
+    view._pane_selected = True
     view._active_section = 1
     active_header = view._render_dependency_header()
 
     assert "[ / ]" not in inactive_header.plain
-    assert "[ / ]" in active_header.plain
+    assert "[ / ]" not in active_header.plain
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
@@ -1240,6 +1244,7 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
         for span in header.spans
         if isinstance(span.style, Style)
     )
+    assert header.style == INACTIVE_SECTION_TITLE_STYLE
 
 
 def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> None:
@@ -1262,6 +1267,23 @@ def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> 
         for span in header.spans
         if isinstance(span.style, Style)
     )
+
+
+def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> None:
+    view = VersionDetailsView()
+    view._pane_selected = True
+    view._active_section = 1
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=("dep",),
+        constraints=(),
+        run_exports=(),
+        files=("file",),
+    )
+
+    header = view._render_dependency_header()
+
+    assert header.style == ACTIVE_SECTION_TITLE_STYLE
 
 
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:

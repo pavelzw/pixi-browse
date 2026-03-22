@@ -39,7 +39,14 @@ from pixi_browse.search import fuzzy_score
 
 from .state import AboutUrls, ChannelStateSnapshot
 from .version_loader import VersionDataLoader
-from .widgets import DEPENDENCY_TABS, HelpScreen, MainPanel, SidebarPanel
+from .widgets import (
+    ACTIVE_SECTION_TITLE_STYLE,
+    DEPENDENCY_TABS,
+    INACTIVE_SECTION_TITLE_STYLE,
+    HelpScreen,
+    MainPanel,
+    SidebarPanel,
+)
 
 
 class CondaMetadataTui(App[None]):
@@ -601,9 +608,11 @@ class CondaMetadataTui(App[None]):
 
     def _focus_main_panel(self) -> None:
         self.query_one("#main-panel", MainPanel).focus()
+        self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
         self.query_one("#sidebar-list", OptionList).focus()
+        self._update_filter_indicator()
 
     def _sidebar_is_focused(self) -> bool:
         return self.focused is self.query_one("#sidebar-list", OptionList)
@@ -1024,7 +1033,7 @@ class CondaMetadataTui(App[None]):
         footer += " | Help: ?"
         return footer
 
-    def _sidebar_title_text(self) -> Text:
+    def _sidebar_title_text(self, *, selected: bool) -> Text:
         if self._mode == "versions":
             label = (
                 f"Versions: {self._selected_package}"
@@ -1035,7 +1044,12 @@ class CondaMetadataTui(App[None]):
             label = "Platforms"
         else:
             label = "Packages"
-        return Text(f"[0] {label}", style="bold")
+        return Text(
+            f"[0] {label}",
+            style=ACTIVE_SECTION_TITLE_STYLE
+            if selected
+            else INACTIVE_SECTION_TITLE_STYLE,
+        )
 
     def _download_indicator_text(self) -> Text:
         if self._download_indicator_override is not None:
@@ -1095,7 +1109,9 @@ class CondaMetadataTui(App[None]):
 
     def _update_filter_indicator(self) -> None:
         sidebar = self.query_one("#sidebar", Vertical)
-        sidebar.border_title = self._sidebar_title_text()
+        sidebar.border_title = self._sidebar_title_text(
+            selected=self._sidebar_is_focused()
+        )
         sidebar.border_subtitle = ""
         self.query_one("#footer", Static).update(self._footer_text())
         self._update_download_indicator()
