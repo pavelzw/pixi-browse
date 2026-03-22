@@ -18,7 +18,12 @@ from textual.events import Paste
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.models import CompareSelection, PackageFile, VersionDetailsData
+from pixi_browse.models import (
+    CompareSelection,
+    PackageFile,
+    VersionCompareData,
+    VersionDetailsData,
+)
 from pixi_browse.rendering import (
     build_version_artifact_data,
     build_version_compare_data,
@@ -38,6 +43,7 @@ from pixi_browse.tui import (
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
+    CompareDetailsView,
     DetailSection,
     Empty,
     FileActionScreen,
@@ -1634,7 +1640,8 @@ def test_dependency_header_tabs_are_clickable() -> None:
 
     assert text.plain == "Constraints (1)"
     assert any(
-        span.style.meta == {"@click": ("app.select_dependency_tab", ("constraints",))}
+        span.style.meta
+        == {"@click": ("detail.select_dependency_tab", ("constraints",))}
         for span in text.spans
         if isinstance(span.style, Style)
     )
@@ -1643,7 +1650,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
         for span in text.spans
         if isinstance(span.style, Style)
         and span.style.meta
-        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+        != {"@click": ("detail.select_dependency_tab", ("constraints",))}
     )
 
 
@@ -1660,8 +1667,44 @@ def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
         for span in text.spans
         if isinstance(span.style, Style)
         and span.style.meta
-        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+        != {"@click": ("detail.select_dependency_tab", ("constraints",))}
     )
+
+
+def test_compare_details_view_uses_detail_sections_with_selected_pane_class() -> None:
+    compare_data = VersionCompareData(
+        left_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.0"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.0-py313h123_0.conda",
+            ),
+        ),
+        right_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.1"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.1-py313h123_0.conda",
+            ),
+        ),
+        metadata_diffs=(),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=(),
+    )
+    view = CompareDetailsView(compare_data)
+    sections = list(view.compose())
+
+    assert "-pane-selected" in view.classes
+    assert len(sections) == 3
+    assert all(isinstance(section, DetailSection) for section in sections)
 
 
 def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
@@ -2314,62 +2357,31 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     assert opened == [("demo", "info/about.json")]
 
 
-def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
-    section = DetailSection("Files", 2)
-    activated: list[tuple[int, bool]] = []
-
-    class _FakeView:
-        def activate_section(
-            self, index: int, *, focus_main_panel: bool = False
-        ) -> None:
-            activated.append((index, focus_main_panel))
-
-    class _FakeApp:
-        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
-            assert selector == "#version-details-view"
-            return _FakeView()
-
-    monkeypatch.setattr(
-        DetailSection,
-        "app",
-        property(lambda self: _FakeApp()),
-    )
+def test_clicking_detail_section_activates_and_focuses_pane() -> None:
+    activated: list[int] = []
+    section = DetailSection("Files", 2, on_activate=activated.append)
 
     event = _FakeClickEvent()
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert activated == [(2, True)]
+    assert activated == [2]
     assert event.stopped is True
 
 
-def test_clicking_dependency_tab_dispatches_without_hover_link_action(
-    monkeypatch,
-) -> None:
-    section = DetailSection("Dependencies", 1)
-    selected_tabs: list[tuple[str, bool]] = []
-
-    class _FakeView:
-        def select_dependency_tab(
-            self, tab: str, *, focus_main_panel: bool = False
-        ) -> None:
-            selected_tabs.append((tab, focus_main_panel))
-
-    class _FakeApp:
-        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
-            assert selector == "#version-details-view"
-            return _FakeView()
-
-    monkeypatch.setattr(
-        DetailSection,
-        "app",
-        property(lambda self: _FakeApp()),
+def test_clicking_dependency_tab_dispatches_without_hover_link_action() -> None:
+    selected_tabs: list[str] = []
+    section = DetailSection(
+        "Dependencies",
+        1,
+        on_activate=lambda _index: None,
+        on_select_dependency_tab=selected_tabs.append,
     )
 
     event = _FakeClickEvent(
         Style(
             meta={
                 "@click": (
-                    "app.select_dependency_tab",
+                    "detail.select_dependency_tab",
                     ("constraints",),
                 )
             }
@@ -2377,7 +2389,7 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == [("constraints", False)]
+    assert selected_tabs == ["constraints"]
     assert event.stopped is True
 
 

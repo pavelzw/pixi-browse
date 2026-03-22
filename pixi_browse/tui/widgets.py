@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -34,6 +35,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "detail.select_dependency_tab"
 
 
 @dataclass(frozen=True)
@@ -70,12 +72,18 @@ class DetailSection(Vertical):
         title: str,
         index: int,
         *,
+        on_activate: Callable[[int], None],
+        on_select_dependency_tab: Callable[[DependencyTab], None] | None = None,
         show_tabs: bool = False,
         use_option_list: bool = False,
+        id_prefix: str = "detail",
     ) -> None:
         super().__init__(classes="detail-section")
         self._index = index
         self._use_option_list = use_option_list
+        self._id_prefix = id_prefix
+        self._on_activate = on_activate
+        self._on_select_dependency_tab = on_select_dependency_tab
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
@@ -83,47 +91,42 @@ class DetailSection(Vertical):
     def compose(self) -> ComposeResult:
         if self._use_option_list:
             yield DetailOptionList(
-                id=f"detail-option-list-{self._index}",
+                id=f"{self._id_prefix}-option-list-{self._index}",
                 classes="detail-option-list",
                 markup=False,
             )
             return
 
-        with VerticalScroll(id=f"detail-scroll-{self._index}", classes="detail-scroll"):
-            yield Static(id=f"detail-body-{self._index}", classes="detail-body")
+        with VerticalScroll(
+            id=f"{self._id_prefix}-scroll-{self._index}", classes="detail-scroll"
+        ):
+            yield Static(
+                id=f"{self._id_prefix}-body-{self._index}",
+                classes="detail-body",
+            )
 
     def on_click(self, event: Click) -> None:
         style = event.style
         meta = style.meta if style is not None else None
         click_meta = meta.get("@click") if meta is not None else None
-        if click_meta is not None:
+        if click_meta is not None and self._on_select_dependency_tab is not None:
             action_name, args = click_meta
-            if action_name == "app.select_dependency_tab":
-                self.app.query_one(
-                    "#version-details-view", VersionDetailsView
-                ).select_dependency_tab(
-                    *args,
-                    focus_main_panel=False,
-                )
+            if action_name == DETAIL_SELECT_DEPENDENCY_TAB_ACTION:
+                self._on_select_dependency_tab(*args)
                 event.stop()
                 return
-        self.app.query_one(
-            "#version-details-view", VersionDetailsView
-        ).activate_section(
-            self._index,
-            focus_main_panel=True,
-        )
+        self._on_activate(self._index)
         event.stop()
 
     def update_header(self, title: str | Text) -> None:
         self.border_title = title
 
     def update_body(self, body: str | Text) -> None:
-        self.query_one(f"#detail-body-{self._index}", Static).update(body)
+        self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
 
     def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
         option_list = self.query_one(
-            f"#detail-option-list-{self._index}", DetailOptionList
+            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
         )
         option_list.clear_options()
         option_list.add_options(labels)
@@ -135,92 +138,31 @@ class DetailSection(Vertical):
         self.set_class(not active, "-collapsed")
 
     def scroll_body_home(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
-        )
+        self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        ).scroll_home(animate=False, immediate=True, x_axis=False)
 
     def scroll_body_end(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_end(
-            animate=False
-        )
+        self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        ).scroll_end(animate=False)
 
     def scroll_body_by(self, delta: float) -> None:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        scroll = self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        )
         scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
 
     def page_step(self) -> int:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
-        return max(1, scroll.size.height)
-
-
-class CompareSection(Vertical):
-    def __init__(self, title: str, index: int) -> None:
-        super().__init__(classes="detail-section")
-        self._index = index
-        del title
-        self.auto_links = False
-        self.styles.border_title_align = "left"
-
-    def compose(self) -> ComposeResult:
-        with VerticalScroll(
-            id=f"compare-scroll-{self._index}", classes="detail-scroll"
-        ):
-            yield Static(id=f"compare-body-{self._index}", classes="detail-body")
-
-    def on_click(self, event: Click) -> None:
-        style = event.style
-        meta = style.meta if style is not None else None
-        click_meta = meta.get("@click") if meta is not None else None
-        if click_meta is not None:
-            action_name, args = click_meta
-            if action_name == "screen.select_compare_dependency_tab":
-                self.screen.query_one(
-                    "#compare-details-view", CompareDetailsView
-                ).select_dependency_tab(*args)
-                event.stop()
-                return
-
-        self.screen.query_one(
-            "#compare-details-view", CompareDetailsView
-        ).set_active_section(self._index)
-        event.stop()
-
-    def update_header(self, title: str | Text) -> None:
-        self.border_title = title
-
-    def update_body(self, body: str | Text) -> None:
-        self.query_one(f"#compare-body-{self._index}", Static).update(body)
-
-    def set_active(self, active: bool) -> None:
-        self.set_class(active, "-active")
-        self.set_class(not active, "-collapsed")
-
-    def scroll_body_home(self) -> None:
-        self.query_one(f"#compare-scroll-{self._index}", VerticalScroll).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
+        scroll = self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
         )
-
-    def scroll_body_end(self) -> None:
-        self.query_one(f"#compare-scroll-{self._index}", VerticalScroll).scroll_end(
-            animate=False
-        )
-
-    def scroll_body_by(self, delta: float) -> None:
-        scroll = self.query_one(f"#compare-scroll-{self._index}", VerticalScroll)
-        scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
-
-    def page_step(self) -> int:
-        scroll = self.query_one(f"#compare-scroll-{self._index}", VerticalScroll)
         return max(1, scroll.size.height)
 
 
 class VersionDetailsView(Vertical):
     def __init__(self) -> None:
-        super().__init__(id="version-details-view")
+        super().__init__(id="version-details-view", classes="detail-view")
         self._details: VersionDetailsData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
@@ -237,9 +179,25 @@ class VersionDetailsView(Vertical):
         self._pane_selected = False
 
     def compose(self) -> ComposeResult:
-        yield DetailSection("Metadata", 0)
-        yield DetailSection("Dependencies", 1, show_tabs=True, use_option_list=True)
-        yield DetailSection("Files", 2, use_option_list=True)
+        yield DetailSection(
+            "Metadata",
+            0,
+            on_activate=self._activate_section_from_click,
+        )
+        yield DetailSection(
+            "Dependencies",
+            1,
+            on_activate=self._activate_section_from_click,
+            on_select_dependency_tab=self._select_dependency_tab_from_click,
+            show_tabs=True,
+            use_option_list=True,
+        )
+        yield DetailSection(
+            "Files",
+            2,
+            on_activate=self._activate_section_from_click,
+            use_option_list=True,
+        )
 
     def set_details(self, details: VersionDetailsData) -> None:
         self._details = details
@@ -254,12 +212,19 @@ class VersionDetailsView(Vertical):
 
     def set_pane_selected(self, selected: bool) -> None:
         self._pane_selected = selected
+        self.set_class(selected, "-pane-selected")
         self._apply_section_state()
 
     def activate_section(self, index: int, *, focus_main_panel: bool = False) -> None:
         self.set_active_section(index)
         if focus_main_panel:
             self.app.query_one("#main-panel", MainPanel).focus()
+
+    def _activate_section_from_click(self, index: int) -> None:
+        self.activate_section(index, focus_main_panel=True)
+
+    def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
+        self.select_dependency_tab(tab, focus_main_panel=True)
 
     def cycle_active_section(self, direction: int) -> None:
         self._active_section = (self._active_section + direction) % 3
@@ -554,14 +519,7 @@ class VersionDetailsView(Vertical):
             else INACTIVE_TAB_STYLE
         )
         text.stylize(
-            Style(
-                meta={
-                    "@click": (
-                        "app.select_dependency_tab",
-                        (tab,),
-                    )
-                }
-            )
+            Style(meta={"@click": (DETAIL_SELECT_DEPENDENCY_TAB_ACTION, (tab,))})
         )
         return text
 
@@ -860,15 +818,34 @@ class CompareDetailsView(Vertical):
     _vim_g_pending = False
 
     def __init__(self, compare_data: VersionCompareData) -> None:
-        super().__init__(id="compare-details-view")
+        super().__init__(
+            id="compare-details-view", classes="detail-view -pane-selected"
+        )
         self._compare_data = compare_data
         self._active_section = 0
         self._dependency_tab_index = 0
+        self._pane_selected = True
 
     def compose(self) -> ComposeResult:
-        yield CompareSection("Metadata", 0)
-        yield CompareSection("Dependencies", 1)
-        yield CompareSection("Files", 2)
+        yield DetailSection(
+            "Metadata",
+            0,
+            on_activate=self.set_active_section,
+            id_prefix="compare",
+        )
+        yield DetailSection(
+            "Dependencies",
+            1,
+            on_activate=self.set_active_section,
+            on_select_dependency_tab=self.select_dependency_tab,
+            id_prefix="compare",
+        )
+        yield DetailSection(
+            "Files",
+            2,
+            on_activate=self.set_active_section,
+            id_prefix="compare",
+        )
 
     def on_mount(self) -> None:
         self._refresh_sections()
@@ -903,14 +880,14 @@ class CompareDetailsView(Vertical):
     def active_page_step(self) -> int:
         return self._section(self._active_section).page_step()
 
-    def _section(self, index: int) -> CompareSection:
-        return list(self.query(CompareSection))[index]
+    def _section(self, index: int) -> DetailSection:
+        return list(self.query(DetailSection))[index]
 
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
 
     def _apply_section_state(self) -> None:
-        for index, section in enumerate(self.query(CompareSection)):
+        for index, section in enumerate(self.query(DetailSection)):
             section.set_active(index == self._active_section)
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
         self._section(1).update_header(self._render_dependency_header())
@@ -934,7 +911,7 @@ class CompareDetailsView(Vertical):
             f"[{index + 1}] {label}",
             style=(
                 ACTIVE_SECTION_TITLE_STYLE
-                if index == self._active_section
+                if self._pane_selected and index == self._active_section
                 else INACTIVE_SECTION_TITLE_STYLE
             ),
         )
@@ -956,19 +933,28 @@ class CompareDetailsView(Vertical):
                 text.append(" - ", style=INACTIVE_TAB_STYLE)
             text.append_text(
                 self._render_clickable_dependency_tab(
-                    tab, labels[tab], active=tab == self._active_dependency_tab()
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_dependency_tab(),
+                    pane_active=self._pane_selected and self._active_section == 1,
                 )
             )
         return text
 
     @staticmethod
     def _render_clickable_dependency_tab(
-        tab: DependencyTab, label: str, *, active: bool
+        tab: DependencyTab, label: str, *, active: bool, pane_active: bool
     ) -> Text:
         text = Text(label)
-        text.stylize(ACTIVE_TAB_STYLE if active else INACTIVE_TAB_STYLE)
         text.stylize(
-            Style(meta={"@click": ("screen.select_compare_dependency_tab", (tab,))})
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(
+            Style(meta={"@click": (DETAIL_SELECT_DEPENDENCY_TAB_ACTION, (tab,))})
         )
         return text
 

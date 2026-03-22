@@ -96,6 +96,10 @@ Screen {
     display: none;
 }
 
+.detail-view {
+    height: 1fr;
+}
+
 .detail-section {
     height: 1fr;
     border: round $text;
@@ -113,7 +117,7 @@ Screen {
     border: round $text;
 }
 
-#main-panel.-active-pane .detail-section.-active {
+.detail-view.-pane-selected .detail-section.-active {
     border: round #ec4899;
 }
 
@@ -144,7 +148,7 @@ Screen {
     text-style: bold;
 }
 
-#main-panel.-active-pane .detail-section.-active .detail-option-list > .option-list--option-highlighted {
+.detail-view.-pane-selected .detail-section.-active .detail-option-list > .option-list--option-highlighted {
     color: #ffffff;
     background: #ec4899;
     text-style: bold;
