@@ -593,6 +593,43 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
     assert app._sidebar_title_text(selected=False).plain == "[0] Versions: demo"
 
 
+def test_open_platform_selector_no_longer_queries_removed_sidebar_title(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+
+    class _FakeOptionList:
+        highlighted = 3
+        scroll_y = 7.0
+
+    option_list = _FakeOptionList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    rendered: list[str] = []
+    statuses: list[str] = []
+    indicators: list[str] = []
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_render_platform_options", lambda: rendered.append("ok"))
+    monkeypatch.setattr(
+        app, "_update_platform_selection_status", lambda: statuses.append("ok")
+    )
+    monkeypatch.setattr(app, "_update_platform_indicator", lambda: indicators.append("ok"))
+
+    app._open_platform_selector()
+
+    assert app._mode == "platforms"
+    assert app._last_package_highlight == 3
+    assert app._last_package_scroll_y == 7.0
+    assert rendered == ["ok"]
+    assert statuses == ["ok"]
+    assert indicators == ["ok"]
+
+
 def test_escape_from_main_panel_focuses_sidebar(monkeypatch) -> None:
     app = CondaMetadataTui()
     focused: list[str] = []
@@ -1780,12 +1817,13 @@ def test_action_channel_key_c_starts_channel_edit_mode() -> None:
     app._mode = "packages"
     app._filter_mode = False
     app._channel_name = "custom-channel"
+    app._channel_draft = "stale-draft"
     app._update_filter_indicator = lambda: None  # type: ignore[method-assign]
 
     app.action_channel_key_c()
 
     assert app._channel_edit_mode is True
-    assert app._channel_draft == ""
+    assert app._channel_draft == "custom-channel"
 
 
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
@@ -1834,6 +1872,14 @@ def test_footer_text_shows_live_search_query_in_filter_mode() -> None:
     app._search_query = "polars"
 
     assert app._footer_text() == "Search: polars_"
+
+
+def test_footer_text_shows_live_channel_draft_in_channel_edit_mode() -> None:
+    app = CondaMetadataTui()
+    app._channel_edit_mode = True
+    app._channel_draft = "prefix.dev/conda-forge"
+
+    assert app._footer_text() == "Channel: prefix.dev/conda-forge_"
 
 
 def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:

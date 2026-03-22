@@ -329,7 +329,6 @@ class CondaMetadataTui(App[None]):
 
         self._mode = "platforms"
         self._draft_selected_platform_names = set(self._selected_platform_names)
-        self.query_one("#sidebar-title", Static).update("Platforms")
         self._render_platform_options()
         self._update_platform_selection_status()
         self._update_platform_indicator()
@@ -1024,6 +1023,9 @@ class CondaMetadataTui(App[None]):
         )
 
     def _footer_text(self) -> str:
+        if self._channel_edit_mode:
+            return f"Channel: {self._channel_draft}_"
+
         if self._mode == "packages" and self._filter_mode:
             return f"Search: {self._search_query}_"
 
@@ -1191,8 +1193,7 @@ class CondaMetadataTui(App[None]):
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("c")
             return
-        self._set_channel_edit_mode(True, reset_draft=False)
-        self._channel_draft = ""
+        self._set_channel_edit_mode(True, reset_draft=True)
         self._update_filter_indicator()
 
     def action_show_help(self) -> None:
