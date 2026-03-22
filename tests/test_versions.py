@@ -618,7 +618,9 @@ def test_open_platform_selector_no_longer_queries_removed_sidebar_title(
     monkeypatch.setattr(
         app, "_update_platform_selection_status", lambda: statuses.append("ok")
     )
-    monkeypatch.setattr(app, "_update_platform_indicator", lambda: indicators.append("ok"))
+    monkeypatch.setattr(
+        app, "_update_platform_indicator", lambda: indicators.append("ok")
+    )
 
     app._open_platform_selector()
 
