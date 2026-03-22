@@ -14,17 +14,53 @@ Screen {
     margin: 0;
 }
 
-#sidebar:focus-within {
+#sidebar.-active-pane {
     border: round #ec4899;
 }
 
 #sidebar-list {
     height: 1fr;
-    border: solid $surface;
+    border: none;
     padding: 0 0 0 1;
+    color: $text;
+    background: $background;
     scrollbar-size-vertical: 1;
     text-wrap: nowrap;
     text-overflow: ellipsis;
+}
+
+#sidebar-list:disabled {
+    color: $text;
+    background: $background;
+    opacity: 1;
+}
+
+#sidebar-list:disabled > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
+}
+
+#sidebar-list > .option-list--option-highlighted {
+    color: #f9a8d4;
+    background: #4a2233;
+    text-style: bold;
+}
+
+#sidebar.-active-pane #sidebar-list > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
+}
+
+#sidebar-list > .option-list--option-hover {
+    color: #f9a8d4;
+    background: #4a2233;
+}
+
+#sidebar-list:focus > .option-list--option-hover {
+    color: #f9a8d4;
+    background: #4a2233;
 }
 
 #status {
@@ -40,9 +76,6 @@ Screen {
     scrollbar-size-vertical: 1;
 }
 
-#main-panel:focus {
-}
-
 #main-placeholder-scroll {
     height: 1fr;
     border: round $text;
@@ -50,7 +83,7 @@ Screen {
     scrollbar-size-vertical: 1;
 }
 
-#main-panel:focus #main-placeholder-scroll {
+#main-panel.-active-pane #main-placeholder-scroll {
     border: round #ec4899;
 }
 
@@ -80,7 +113,7 @@ Screen {
     border: round $text;
 }
 
-#main-panel:focus .detail-section.-active {
+#main-panel.-active-pane .detail-section.-active {
     border: round #ec4899;
 }
 

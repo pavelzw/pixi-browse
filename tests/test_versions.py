@@ -1177,6 +1177,7 @@ def test_on_key_zero_focuses_sidebar_in_packages_mode(monkeypatch) -> None:
 def test_on_key_bracket_shortcut_cycles_dependency_tab(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
+    app._selected_pane = "main"
     focused: list[str] = []
     tab_directions: list[int] = []
 
@@ -1358,6 +1359,7 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 ) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
+    app._selected_pane = "main"
 
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
@@ -1376,6 +1378,73 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     app.on_key(event)  # type: ignore[arg-type]
 
     assert event.stopped is False
+
+
+def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_pane = "sidebar"
+    cycled: list[int] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "_cycle_main_dependency_tab",
+        lambda value: cycled.append(value),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("[", "[")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert cycled == []
+    assert event.stopped is False
+
+
+def test_sidebar_highlight_does_not_switch_selected_pane_without_sidebar_focus(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._selected_pane = "main"
+    highlighted_updates: list[int] = []
+
+    class _FakeOptionList:
+        id = "sidebar-list"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 3
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(
+        app,
+        "_update_main_panel_for_sidebar_highlight",
+        lambda option_index: highlighted_updates.append(option_index),
+    )
+    monkeypatch.setattr(
+        app,
+        "_update_filter_indicator",
+        lambda: (_ for _ in ()).throw(AssertionError("should not update pane state")),
+    )
+
+    event = _FakeEvent()
+    app.on_option_list_option_highlighted(event)  # type: ignore[arg-type]
+
+    assert app._selected_pane == "main"
+    assert highlighted_updates == [3]
 
 
 def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
@@ -1648,12 +1717,24 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
 def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
     panel = MainPanel()
     focused: list[str] = []
+    selected: list[str] = []
+
+    class _FakeApp:
+        def _set_selected_pane(self, pane: str) -> None:
+            selected.append(pane)
+
+    monkeypatch.setattr(
+        MainPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
 
     monkeypatch.setattr(panel, "focus", lambda: focused.append("main"))
 
     event = _FakeClickEvent()
     panel.on_click(event)  # type: ignore[arg-type]
 
+    assert selected == ["main"]
     assert focused == ["main"]
     assert event.stopped is True
 
@@ -1661,12 +1742,16 @@ def test_clicking_main_panel_focuses_it(monkeypatch) -> None:
 def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
     panel = SidebarPanel()
     focused: list[str] = []
+    selected: list[str] = []
 
     class _FakeSidebarList:
         def focus(self) -> None:
             focused.append("sidebar")
 
     class _FakeApp:
+        def _set_selected_pane(self, pane: str) -> None:
+            selected.append(pane)
+
         def query_one(
             self, selector: str, _widget_type: object = None
         ) -> _FakeSidebarList:
@@ -1681,6 +1766,30 @@ def test_clicking_sidebar_panel_focuses_sidebar_list(monkeypatch) -> None:
 
     event = _FakeClickEvent()
     panel.on_click(event)  # type: ignore[arg-type]
+
+    assert selected == ["sidebar"]
+    assert focused == ["sidebar"]
+    assert event.stopped is True
+
+
+def test_main_panel_h_key_uses_app_sidebar_focus(monkeypatch) -> None:
+    panel = MainPanel()
+    focused: list[str] = []
+
+    class _FakeApp:
+        def _focus_sidebar(self) -> None:
+            focused.append("sidebar")
+
+    monkeypatch.setattr(
+        MainPanel,
+        "app",
+        property(lambda self: _FakeApp()),
+    )
+    monkeypatch.setattr(panel, "_showing_version_details", lambda: False)
+    monkeypatch.setattr(panel, "current_page_step", lambda: 10)
+
+    event = _FakeKeyEvent("h", "h")
+    panel.on_key(event)  # type: ignore[arg-type]
 
     assert focused == ["sidebar"]
     assert event.stopped is True
@@ -1850,6 +1959,65 @@ def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
             "exit_on_error": False,
         }
     ]
+
+
+def test_apply_channel_selection_renders_sidebar_loading_placeholder(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_name = "conda-forge"
+
+    class _FakeOptionList:
+        def __init__(self) -> None:
+            self.disabled = False
+            self.options: list[str] = []
+            self.highlighted: int | None = None
+            self.focused = False
+
+        def clear_options(self) -> None:
+            self.options.clear()
+
+        def add_option(self, option: str) -> None:
+            self.options.append(option)
+
+        def focus(self) -> None:
+            self.focused = True
+
+    option_list = _FakeOptionList()
+    placeholder_updates: list[str] = []
+    notifications: list[str] = []
+    restored: list[object] = []
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
+        assert selector == "#sidebar-list"
+        return option_list
+
+    async def _fake_load_packages() -> bool:
+        assert option_list.options == ["Loading packages..."]
+        assert option_list.highlighted == 0
+        assert option_list.disabled is True
+        return False
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_snapshot_channel_state", lambda: "snapshot")
+    monkeypatch.setattr(app, "_clear_channel_loaded_state", lambda: None)
+    monkeypatch.setattr(app, "_show_main_placeholder", placeholder_updates.append)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_load_packages", _fake_load_packages)
+    monkeypatch.setattr(app, "_restore_channel_state", restored.append)
+    monkeypatch.setattr(app, "_restore_ui_from_snapshot", restored.append)
+    monkeypatch.setattr(
+        app, "notify", lambda message, **kwargs: notifications.append(message)
+    )
+
+    import asyncio
+
+    asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
+
+    assert placeholder_updates == ["# prefix.dev/conda-forge\n\nLoading repodata..."]
+    assert restored == ["snapshot", "snapshot"]
+    assert notifications == ["Failed to load channel: prefix.dev/conda-forge"]
+    assert option_list.focused is True
 
 
 def test_footer_text_matches_redesigned_shortcuts() -> None:

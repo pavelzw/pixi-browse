@@ -4,7 +4,7 @@ import webbrowser
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from rattler.exceptions import GatewayError
 from rattler.networking import Client
@@ -111,6 +111,7 @@ class CondaMetadataTui(App[None]):
         self._last_package_scroll_y = 0.0
         self._sidebar_vim_g_pending = False
         self._sidebar_selection_by_keyboard = False
+        self._selected_pane: Literal["sidebar", "main"] = "sidebar"
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -319,6 +320,12 @@ class CondaMetadataTui(App[None]):
         )
         package_list.highlighted = 0
 
+    def _render_sidebar_loading_option(self, label: str) -> None:
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.clear_options()
+        package_list.add_option(label)
+        package_list.highlighted = 0
+
     def _open_platform_selector(self) -> None:
         if self._mode != "packages":
             return
@@ -517,6 +524,7 @@ class CondaMetadataTui(App[None]):
         self._clear_channel_loaded_state()
 
         package_list = self.query_one("#sidebar-list", OptionList)
+        self._render_sidebar_loading_option("Loading packages...")
         package_list.disabled = True
         self._show_main_placeholder(f"# {escape(channel_name)}\n\nLoading repodata...")
         self._update_filter_indicator()
@@ -605,11 +613,17 @@ class CondaMetadataTui(App[None]):
     def _cycle_main_dependency_tab(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
 
+    def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
+        self._selected_pane = pane
+        self._update_filter_indicator()
+
     def _focus_main_panel(self) -> None:
+        self._selected_pane = "main"
         self.query_one("#main-panel", MainPanel).focus()
         self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
+        self._selected_pane = "sidebar"
         self.query_one("#sidebar-list", OptionList).focus()
         self._update_filter_indicator()
 
@@ -1111,10 +1125,14 @@ class CondaMetadataTui(App[None]):
 
     def _update_filter_indicator(self) -> None:
         sidebar = self.query_one("#sidebar", Vertical)
-        sidebar.border_title = self._sidebar_title_text(
-            selected=self._sidebar_is_focused()
-        )
+        sidebar_selected = self._selected_pane == "sidebar"
+        sidebar.set_class(sidebar_selected, "-active-pane")
+        sidebar.border_title = self._sidebar_title_text(selected=sidebar_selected)
         sidebar.border_subtitle = ""
+        main_panel = self.query_one("#main-panel", MainPanel)
+        main_selected = self._selected_pane == "main"
+        main_panel.set_class(main_selected, "-active-pane")
+        main_panel.set_pane_selected(main_selected)
         self.query_one("#footer", Static).update(self._footer_text())
         self._update_download_indicator()
 
@@ -1386,6 +1404,7 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and event.character == "["
+            and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(-1)
@@ -1396,6 +1415,7 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and event.character == "]"
+            and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(1)
@@ -1582,6 +1602,8 @@ class CondaMetadataTui(App[None]):
     ) -> None:
         if event.option_list.id != "sidebar-list":
             return
+        if self._sidebar_is_focused() and self._selected_pane != "sidebar":
+            self._set_selected_pane("sidebar")
         self._update_main_panel_for_sidebar_highlight(event.option_index)
 
     async def on_option_list_option_selected(

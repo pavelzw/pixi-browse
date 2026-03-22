@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from rich.style import Style
 from rich.text import Text
 from textual.app import ComposeResult
@@ -95,6 +97,8 @@ class VersionDetailsView(Vertical):
         self._details: VersionDetailsData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
+        # Duplicate this state so we can avoid updating on every Textual
+        # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
 
     def compose(self) -> ComposeResult:
@@ -273,6 +277,10 @@ class MainPanel(Vertical):
     can_focus = True
     _vim_g_pending = False
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._pane_selected = False
+
     @staticmethod
     def _page_step(height: int) -> int:
         return max(1, height)
@@ -292,13 +300,16 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._set_selected_pane("main")
         self.focus()
         event.stop()
 
     def show_placeholder(self, content: str | Text) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = True
-        self._set_placeholder_title(selected=self.has_focus)
+        self._set_placeholder_title(selected=self._pane_selected)
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
@@ -308,8 +319,17 @@ class MainPanel(Vertical):
         placeholder.border_title = ""
         version_details = self.query_one("#version-details-view", VersionDetailsView)
         version_details.set_details(details)
-        version_details.set_pane_selected(self.has_focus)
+        version_details.set_pane_selected(self._pane_selected)
         version_details.display = True
+
+    def set_pane_selected(self, selected: bool) -> None:
+        self._pane_selected = selected
+        if self._showing_version_details():
+            self.query_one(
+                "#version-details-view", VersionDetailsView
+            ).set_pane_selected(selected)
+        else:
+            self._set_placeholder_title(selected=selected)
 
     def _set_placeholder_title(self, *, selected: bool) -> None:
         self.query_one("#main-placeholder-scroll", VerticalScroll).border_title = Text(
@@ -320,26 +340,16 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
-        if callable(update_filter_indicator):
-            update_filter_indicator()
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).set_pane_selected(True)
-        else:
-            self._set_placeholder_title(selected=True)
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        app = cast(CondaMetadataTui, self.app)
+        app._set_selected_pane("main")
+        app._update_filter_indicator()
 
     def on_blur(self) -> None:
-        update_filter_indicator = getattr(self.app, "_update_filter_indicator", None)
-        if callable(update_filter_indicator):
-            update_filter_indicator()
-        if self._showing_version_details():
-            self.query_one(
-                "#version-details-view", VersionDetailsView
-            ).set_pane_selected(False)
-        else:
-            self._set_placeholder_title(selected=False)
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._update_filter_indicator()
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -500,13 +510,19 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            self.app.query_one("#sidebar-list").focus()
+            from pixi_browse.tui.app import CondaMetadataTui
+
+            cast(CondaMetadataTui, self.app)._focus_sidebar()
             event.stop()
 
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        self.app.query_one("#sidebar-list").focus()
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        app = cast(CondaMetadataTui, self.app)
+        app._set_selected_pane("sidebar")
+        app.query_one("#sidebar-list").focus()
         event.stop()
 
 
@@ -522,7 +538,7 @@ class HelpScreen(ModalScreen[None]):
         max-width: 90%;
         height: auto;
         max-height: 90%;
-        border: round $accent;
+        border: round #ec4899;
         background: $surface;
         padding: 1 2;
     }
