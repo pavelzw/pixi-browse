@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, cast
 
-from rattler.exceptions import GatewayError, InvalidMatchSpecError
+from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
@@ -1366,12 +1366,7 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_matchspec_key_m(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("m")
-            return
-
-        if self._mode == "packages" and self._filter_mode:
-            self._append_filter_char("m")
+        if self._channel_edit_mode or self._filter_mode:
             return
 
         self.push_screen(
