@@ -1041,6 +1041,7 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     screen, callback = pushed[0]
     assert isinstance(screen, MatchSpecScreen)
     assert screen._initial_value == "numpy >=2"
+    assert screen._select_on_focus is True
     assert callback == app._handle_matchspec_result
 
 
@@ -1259,6 +1260,38 @@ def test_selecting_version_entry_with_keyboard_focuses_main_panel(monkeypatch) -
 
     assert preview_calls == [("demo", entry)]
     assert focused == ["main"]
+
+
+def test_selecting_dependency_option_opens_matchspec_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+    focused: list[str] = []
+    sections: list[int] = []
+
+    monkeypatch.setattr(app, "_dependency_matchspec_at", lambda index: "python >=3.12")
+    monkeypatch.setattr(
+        app, "_defer_matchspec_screen", lambda value: opened.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+
+    class _FakeOptionList:
+        id = "detail-option-list-1"
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = _FakeOptionList()
+            self.option_index = 0
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert sections == [1]
+    assert focused == ["main"]
+    assert opened == ["python >=3.12"]
 
 
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
@@ -1495,6 +1528,38 @@ def test_dependency_header_omits_counts_before_details_are_loaded() -> None:
     assert "(0)" not in header.plain
 
 
+def test_run_export_list_entry_uses_plain_matchspec() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(),
+        constraints=(),
+        run_exports=("weak: python_abi 3.13.* *_cp313",),
+        files=("file",),
+    )
+
+    entries = view._dependency_entries_for_tab("run_exports")
+
+    assert entries[0].label == "weak: python_abi 3.13.* *_cp313"
+    assert entries[0].matchspec == "python_abi 3.13.* *_cp313"
+
+
+def test_dependency_list_entry_unescapes_matchspec_text() -> None:
+    view = VersionDetailsView()
+    view._details = VersionDetailsData(
+        metadata_lines=("meta",),
+        dependencies=(r"demo \[version='>=1'\]",),
+        constraints=(),
+        run_exports=(),
+        files=("file",),
+    )
+
+    entries = view._dependency_entries_for_tab("dependencies")
+
+    assert entries[0].label == "demo [version='>=1']"
+    assert entries[0].matchspec == "demo [version='>=1']"
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -1607,6 +1672,63 @@ def test_on_key_tab_shortcut_cycles_main_section(monkeypatch) -> None:
 
     assert section_directions == [1]
     assert event.stopped is True
+
+
+def test_on_key_enter_opens_matchspec_screen_for_selected_dependency(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    opened: list[str] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_selected_dependency_matchspec", lambda: "numpy >=2")
+    monkeypatch.setattr(
+        app, "_defer_matchspec_screen", lambda value: opened.append(value)
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("enter")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert opened == ["numpy >=2"]
+    assert event.stopped is True
+
+
+def test_defer_matchspec_screen_waits_until_after_refresh(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[tuple[str, bool]] = []
+    scheduled: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "_open_matchspec_screen",
+        lambda value, *, select_on_focus=True: opened.append((value, select_on_focus)),
+    )
+    monkeypatch.setattr(
+        app, "call_after_refresh", lambda callback: scheduled.append(callback)
+    )
+
+    app._defer_matchspec_screen("numpy >=2")
+
+    assert opened == []
+    assert len(scheduled) == 1
+
+    callback = scheduled[0]
+    assert callable(callback)
+    callback()
+
+    assert opened == [("numpy >=2", False)]
 
 
 def test_on_key_shift_tab_shortcut_cycles_main_section_backwards(monkeypatch) -> None:
@@ -2249,7 +2371,42 @@ def test_apply_matchspec_result_auto_opens_versions_for_single_package(
     assert app._matchspec_query == "demo >=2"
     assert app._matchspec_records_by_package == {"demo": [record]}
     assert opened == ["demo"]
-    assert focused == []
+    assert focused == ["sidebar"]
+
+
+def test_apply_matchspec_result_clears_package_search_filter(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._filter_mode = True
+    app._search_query = "num"
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "python >=3.12",
+            MatchSpecQueryResult(
+                package_names=["python", "pypy"],
+                records_by_package={
+                    "python": [_make_repo_data_record(name="python")],
+                    "pypy": [_make_repo_data_record(name="pypy")],
+                },
+            ),
+        )
+    )
+
+    assert app._filter_mode is False
+    assert app._search_query == ""
+    assert app._visible_package_names == ["python", "pypy"]
+    assert focused == ["sidebar"]
 
 
 def test_apply_matchspec_result_keeps_packages_view_for_multiple_packages(

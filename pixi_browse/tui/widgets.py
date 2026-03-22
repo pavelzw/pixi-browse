@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen
-from textual.widgets import Input, Static
+from textual.widgets import Input, OptionList, Static
 
 from pixi_browse.models import DependencyTab, VersionDetailsData
 
@@ -34,18 +34,43 @@ class Empty:
     pass
 
 
+@dataclass(frozen=True)
+class DependencyListEntry:
+    label: str
+    matchspec: str | None
+
+
 EMPTY_MATCHSPEC_RESULT = Empty()
 
 
+class DependencyOptionList(OptionList):
+    can_focus = False
+
+
 class DetailSection(Vertical):
-    def __init__(self, title: str, index: int, *, show_tabs: bool = False) -> None:
+    def __init__(
+        self,
+        title: str,
+        index: int,
+        *,
+        show_tabs: bool = False,
+        use_option_list: bool = False,
+    ) -> None:
         super().__init__(classes="detail-section")
         self._index = index
+        self._use_option_list = use_option_list
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
 
     def compose(self) -> ComposeResult:
+        if self._use_option_list:
+            yield DependencyOptionList(
+                id=f"detail-option-list-{self._index}",
+                classes="detail-option-list",
+            )
+            return
+
         with VerticalScroll(id=f"detail-scroll-{self._index}", classes="detail-scroll"):
             yield Static(id=f"detail-body-{self._index}", classes="detail-body")
 
@@ -78,6 +103,15 @@ class DetailSection(Vertical):
     def update_body(self, body: str | Text) -> None:
         self.query_one(f"#detail-body-{self._index}", Static).update(body)
 
+    def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
+        option_list = self.query_one(
+            f"#detail-option-list-{self._index}", DependencyOptionList
+        )
+        option_list.clear_options()
+        option_list.add_options(labels)
+        if labels:
+            option_list.highlighted = max(0, min(highlighted, len(labels) - 1))
+
     def set_active(self, active: bool) -> None:
         self.set_class(active, "-active")
         self.set_class(not active, "-collapsed")
@@ -109,17 +143,24 @@ class VersionDetailsView(Vertical):
         self._details: VersionDetailsData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
+        self._dependency_entries: dict[
+            DependencyTab, tuple[DependencyListEntry, ...]
+        ] = {tab: () for tab in DEPENDENCY_TABS}
+        self._dependency_highlighted: dict[DependencyTab, int] = {
+            tab: 0 for tab in DEPENDENCY_TABS
+        }
         # Duplicate this state so we can avoid updating on every Textual
         # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
 
     def compose(self) -> ComposeResult:
         yield DetailSection("Metadata", 0)
-        yield DetailSection("Dependencies", 1, show_tabs=True)
+        yield DetailSection("Dependencies", 1, show_tabs=True, use_option_list=True)
         yield DetailSection("Files", 2)
 
     def set_details(self, details: VersionDetailsData) -> None:
         self._details = details
+        self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
         self.display = True
         self._refresh_sections()
 
@@ -159,19 +200,46 @@ class VersionDetailsView(Vertical):
             self.app.query_one("#main-panel", MainPanel).focus()
 
     def scroll_home_active(self) -> None:
+        if self.dependency_section_is_active():
+            self._set_dependency_highlight(0)
+            return
         self._section(self._active_section).scroll_body_home()
 
     def scroll_end_active(self) -> None:
+        if self.dependency_section_is_active():
+            entries = self._current_dependency_entries()
+            if entries:
+                self._set_dependency_highlight(len(entries) - 1)
+            return
         self._section(self._active_section).scroll_body_end()
 
     def scroll_active(self, delta: float) -> None:
+        if self.dependency_section_is_active():
+            self._move_dependency_highlight(int(delta))
+            return
         self._section(self._active_section).scroll_body_by(delta)
 
     def active_page_step(self) -> int:
+        if self.dependency_section_is_active():
+            option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+            return max(1, option_list.size.height)
         return self._section(self._active_section).page_step()
 
     def dependency_section_is_active(self) -> bool:
         return self._active_section == 1
+
+    def dependency_matchspec_at(self, index: int) -> str | None:
+        entries = self._current_dependency_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].matchspec
+
+    def selected_dependency_matchspec(self) -> str | None:
+        option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.dependency_matchspec_at(highlighted)
 
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
@@ -206,10 +274,15 @@ class VersionDetailsView(Vertical):
         if self._details is None:
             return
 
+        active_tab = self._active_dependency_tab()
         dependency_section = self._section(1)
         dependency_section.update_header(self._render_dependency_header())
-        dependency_section.update_body(
-            "\n".join(self._dependency_lines(self._active_dependency_tab()))
+        self._dependency_entries = {
+            tab: self._dependency_entries_for_tab(tab) for tab in DEPENDENCY_TABS
+        }
+        dependency_section.update_options(
+            [entry.label for entry in self._dependency_entries[active_tab]],
+            highlighted=self._dependency_highlighted[active_tab],
         )
 
     def _dependency_lines(self, tab: DependencyTab) -> tuple[str, ...]:
@@ -219,6 +292,45 @@ class VersionDetailsView(Vertical):
         if tab == "constraints":
             return self._details.constraints or ("No constraints.",)
         return self._details.run_exports or ("No run exports.",)
+
+    def _current_dependency_entries(self) -> tuple[DependencyListEntry, ...]:
+        return self._dependency_entries[self._active_dependency_tab()]
+
+    def _dependency_entries_for_tab(
+        self, tab: DependencyTab
+    ) -> tuple[DependencyListEntry, ...]:
+        lines = self._dependency_lines(tab)
+        if tab == "run_exports":
+            return tuple(
+                DependencyListEntry(
+                    label=self._plain_text(line),
+                    matchspec=self._run_export_matchspec(line),
+                )
+                for line in lines
+            )
+        return tuple(
+            DependencyListEntry(
+                label=self._plain_text(line),
+                matchspec=None if line.startswith("No ") else self._plain_text(line),
+            )
+            for line in lines
+        )
+
+    def _move_dependency_highlight(self, delta: int) -> None:
+        option_list = self.query_one("#detail-option-list-1", DependencyOptionList)
+        highlighted = option_list.highlighted or 0
+        self._set_dependency_highlight(highlighted + delta)
+
+    def _set_dependency_highlight(self, index: int) -> None:
+        entries = self._current_dependency_entries()
+        if not entries:
+            return
+        highlighted = max(0, min(index, len(entries) - 1))
+        active_tab = self._active_dependency_tab()
+        self._dependency_highlighted[active_tab] = highlighted
+        self.query_one(
+            "#detail-option-list-1", DependencyOptionList
+        ).highlighted = highlighted
 
     def _render_dependency_tabs(self) -> Text:
         if self._details is None:
@@ -283,6 +395,17 @@ class VersionDetailsView(Vertical):
             )
         )
         return text
+
+    @staticmethod
+    def _plain_text(value: str) -> str:
+        return Text.from_markup(value).plain.replace(r"\[", "[").replace(r"\]", "]")
+
+    @classmethod
+    def _run_export_matchspec(cls, value: str) -> str | None:
+        plain_value = cls._plain_text(value)
+        if ": " not in plain_value:
+            return None if plain_value.startswith("No ") else plain_value
+        return plain_value.split(": ", 1)[1]
 
 
 class MainPanel(Vertical):
@@ -377,6 +500,16 @@ class MainPanel(Vertical):
         return self.query_one(
             "#version-details-view", VersionDetailsView
         ).dependency_section_is_active()
+
+    def selected_dependency_matchspec(self) -> str | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_dependency_matchspec()
+
+    def dependency_matchspec_at(self, index: int) -> str | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).dependency_matchspec_at(index)
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -576,9 +709,12 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         Binding("q", "dismiss", show=False),
     ]
 
-    def __init__(self, initial_value: str = "") -> None:
+    def __init__(
+        self, initial_value: str = "", *, select_on_focus: bool = True
+    ) -> None:
         super().__init__()
         self._initial_value = initial_value
+        self._select_on_focus = select_on_focus
 
     def compose(self) -> ComposeResult:
         with Vertical(id="matchspec-dialog"):
@@ -586,6 +722,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
             yield Input(
                 value=self._initial_value,
                 placeholder="numpy >=2",
+                select_on_focus=self._select_on_focus,
                 id="matchspec-input",
             )
             yield Static("Leave empty to query everything.", id="matchspec-help")

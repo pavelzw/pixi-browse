@@ -687,6 +687,25 @@ class CondaMetadataTui(App[None]):
     def _cycle_main_dependency_tab(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
 
+    def _selected_dependency_matchspec(self) -> str | None:
+        return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
+
+    def _dependency_matchspec_at(self, index: int) -> str | None:
+        return self.query_one("#main-panel", MainPanel).dependency_matchspec_at(index)
+
+    def _open_matchspec_screen(
+        self, initial_value: str, *, select_on_focus: bool = True
+    ) -> None:
+        self.push_screen(
+            MatchSpecScreen(initial_value, select_on_focus=select_on_focus),
+            self._handle_matchspec_result,
+        )
+
+    def _defer_matchspec_screen(self, initial_value: str) -> None:
+        self.call_after_refresh(
+            lambda: self._open_matchspec_screen(initial_value, select_on_focus=False)
+        )
+
     def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
         self._selected_pane = pane
         self._update_filter_indicator()
@@ -1043,6 +1062,8 @@ class CondaMetadataTui(App[None]):
             package_name: list(records)
             for package_name, records in result.records_by_package.items()
         }
+        self._filter_mode = False
+        self._search_query = ""
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -1055,6 +1076,7 @@ class CondaMetadataTui(App[None]):
             and result.package_names[0] in self._visible_package_names
         ):
             await self._open_versions(result.package_names[0])
+            self._focus_sidebar()
             return
         self._focus_sidebar()
 
@@ -1369,10 +1391,7 @@ class CondaMetadataTui(App[None]):
         if self._channel_edit_mode or self._filter_mode:
             return
 
-        self.push_screen(
-            MatchSpecScreen(self._matchspec_query),
-            self._handle_matchspec_result,
-        )
+        self._open_matchspec_screen(self._matchspec_query)
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
@@ -1509,6 +1528,19 @@ class CondaMetadataTui(App[None]):
                 return
 
         self._reset_sidebar_vim_pending()
+
+        if (
+            self._mode == "versions"
+            and self._main_panel_shows_version_details()
+            and self._main_panel_is_focused()
+            and event.key == "enter"
+            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
+        ):
+            matchspec = self._selected_dependency_matchspec()
+            if matchspec is not None:
+                self._defer_matchspec_screen(matchspec)
+            event.stop()
+            return
 
         if (
             self._mode == "versions"
@@ -1775,6 +1807,15 @@ class CondaMetadataTui(App[None]):
     ) -> None:
         selection_by_keyboard = self._sidebar_selection_by_keyboard
         self._sidebar_selection_by_keyboard = False
+
+        if event.option_list.id == "detail-option-list-1":
+            matchspec = self._dependency_matchspec_at(event.option_index)
+            if matchspec is None:
+                return
+            self._set_active_main_section(1)
+            self._focus_main_panel()
+            self._defer_matchspec_screen(matchspec)
+            return
 
         if event.option_list.id != "sidebar-list":
             return

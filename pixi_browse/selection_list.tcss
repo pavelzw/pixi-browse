@@ -127,6 +127,34 @@ Screen {
     width: 100%;
 }
 
+.detail-option-list {
+    height: 1fr;
+    border: none;
+    padding: 0 0 0 1;
+    color: $text;
+    background: $background;
+    scrollbar-size-vertical: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.detail-option-list > .option-list--option-highlighted {
+    color: #f9a8d4;
+    background: #4a2233;
+    text-style: bold;
+}
+
+#main-panel.-active-pane .detail-section.-active .detail-option-list > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #ec4899;
+    text-style: bold;
+}
+
+.detail-option-list > .option-list--option-hover {
+    color: #f9a8d4;
+    background: #4a2233;
+}
+
 #footer {
     height: 1;
     margin: 0;
