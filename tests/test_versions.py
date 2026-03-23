@@ -158,6 +158,14 @@ class _FakeClickEvent:
         self.stopped = True
 
 
+class _FakeFooter:
+    def __init__(self) -> None:
+        self.updates: list[object] = []
+
+    def update(self, value: object) -> None:
+        self.updates.append(value)
+
+
 def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) -> None:
     shared_client = object()
     gateway_calls: list[object] = []
@@ -3402,6 +3410,7 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     first_artifact = build_version_artifact_data("demo", first_record)
     second_artifact = build_version_artifact_data("demo", second_record)
     pushed: list[VersionCompareData] = []
+    footer = _FakeFooter()
 
     async def _fake_load_compare_artifact(
         selection: CompareSelection,
@@ -3415,7 +3424,15 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
     monkeypatch.setattr(app, "_compare_selection", first_selection)
     monkeypatch.setattr(app, "_compare_screen_open", False)
-    monkeypatch.setattr(app, "_update_footer_if_available", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
     monkeypatch.setattr(
         app,
         "push_screen",
@@ -3549,12 +3566,22 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     filtered: list[str] = []
     updated: list[str] = []
     focused: list[str] = []
+    footer = _FakeFooter()
 
     monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
     monkeypatch.setattr(
         app, "_update_filter_indicator", lambda: updated.append("updated")
     )
     monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
 
     asyncio.run(app._apply_matchspec_query(None))
 
@@ -3702,6 +3729,7 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
 
     status = _FakeStatus()
     option_list = _FakeOptionList()
+    footer = _FakeFooter()
     reapplications: list[str] = []
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
@@ -3709,6 +3737,8 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
             return status
         if selector == "#sidebar-list":
             return option_list
+        if selector == "#footer":
+            return footer
         raise AssertionError(selector)
 
     async def _fake_fetch_package_names_with_gateway() -> list[str]:
@@ -3760,11 +3790,15 @@ def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
             self.focused = True
 
     option_list = _FakeOptionList()
+    footer = _FakeFooter()
     notifications: list[str] = []
 
-    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
-        assert selector == "#sidebar-list"
-        return option_list
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#sidebar-list":
+            return option_list
+        if selector == "#footer":
+            return footer
+        raise AssertionError(selector)
 
     async def _fake_load_packages() -> bool:
         return True

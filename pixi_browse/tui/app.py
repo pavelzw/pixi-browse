@@ -368,13 +368,7 @@ class CondaMetadataTui(App[None]):
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
         self._compare_screen_open = False
-        self._update_footer_if_available()
-
-    def _update_footer_if_available(self) -> None:
-        try:
-            self.query_one("#footer", Static).update(self._footer_text())
-        except Exception:
-            pass
+        self.query_one("#footer", Static).update(self._footer_text())
 
     def _reset_preview_state(self) -> None:
         self._previewed_package = None
@@ -1010,7 +1004,7 @@ class CondaMetadataTui(App[None]):
             right_artifact,
         )
         self._compare_screen_open = True
-        self._update_footer_if_available()
+        self.query_one("#footer", Static).update(self._footer_text())
         self.push_screen(
             CompareScreen(compare_data),
             self._handle_compare_screen_dismissed,
