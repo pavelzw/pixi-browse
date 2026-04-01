@@ -51,10 +51,12 @@ from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
+    FILE_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     Empty,
     FileActionScreen,
     FilePreviewScreen,
+    FileTab,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
@@ -674,6 +676,12 @@ class CondaMetadataTui(App[None]):
     def _cycle_main_dependency_tab(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
 
+    def _set_main_file_tab(self, tab: FileTab) -> None:
+        self.query_one("#main-panel", MainPanel).set_file_tab(tab)
+
+    def _cycle_main_file_tab(self, direction: int) -> None:
+        self.query_one("#main-panel", MainPanel).cycle_file_tab(direction)
+
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
 
@@ -791,7 +799,7 @@ class CondaMetadataTui(App[None]):
                 ("h / l", "Focus left / right pane"),
                 ("1 / 2 / 3", "Focus metadata, deps, or files"),
                 ("Tab / Shift+Tab", "Cycle focused section"),
-                ("[ / ]", "Cycle dependency tabs"),
+                ("[ / ]", "Cycle active section tabs"),
                 ("gg / G", "Jump to top / bottom"),
                 ("Ctrl+u / Ctrl+d", "Page up / down"),
                 ("Enter", "Open / select"),
@@ -1627,6 +1635,15 @@ class CondaMetadataTui(App[None]):
         self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
 
+    def action_select_file_tab(self, tab: str) -> None:
+        if self._mode != "versions":
+            return
+        if tab not in FILE_TABS:
+            return
+        self._set_active_main_section(2)
+        self._set_main_file_tab(cast(FileTab, tab))
+        self._focus_main_panel()
+
     def action_tab_key(self) -> None:
         if self._mode != "versions":
             return
@@ -1823,9 +1840,14 @@ class CondaMetadataTui(App[None]):
             self._mode == "versions"
             and event.character == "["
             and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
-            self._cycle_main_dependency_tab(-1)
+            main_panel = self.query_one("#main-panel", MainPanel)
+            if main_panel.dependency_section_is_active():
+                self._cycle_main_dependency_tab(-1)
+            elif main_panel.file_section_is_active():
+                self._cycle_main_file_tab(-1)
+            else:
+                return
             self._focus_main_panel()
             event.stop()
             return
@@ -1834,9 +1856,14 @@ class CondaMetadataTui(App[None]):
             self._mode == "versions"
             and event.character == "]"
             and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
-            self._cycle_main_dependency_tab(1)
+            main_panel = self.query_one("#main-panel", MainPanel)
+            if main_panel.dependency_section_is_active():
+                self._cycle_main_dependency_tab(1)
+            elif main_panel.file_section_is_active():
+                self._cycle_main_file_tab(1)
+            else:
+                return
             self._focus_main_panel()
             event.stop()
             return
