@@ -48,6 +48,7 @@ from pixi_browse.tui import (
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
+    Client,
     CompareDetailsView,
     CompareScreen,
     DetailSection,
@@ -62,6 +63,7 @@ from pixi_browse.tui import (
     VersionDetailsView,
 )
 from pixi_browse.tui.state import AboutUrls
+from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import FileActionOption
 
 
@@ -302,6 +304,57 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
     assert details.dependencies == ()
     assert details.constraints == ()
     assert len(details.run_exports) == 3
+
+
+def test_load_version_details_reuses_artifact_run_exports(monkeypatch) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+    artifact_data = build_version_artifact_data(
+        "demo",
+        record,
+        run_exports=RunExportsJson(
+            weak=["python_abi 3.13.* *_cp313"],
+            strong=["libdemo >=1"],
+        ),
+    )
+
+    async def _fake_load_version_artifact_data(
+        package_name: str,
+        _record: RepoDataRecord,
+        *,
+        preview_key: tuple[str, str, str, int, str, str],
+    ):
+        assert package_name == "demo"
+        assert preview_key == (
+            "demo",
+            "1.2.3",
+            "py313h123_0",
+            0,
+            "noarch",
+            record.file_name,
+        )
+        return artifact_data
+
+    async def _unexpected_get_run_exports(_url: str) -> RunExportsJson:
+        raise AssertionError("load_version_details should reuse artifact run exports")
+
+    monkeypatch.setattr(
+        loader,
+        "load_version_artifact_data",
+        _fake_load_version_artifact_data,
+    )
+    monkeypatch.setattr(loader, "get_run_exports", _unexpected_get_run_exports)
+    loader.about_urls_cache[preview_key] = AboutUrls()
+
+    details = asyncio.run(
+        loader.load_version_details("demo", record, preview_key=preview_key)
+    )
+
+    assert details.run_exports == (
+        "weak: python_abi 3.13.* *_cp313",
+        "strong: libdemo >=1",
+    )
 
 
 def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (

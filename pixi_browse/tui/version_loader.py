@@ -176,11 +176,6 @@ class VersionDataLoader:
             preview_key=preview_key,
         )
         about_urls = self.about_urls_cache.get(preview_key, AboutUrls())
-        run_exports: RunExportsJson | None = None
-        try:
-            run_exports = await self.get_run_exports(str(record.url))
-        except Exception:
-            pass
 
         details = build_version_details_data(
             package_name,
@@ -200,7 +195,7 @@ class VersionDataLoader:
             provenance_remote_url=about_urls.provenance_remote_url,
             provenance_sha=about_urls.provenance_sha,
             rattler_build_version=about_urls.rattler_build_version,
-            run_exports=run_exports,
+            run_exports=artifact_data.raw_run_exports,
         )
         self.details_cache[preview_key] = details
         return details

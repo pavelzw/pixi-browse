@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from rattler.package import RunExportsJson
 from rattler.version import Version
 
 ViewMode = Literal["packages", "versions", "platforms"]
@@ -52,6 +53,7 @@ class VersionArtifactData:
     run_exports: tuple[str, ...]
     files: tuple[str, ...]
     file_paths: tuple[PackageFile, ...] = ()
+    raw_run_exports: RunExportsJson | None = None
 
 
 @dataclass(frozen=True)

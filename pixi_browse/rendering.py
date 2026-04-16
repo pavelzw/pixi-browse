@@ -410,6 +410,7 @@ def build_version_artifact_data(
         run_exports=tuple(_format_plain_run_exports_lines(run_exports)),
         files=file_lines,
         file_paths=tuple(package_paths or ()),
+        raw_run_exports=run_exports,
     )
 
 
