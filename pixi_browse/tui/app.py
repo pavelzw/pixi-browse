@@ -947,19 +947,6 @@ class CondaMetadataTui(App[None]):
     ) -> AboutUrls:
         return await self._version_loader.get_about_urls(preview_key, url)
 
-    async def _load_version_artifact_data(
-        self, package_name: str, entry: VersionEntry
-    ) -> VersionArtifactData | None:
-        record = await self._get_record_for_version_entry(package_name, entry)
-        if record is None:
-            return None
-        preview_key = self._version_preview_key(package_name, entry)
-        return await self._version_loader.load_version_artifact_data(
-            package_name,
-            record,
-            preview_key=preview_key,
-        )
-
     async def _load_compare_artifact(
         self, selection: CompareSelection
     ) -> tuple[RepoDataRecord, VersionArtifactData] | None:
