@@ -14,6 +14,7 @@ from rattler.version import VersionWithSource
 from rich.markup import escape
 
 from pixi_browse.models import (
+    CompareFileRow,
     CompareRow,
     CompareSelection,
     MetadataField,
@@ -522,43 +523,47 @@ def _files_differ(left: PackageFile, right: PackageFile) -> bool:
 
 def _diff_file_paths(
     left_files: Sequence[PackageFile], right_files: Sequence[PackageFile]
-) -> tuple[CompareRow, ...]:
+) -> tuple[CompareFileRow, ...]:
     left_by_path = {package_file.path: package_file for package_file in left_files}
     right_by_path = {package_file.path: package_file for package_file in right_files}
     ordered_paths = list(left_by_path)
     ordered_paths.extend(path for path in right_by_path if path not in left_by_path)
 
-    rows: list[CompareRow] = []
+    rows: list[CompareFileRow] = []
     for path in ordered_paths:
         left_file = left_by_path.get(path)
         right_file = right_by_path.get(path)
         if left_file is None and right_file is not None:
             rows.append(
-                CompareRow(
+                CompareFileRow(
                     label=path,
                     left="",
                     right=_package_file_summary(right_file),
                     changed=True,
+                    right_file=right_file,
                 )
             )
             continue
         if right_file is None and left_file is not None:
             rows.append(
-                CompareRow(
+                CompareFileRow(
                     label=path,
                     left=_package_file_summary(left_file),
                     right="",
                     changed=True,
+                    left_file=left_file,
                 )
             )
             continue
         assert left_file is not None and right_file is not None
         rows.append(
-            CompareRow(
+            CompareFileRow(
                 label=path,
                 left=_package_file_summary(left_file),
                 right=_package_file_summary(right_file),
                 changed=_files_differ(left_file, right_file),
+                left_file=left_file,
+                right_file=right_file,
             )
         )
     return tuple(rows)
@@ -576,7 +581,7 @@ def _file_compare_error(artifact: VersionArtifactData) -> str | None:
 
 def _build_file_compare_rows(
     left_artifact: VersionArtifactData, right_artifact: VersionArtifactData
-) -> tuple[CompareRow, ...]:
+) -> tuple[CompareFileRow, ...]:
     left_error = _file_compare_error(left_artifact)
     right_error = _file_compare_error(right_artifact)
 
@@ -586,7 +591,7 @@ def _build_file_compare_rows(
     if left_error is not None and right_error is not None:
         if left_error == right_error:
             return (
-                CompareRow(
+                CompareFileRow(
                     label=left_error,
                     left=left_error,
                     right=right_error,
@@ -594,15 +599,19 @@ def _build_file_compare_rows(
                 ),
             )
         return (
-            CompareRow(label=left_error, left=left_error, right="", changed=True),
-            CompareRow(label=right_error, left="", right=right_error, changed=True),
+            CompareFileRow(label=left_error, left=left_error, right="", changed=True),
+            CompareFileRow(label=right_error, left="", right=right_error, changed=True),
         )
 
     if left_error is not None:
-        return (CompareRow(label=left_error, left=left_error, right="", changed=True),)
+        return (
+            CompareFileRow(label=left_error, left=left_error, right="", changed=True),
+        )
 
     assert right_error is not None
-    return (CompareRow(label=right_error, left="", right=right_error, changed=True),)
+    return (
+        CompareFileRow(label=right_error, left="", right=right_error, changed=True),
+    )
 
 
 def build_version_compare_data(

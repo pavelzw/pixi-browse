@@ -76,6 +76,16 @@ class CompareRow:
 
 
 @dataclass(frozen=True)
+class CompareFileRow:
+    label: str
+    left: str
+    right: str
+    changed: bool
+    left_file: PackageFile | None = None
+    right_file: PackageFile | None = None
+
+
+@dataclass(frozen=True)
 class VersionCompareData:
     left_selection: CompareSelection
     right_selection: CompareSelection
@@ -83,7 +93,7 @@ class VersionCompareData:
     dependencies: tuple[CompareRow, ...]
     constraints: tuple[CompareRow, ...]
     run_exports: tuple[CompareRow, ...]
-    files: tuple[CompareRow, ...]
+    files: tuple[CompareFileRow, ...]
 
 
 @dataclass(frozen=True)

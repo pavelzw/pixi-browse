@@ -22,6 +22,7 @@ from textual.widgets import Static
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
 from pixi_browse.models import (
+    CompareFileRow,
     CompareRow,
     CompareSelection,
     PackageFile,
@@ -50,6 +51,7 @@ from pixi_browse.tui import (
     CompareDetailsView,
     CompareScreen,
     DetailSection,
+    DownloadPathScreen,
     Empty,
     FileActionScreen,
     FilePreviewScreen,
@@ -60,6 +62,7 @@ from pixi_browse.tui import (
     VersionDetailsView,
 )
 from pixi_browse.tui.state import AboutUrls
+from pixi_browse.tui.widgets import FileActionOption
 
 
 @dataclass(frozen=True)
@@ -486,7 +489,7 @@ def test_build_version_compare_data_surfaces_unavailable_file_metadata() -> None
     )
 
     assert compare_data.files == (
-        CompareRow(
+        CompareFileRow(
             label="Unavailable: paths.json missing",
             left="Unavailable: paths.json missing",
             right="",
@@ -1963,25 +1966,25 @@ def test_compare_file_body_uses_single_column_with_status_colors() -> None:
             constraints=(),
             run_exports=(),
             files=(
-                CompareRow(
+                CompareFileRow(
                     label="same.txt",
                     left="same.txt",
                     right="same.txt",
                     changed=False,
                 ),
-                CompareRow(
+                CompareFileRow(
                     label="changed.txt",
                     left="changed.txt",
                     right="changed.txt",
                     changed=True,
                 ),
-                CompareRow(
+                CompareFileRow(
                     label="left-only.txt",
                     left="left-only.txt",
                     right="",
                     changed=True,
                 ),
-                CompareRow(
+                CompareFileRow(
                     label="right-only.txt",
                     left="",
                     right="right-only.txt",
@@ -1991,29 +1994,19 @@ def test_compare_file_body_uses_single_column_with_status_colors() -> None:
         )
     )
 
-    body = cast(Text, view._render_file_body())
+    same = view._render_compare_file_option(view._compare_data.files[0])
+    changed = view._render_compare_file_option(view._compare_data.files[1])
+    left_only = view._render_compare_file_option(view._compare_data.files[2])
+    right_only = view._render_compare_file_option(view._compare_data.files[3])
 
-    assert body.plain == "same.txt\nchanged.txt\nleft-only.txt\nright-only.txt"
-    assert any(
-        body.plain[span.start : span.end] == "same.txt" and span.style == "white"
-        for span in body.spans
-        if isinstance(span.style, str)
-    )
-    assert any(
-        body.plain[span.start : span.end] == "changed.txt" and span.style == "yellow"
-        for span in body.spans
-        if isinstance(span.style, str)
-    )
-    assert any(
-        body.plain[span.start : span.end] == "left-only.txt" and span.style == "red"
-        for span in body.spans
-        if isinstance(span.style, str)
-    )
-    assert any(
-        body.plain[span.start : span.end] == "right-only.txt" and span.style == "green"
-        for span in body.spans
-        if isinstance(span.style, str)
-    )
+    assert same.plain == "same.txt"
+    assert changed.plain == "changed.txt"
+    assert left_only.plain == "left-only.txt"
+    assert right_only.plain == "right-only.txt"
+    assert same.style == "bright_black"
+    assert changed.style == "yellow"
+    assert left_only.style == "red"
+    assert right_only.style == "green"
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
@@ -2647,7 +2640,7 @@ def test_compare_screen_swap_sides_flips_compare_data(monkeypatch) -> None:
         constraints=(),
         run_exports=(),
         files=(
-            CompareRow(
+            CompareFileRow(
                 label="bin/demo",
                 left="",
                 right="bin/demo",
@@ -2753,7 +2746,7 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
 
             assert (
                 str(screen.query_one("#compare-footer", Static).render())
-                == "Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
+                == "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | Quit: q | Help: ?"
             )
 
     asyncio.run(_run())
@@ -3950,7 +3943,33 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
-def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
+def test_handle_file_action_result_opens_download_path_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    pushed: list[DownloadPathScreen] = []
+    monkeypatch.setattr(
+        app, "push_screen", lambda screen, callback: pushed.append(screen)
+    )
+
+    app._handle_file_action_result(
+        "demo",
+        entry,
+        "info/about.json",
+        None,
+        FileActionOption(action="download", label="Download as file"),
+    )
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], DownloadPathScreen)
+
+
+def test_handle_file_action_result_spawns_worker_for_preview(monkeypatch) -> None:
     app = CondaMetadataTui()
     entry = VersionEntry(
         version=Version("1.2.3"),
@@ -3967,7 +3986,13 @@ def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
 
     monkeypatch.setattr(app, "run_worker", _fake_run_worker)
 
-    app._handle_file_action_result("demo", entry, "info/about.json", None, "download")
+    app._handle_file_action_result(
+        "demo",
+        entry,
+        "info/about.json",
+        None,
+        FileActionOption(action="preview", label="Preview"),
+    )
 
     assert worker_calls == [
         {
@@ -4144,11 +4169,36 @@ def test_file_action_screen_uses_plain_static_text() -> None:
     async def _run() -> None:
         app = _HostApp()
         async with app.run_test() as pilot:
-            screen = FileActionScreen("info/[about].json")
+            screen = FileActionScreen(
+                "info/[about].json",
+                actions=(
+                    FileActionOption(action="preview", label="Preview"),
+                    FileActionOption(action="download", label="Download"),
+                ),
+            )
             app.push_screen(screen)
             await pilot.pause()
 
             assert screen.query_one("#file-action-path")._render_markup is False
+
+    asyncio.run(_run())
+
+
+def test_download_path_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = DownloadPathScreen(
+                "info/[about].json",
+                default_destination="info/[about].json",
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#download-path-file")._render_markup is False
 
     asyncio.run(_run())
 

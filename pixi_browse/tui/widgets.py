@@ -18,8 +18,10 @@ from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
+    CompareFileRow,
     CompareRow,
     CompareSelection,
     DependencyTab,
@@ -59,10 +61,24 @@ class FileListEntry:
     size_in_bytes: int | None = None
 
 
+@dataclass(frozen=True)
+class CompareFileListEntry:
+    option: Text
+    row: CompareFileRow
+
+
 EMPTY_MATCHSPEC_RESULT = Empty()
 
 
 FileAction = Literal["download", "preview"]
+FileActionSource = Literal["default", "left", "right"]
+
+
+@dataclass(frozen=True)
+class FileActionOption:
+    action: FileAction
+    label: str
+    source: FileActionSource = "default"
 
 
 class DetailOptionList(OptionList):
@@ -129,7 +145,9 @@ class DetailSection(Vertical):
     def update_body(self, body: RenderableType) -> None:
         self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
 
-    def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
+    def update_options(
+        self, labels: list[str | Text | Option], *, highlighted: int = 0
+    ) -> None:
         option_list = self.query_one(
             f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
         )
@@ -829,6 +847,8 @@ class CompareDetailsView(Vertical):
         self._compare_data = compare_data
         self._active_section = 0
         self._dependency_tab_index = 0
+        self._file_entries: tuple[CompareFileListEntry, ...] = ()
+        self._file_highlighted = 0
         self._pane_selected = True
 
     def compose(self) -> ComposeResult:
@@ -849,6 +869,7 @@ class CompareDetailsView(Vertical):
             "Files",
             2,
             on_activate=self.set_active_section,
+            use_option_list=True,
             id_prefix="compare",
         )
 
@@ -857,6 +878,7 @@ class CompareDetailsView(Vertical):
 
     def set_compare_data(self, compare_data: VersionCompareData) -> None:
         self._compare_data = compare_data
+        self._file_highlighted = 0
         self._refresh_sections()
 
     def set_active_section(self, index: int) -> None:
@@ -886,16 +908,45 @@ class CompareDetailsView(Vertical):
         self._refresh_dependency_section()
 
     def scroll_active(self, delta: float) -> None:
+        if self.file_section_is_active():
+            self._move_file_highlight(int(delta))
+            return
         self._section(self._active_section).scroll_body_by(delta)
 
     def scroll_home_active(self) -> None:
+        if self.file_section_is_active():
+            self._set_file_highlight(0)
+            return
         self._section(self._active_section).scroll_body_home()
 
     def scroll_end_active(self) -> None:
+        if self.file_section_is_active():
+            if self._file_entries:
+                self._set_file_highlight(len(self._file_entries) - 1)
+            return
         self._section(self._active_section).scroll_body_end()
 
     def active_page_step(self) -> int:
+        if self.file_section_is_active():
+            option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+            return max(1, option_list.size.height)
         return self._section(self._active_section).page_step()
+
+    def file_section_is_active(self) -> bool:
+        return self._active_section == 2
+
+    def selected_file_row(self) -> CompareFileRow | None:
+        option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_row_at(highlighted)
+
+    def file_row_at(self, index: int) -> CompareFileRow | None:
+        entries = self._file_entries
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].row
 
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
@@ -915,7 +966,11 @@ class CompareDetailsView(Vertical):
         self._section(0).update_body(self._render_metadata_body())
         self._refresh_dependency_section()
         self._section(2).update_header(self._render_section_header(2, "Files"))
-        self._section(2).update_body(self._render_file_body())
+        self._file_entries = self._file_entries_for_compare_data()
+        self._section(2).update_options(
+            [Option(entry.option) for entry in self._file_entries],
+            highlighted=self._file_highlighted,
+        )
         self._apply_section_state()
 
     def _refresh_dependency_section(self) -> None:
@@ -997,17 +1052,6 @@ class CompareDetailsView(Vertical):
             show_label_column=False,
         )
 
-    def _render_file_body(self) -> RenderableType:
-        if not self._compare_data.files:
-            return Text("No files listed.", style="dim")
-
-        body = Text()
-        for index, row in enumerate(self._compare_data.files):
-            if index:
-                body.append("\n")
-            body.append(row.label, style=self._file_row_style(row))
-        return body
-
     @staticmethod
     def _row_style(row: CompareRow) -> tuple[str, str]:
         if row.changed:
@@ -1015,14 +1059,95 @@ class CompareDetailsView(Vertical):
         return "white", "white"
 
     @staticmethod
-    def _file_row_style(row: CompareRow) -> str:
+    def _file_row_style(row: CompareFileRow) -> str:
         if not row.changed:
-            return "white"
+            return "bright_black"
         if row.left and row.right:
             return "yellow"
         if row.left:
             return "red"
         return "green"
+
+    def _file_entries_for_compare_data(self) -> tuple[CompareFileListEntry, ...]:
+        if not self._compare_data.files:
+            return (
+                CompareFileListEntry(
+                    option=Text("No files listed.", style="dim"),
+                    row=CompareFileRow(
+                        label="No files listed.",
+                        left="",
+                        right="",
+                        changed=False,
+                    ),
+                ),
+            )
+
+        return tuple(
+            CompareFileListEntry(
+                option=self._render_compare_file_option(row),
+                row=row,
+            )
+            for row in self._compare_data.files
+        )
+
+    def _render_compare_file_option(self, row: CompareFileRow) -> Text:
+        text = Text(row.label, style=self._file_row_style(row))
+        suffix = self._compare_file_suffix(row)
+        if suffix:
+            text.append(suffix, style="dim")
+        return text
+
+    @staticmethod
+    def _compare_file_suffix(row: CompareFileRow) -> str:
+        left_size = row.left_file.size_in_bytes if row.left_file is not None else None
+        right_size = (
+            row.right_file.size_in_bytes if row.right_file is not None else None
+        )
+        if row.left_file is not None and row.right_file is not None:
+            if not row.changed and left_size == right_size:
+                return (
+                    f" ({format_human_byte_size(left_size)})"
+                    if left_size is not None
+                    else ""
+                )
+            left_label = (
+                format_human_byte_size(left_size)
+                if left_size is not None
+                else "unknown"
+            )
+            right_label = (
+                format_human_byte_size(right_size)
+                if right_size is not None
+                else "unknown"
+            )
+            return f" [L: {left_label} | R: {right_label}]"
+        if row.left_file is not None:
+            return (
+                f" [left: {format_human_byte_size(left_size)}]"
+                if left_size is not None
+                else " [left]"
+            )
+        if row.right_file is not None:
+            return (
+                f" [right: {format_human_byte_size(right_size)}]"
+                if right_size is not None
+                else " [right]"
+            )
+        return ""
+
+    def _move_file_highlight(self, delta: int) -> None:
+        option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted or 0
+        self._set_file_highlight(highlighted + delta)
+
+    def _set_file_highlight(self, index: int) -> None:
+        if not self._file_entries:
+            return
+        highlighted = max(0, min(index, len(self._file_entries) - 1))
+        self._file_highlighted = highlighted
+        self.query_one(
+            "#compare-option-list-2", DetailOptionList
+        ).highlighted = highlighted
 
     def _render_compare_table(
         self,
@@ -1174,7 +1299,10 @@ class CompareScreen(Screen[None]):
 
     @staticmethod
     def _footer_text() -> str:
-        return "Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
+        return (
+            "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | "
+            "Quit: q | Help: ?"
+        )
 
     @staticmethod
     def _selection_label(selection: CompareSelection) -> str:
@@ -1211,6 +1339,20 @@ class CompareScreen(Screen[None]):
             for row in rows
         )
 
+    @staticmethod
+    def _swap_file_rows(rows: tuple[CompareFileRow, ...]) -> tuple[CompareFileRow, ...]:
+        return tuple(
+            CompareFileRow(
+                label=row.label,
+                left=row.right,
+                right=row.left,
+                changed=row.changed,
+                left_file=row.right_file,
+                right_file=row.left_file,
+            )
+            for row in rows
+        )
+
     @classmethod
     def _swapped_compare_data(
         cls, compare_data: VersionCompareData
@@ -1222,8 +1364,25 @@ class CompareScreen(Screen[None]):
             dependencies=cls._swap_rows(compare_data.dependencies),
             constraints=cls._swap_rows(compare_data.constraints),
             run_exports=cls._swap_rows(compare_data.run_exports),
-            files=cls._swap_rows(compare_data.files),
+            files=cls._swap_file_rows(compare_data.files),
         )
+
+    def file_section_is_active(self) -> bool:
+        return self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).file_section_is_active()
+
+    def selected_file_row(self) -> CompareFileRow | None:
+        return self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).selected_file_row()
+
+    def selection_for_source(self, source: FileActionSource) -> CompareSelection:
+        if source == "left":
+            return self._compare_data.left_selection
+        if source == "right":
+            return self._compare_data.right_selection
+        raise RuntimeError(f"Unsupported compare file source: {source}")
 
     def action_swap_sides(self) -> None:
         self._compare_data = self._swapped_compare_data(self._compare_data)
@@ -1358,7 +1517,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         self.dismiss(result)
 
 
-class FileActionScreen(ModalScreen[FileAction | None]):
+class FileActionScreen(ModalScreen[FileActionOption | None]):
     DEFAULT_CSS = """
     FileActionScreen {
         align: center middle;
@@ -1407,21 +1566,25 @@ class FileActionScreen(ModalScreen[FileAction | None]):
         Binding("q", "dismiss", show=False),
     ]
 
-    _ACTIONS: tuple[tuple[FileAction, str], ...] = (
-        ("preview", "Preview"),
-        ("download", "Download as file"),
-    )
-
-    def __init__(self, file_path: str) -> None:
+    def __init__(
+        self,
+        file_path: str,
+        *,
+        actions: tuple[FileActionOption, ...] | None = None,
+    ) -> None:
         super().__init__()
         self._file_path = file_path
+        self._actions = actions or (
+            FileActionOption(action="preview", label="Preview"),
+            FileActionOption(action="download", label="Download as file"),
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
             yield Static(self._file_path, id="file-action-path", markup=False)
             yield OptionList(
-                *(label for _, label in self._ACTIONS),
+                *(action.label for action in self._actions),
                 id="file-action-list",
                 markup=False,
             )
@@ -1432,10 +1595,111 @@ class FileActionScreen(ModalScreen[FileAction | None]):
     @on(OptionList.OptionSelected, "#file-action-list")
     def _select_action(self, event: OptionList.OptionSelected) -> None:
         event.stop()
-        action, _label = self._ACTIONS[event.option_index]
+        action = self._actions[event.option_index]
         self.dismiss(action)
 
-    async def action_dismiss(self, result: FileAction | None = None) -> None:
+    async def action_dismiss(self, result: FileActionOption | None = None) -> None:
+        self.dismiss(result)
+
+
+class DownloadPathScreen(ModalScreen[str | None]):
+    DEFAULT_CSS = """
+    DownloadPathScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #download-path-dialog {
+        width: 88;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #download-path-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #download-path-file {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #download-path-input {
+        border: tall #ec4899;
+    }
+
+    #download-path-input:focus {
+        border: tall #ec4899;
+    }
+
+    #download-path-input > .input--selection {
+        background: #ec4899;
+        color: #ffffff;
+    }
+
+    #download-path-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #download-path-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, file_path: str, *, default_destination: str) -> None:
+        super().__init__()
+        self._file_path = file_path
+        self._default_destination = default_destination
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="download-path-dialog"):
+            yield Static("Download File", id="download-path-title")
+            yield Static(self._file_path, id="download-path-file", markup=False)
+            yield Input(
+                value=self._default_destination,
+                select_on_focus=True,
+                id="download-path-input",
+            )
+            yield Static(
+                "Edit the destination path and press Enter to download.",
+                id="download-path-help",
+            )
+            yield Static("", id="download-path-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#download-path-input", Input).focus()
+
+    def _destination_value(self) -> str | None:
+        destination = self.query_one("#download-path-input", Input).value.strip()
+        if destination:
+            self.query_one("#download-path-error", Static).update("")
+            return destination
+        self.query_one("#download-path-error", Static).update(
+            "Destination path cannot be empty."
+        )
+        return None
+
+    @on(Input.Submitted, "#download-path-input")
+    def _submit_destination(self, event: Input.Submitted) -> None:
+        event.stop()
+        destination = self._destination_value()
+        if destination is None:
+            return
+        self.dismiss(destination)
+
+    async def action_dismiss(self, result: str | None = None) -> None:
         self.dismiss(result)
 
 

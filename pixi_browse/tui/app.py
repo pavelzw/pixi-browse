@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import webbrowser
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Literal, cast
 
@@ -26,6 +26,7 @@ from textual.widgets import OptionList, Static
 
 from pixi_browse import __version__
 from pixi_browse.models import (
+    CompareFileRow,
     CompareSelection,
     DependencyTab,
     PackageFile,
@@ -59,7 +60,9 @@ from .widgets import (
     DEPENDENCY_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     CompareScreen,
+    DownloadPathScreen,
     Empty,
+    FileActionOption,
     FileActionScreen,
     FilePreviewScreen,
     HelpScreen,
@@ -881,6 +884,16 @@ class CondaMetadataTui(App[None]):
             raise RuntimeError(f"Unsafe package file path: {file_path}") from exc
         return destination
 
+    @staticmethod
+    def _resolve_download_destination(destination: str) -> Path:
+        candidate = destination.strip()
+        if not candidate:
+            raise RuntimeError("Destination path cannot be empty.")
+        resolved = Path(candidate).expanduser()
+        if not resolved.is_absolute():
+            resolved = Path.cwd() / resolved
+        return resolved.resolve()
+
     def _highlighted_version_entry(self) -> VersionEntry | None:
         row = self._highlighted_version_row()
         if row is None or row.kind != "entry" or row.entry is None:
@@ -1142,9 +1155,18 @@ class CondaMetadataTui(App[None]):
         size_in_bytes: int | None,
     ) -> None:
         self.push_screen(
-            FileActionScreen(file_path),
-            lambda action: self._handle_file_action_result(
-                package_name, entry, file_path, size_in_bytes, action
+            FileActionScreen(
+                file_path,
+                actions=(
+                    FileActionOption(action="preview", label="Preview"),
+                    FileActionOption(
+                        action="download",
+                        label="Download as file",
+                    ),
+                ),
+            ),
+            lambda result: self._handle_file_action_result(
+                package_name, entry, file_path, size_in_bytes, result
             ),
         )
 
@@ -1175,6 +1197,59 @@ class CondaMetadataTui(App[None]):
         assert package_name is not None
         assert entry is not None
         self._defer_file_action_screen(package_name, entry, file_path, size_in_bytes)
+
+    def _selected_compare_file_row(self) -> CompareFileRow | None:
+        if not self._compare_screen_open or not isinstance(self.screen, CompareScreen):
+            return None
+        return cast(CompareScreen, self.screen).selected_file_row()
+
+    def _open_compare_file_action_screen(self, row: CompareFileRow) -> None:
+        actions: list[FileActionOption] = []
+        if row.left_file is not None:
+            actions.extend(
+                (
+                    FileActionOption(
+                        action="preview", label="Preview left", source="left"
+                    ),
+                    FileActionOption(
+                        action="download", label="Download left", source="left"
+                    ),
+                )
+            )
+        if row.right_file is not None:
+            actions.extend(
+                (
+                    FileActionOption(
+                        action="preview", label="Preview right", source="right"
+                    ),
+                    FileActionOption(
+                        action="download", label="Download right", source="right"
+                    ),
+                )
+            )
+        if not actions:
+            self.notify(
+                "This compare row does not map to a downloadable file.",
+                title="Files",
+                severity="warning",
+            )
+            return
+
+        self.push_screen(
+            FileActionScreen(
+                row.label,
+                actions=tuple(actions),
+            ),
+            lambda result: self._handle_compare_file_action_result(row, result),
+        )
+
+    def _request_file_action_for_selected_compare_file(self) -> None:
+        if self._file_action_in_progress:
+            return
+        row = self._selected_compare_file_row()
+        if row is None:
+            return
+        self.call_after_refresh(lambda: self._open_compare_file_action_screen(row))
 
     async def _fetch_package_file_bytes(
         self, package_name: str, entry: VersionEntry, file_path: str
@@ -1227,11 +1302,20 @@ class CondaMetadataTui(App[None]):
         return f"{file_path} ({format_human_byte_size(size_in_bytes)})"
 
     async def _download_selected_package_file(
-        self, package_name: str, entry: VersionEntry, file_path: str
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        *,
+        destination_path: str | None = None,
     ) -> None:
         temporary_destination: Path | None = None
         try:
-            destination = self._file_destination_path(file_path)
+            destination = (
+                self._file_destination_path(file_path)
+                if destination_path is None
+                else self._resolve_download_destination(destination_path)
+            )
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary_destination = destination.with_name(f"{destination.name}.part")
             temporary_destination.write_bytes(
@@ -1259,12 +1343,17 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None = None,
+        *,
+        title_prefix: str | None = None,
     ) -> None:
         try:
+            preview_title = self._preview_title(file_path, size_in_bytes=size_in_bytes)
+            if title_prefix is not None:
+                preview_title = f"{title_prefix}: {preview_title}"
             if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
                 self.push_screen(
                     FilePreviewScreen(
-                        self._preview_title(file_path, size_in_bytes=size_in_bytes),
+                        preview_title,
                         self._preview_content(
                             file_path,
                             None,
@@ -1276,9 +1365,12 @@ class CondaMetadataTui(App[None]):
             package_bytes = await self._fetch_package_file_bytes(
                 package_name, entry, file_path
             )
+            preview_title = self._preview_title(file_path, package_bytes)
+            if title_prefix is not None:
+                preview_title = f"{title_prefix}: {preview_title}"
             self.push_screen(
                 FilePreviewScreen(
-                    self._preview_title(file_path, package_bytes),
+                    preview_title,
                     self._preview_content(file_path, package_bytes),
                 )
             )
@@ -1295,15 +1387,19 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
-        action: Literal["download", "preview"],
+        action: FileActionOption,
+        destination_path: str | None = None,
     ) -> None:
         try:
-            if action == "download":
+            if action.action == "download":
                 await self._download_selected_package_file(
-                    package_name, entry, file_path
+                    package_name,
+                    entry,
+                    file_path,
+                    destination_path=destination_path,
                 )
                 return
-            if action == "preview":
+            if action.action == "preview":
                 await self._preview_selected_package_file(
                     package_name, entry, file_path, size_in_bytes
                 )
@@ -1317,9 +1413,24 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
-        action: Literal["download", "preview"] | None,
+        action: FileActionOption | None,
     ) -> None:
         if action is None or self._file_action_in_progress:
+            return
+
+        if action.action == "download":
+            self._open_download_path_screen(
+                file_path,
+                default_destination=str(self._file_destination_path(file_path)),
+                on_submit=lambda destination: self._handle_file_download_destination(
+                    package_name,
+                    entry,
+                    file_path,
+                    size_in_bytes,
+                    action,
+                    destination,
+                ),
+            )
             return
 
         self._file_action_in_progress = True
@@ -1327,6 +1438,177 @@ class CondaMetadataTui(App[None]):
             self.run_worker(
                 self._run_file_action(
                     package_name, entry, file_path, size_in_bytes, action
+                ),
+                group="file-action",
+                exclusive=True,
+                exit_on_error=False,
+            )
+        except Exception:
+            self._file_action_in_progress = False
+            raise
+
+    async def _run_compare_file_action(
+        self,
+        selection: CompareSelection,
+        package_file: PackageFile,
+        action: FileActionOption,
+        *,
+        title_prefix: str,
+        destination_path: str | None = None,
+    ) -> None:
+        try:
+            if action.action == "download":
+                await self._download_selected_package_file(
+                    selection.package_name,
+                    selection.entry,
+                    package_file.path,
+                    destination_path=destination_path,
+                )
+                return
+            if action.action == "preview":
+                await self._preview_selected_package_file(
+                    selection.package_name,
+                    selection.entry,
+                    package_file.path,
+                    package_file.size_in_bytes,
+                    title_prefix=title_prefix,
+                )
+                return
+        finally:
+            self._file_action_in_progress = False
+
+    def _handle_compare_file_action_result(
+        self, row: CompareFileRow, action: FileActionOption | None
+    ) -> None:
+        if (
+            action is None
+            or self._file_action_in_progress
+            or not isinstance(self.screen, CompareScreen)
+        ):
+            return
+
+        compare_screen = cast(CompareScreen, self.screen)
+        if action.source == "left":
+            selection = compare_screen.selection_for_source("left")
+            package_file = row.left_file
+            title_prefix = "Left"
+        elif action.source == "right":
+            selection = compare_screen.selection_for_source("right")
+            package_file = row.right_file
+            title_prefix = "Right"
+        else:
+            self.notify(
+                f"Unsupported compare file source: {action.source}",
+                title="Files",
+                severity="error",
+            )
+            return
+
+        if package_file is None:
+            self.notify(
+                "The selected side does not have a downloadable file.",
+                title="Files",
+                severity="warning",
+            )
+            return
+
+        if action.action == "download":
+            self._open_download_path_screen(
+                package_file.path,
+                default_destination=str(self._file_destination_path(package_file.path)),
+                on_submit=lambda destination: self._handle_compare_download_destination(
+                    selection,
+                    package_file,
+                    title_prefix,
+                    action,
+                    destination,
+                ),
+            )
+            return
+
+        self._file_action_in_progress = True
+        try:
+            self.run_worker(
+                self._run_compare_file_action(
+                    selection,
+                    package_file,
+                    action,
+                    title_prefix=title_prefix,
+                ),
+                group="file-action",
+                exclusive=True,
+                exit_on_error=False,
+            )
+        except Exception:
+            self._file_action_in_progress = False
+            raise
+
+    def _open_download_path_screen(
+        self,
+        file_path: str,
+        *,
+        default_destination: str,
+        on_submit: Callable[[str | None], None],
+    ) -> None:
+        self.push_screen(
+            DownloadPathScreen(
+                file_path,
+                default_destination=default_destination,
+            ),
+            on_submit,
+        )
+
+    def _handle_file_download_destination(
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        size_in_bytes: int | None,
+        action: FileActionOption,
+        destination: str | None,
+    ) -> None:
+        if destination is None or self._file_action_in_progress:
+            return
+
+        self._file_action_in_progress = True
+        try:
+            self.run_worker(
+                self._run_file_action(
+                    package_name,
+                    entry,
+                    file_path,
+                    size_in_bytes,
+                    action,
+                    destination_path=destination,
+                ),
+                group="file-action",
+                exclusive=True,
+                exit_on_error=False,
+            )
+        except Exception:
+            self._file_action_in_progress = False
+            raise
+
+    def _handle_compare_download_destination(
+        self,
+        selection: CompareSelection,
+        package_file: PackageFile,
+        title_prefix: str,
+        action: FileActionOption,
+        destination: str | None,
+    ) -> None:
+        if destination is None or self._file_action_in_progress:
+            return
+
+        self._file_action_in_progress = True
+        try:
+            self.run_worker(
+                self._run_compare_file_action(
+                    selection,
+                    package_file,
+                    action,
+                    title_prefix=title_prefix,
+                    destination_path=destination,
                 ),
                 group="file-action",
                 exclusive=True,
@@ -1861,6 +2143,11 @@ class CondaMetadataTui(App[None]):
                 return
             if event.key in {"shift+tab", "backtab"}:
                 compare_screen.action_previous_section()
+                event.stop()
+                return
+            if event.key == "enter":
+                if compare_screen.file_section_is_active():
+                    self._request_file_action_for_selected_compare_file()
                 event.stop()
                 return
 
