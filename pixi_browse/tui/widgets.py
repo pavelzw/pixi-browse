@@ -1061,12 +1061,12 @@ class CompareDetailsView(Vertical):
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
         if not row.changed:
-            return "bright_black"
+            return "#5c6370"
         if row.left and row.right:
-            return "yellow"
+            return "#7a5c00"
         if row.left:
-            return "red"
-        return "green"
+            return "#8b1e1e"
+        return "#1f5f2b"
 
     def _file_entries_for_compare_data(self) -> tuple[CompareFileListEntry, ...]:
         if not self._compare_data.files:
@@ -1091,11 +1091,22 @@ class CompareDetailsView(Vertical):
         )
 
     def _render_compare_file_option(self, row: CompareFileRow) -> Text:
-        text = Text(row.label, style=self._file_row_style(row))
+        text = Text(self._compare_file_prefix(row), style=self._file_row_style(row))
+        text.append(row.label, style=self._file_row_style(row))
         suffix = self._compare_file_suffix(row)
         if suffix:
             text.append(suffix, style="dim")
         return text
+
+    @staticmethod
+    def _compare_file_prefix(row: CompareFileRow) -> str:
+        if not row.changed:
+            return "= "
+        if row.left and row.right:
+            return "~ "
+        if row.left:
+            return "- "
+        return "+ "
 
     @staticmethod
     def _compare_file_suffix(row: CompareFileRow) -> str:

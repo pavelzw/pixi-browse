@@ -1999,14 +1999,14 @@ def test_compare_file_body_uses_single_column_with_status_colors() -> None:
     left_only = view._render_compare_file_option(view._compare_data.files[2])
     right_only = view._render_compare_file_option(view._compare_data.files[3])
 
-    assert same.plain == "same.txt"
-    assert changed.plain == "changed.txt"
-    assert left_only.plain == "left-only.txt"
-    assert right_only.plain == "right-only.txt"
-    assert same.style == "bright_black"
-    assert changed.style == "yellow"
-    assert left_only.style == "red"
-    assert right_only.style == "green"
+    assert same.plain == "= same.txt"
+    assert changed.plain == "~ changed.txt"
+    assert left_only.plain == "- left-only.txt"
+    assert right_only.plain == "+ right-only.txt"
+    assert same.style == "#5c6370"
+    assert changed.style == "#7a5c00"
+    assert left_only.style == "#8b1e1e"
+    assert right_only.style == "#1f5f2b"
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
