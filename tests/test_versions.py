@@ -3299,6 +3299,7 @@ def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
         ),
     )
     notifications: list[tuple[str, str | None, str | None]] = []
+    footer = _FakeFooter()
 
     monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
     monkeypatch.setattr(
@@ -3306,6 +3307,15 @@ def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
         "notify",
         lambda message, title=None, severity=None: notifications.append(
             (message, title, severity)
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
         ),
     )
 
@@ -3319,6 +3329,15 @@ def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
             None,
         )
     ]
+    assert len(footer.updates) == 1
+    footer_text = footer.updates[0]
+    assert isinstance(footer_text, Text)
+    assert any(
+        footer_text.plain[span.start : span.end] == "Compare: C"
+        and span.style == "#ec4899"
+        for span in footer_text.spans
+        if isinstance(span.style, str)
+    )
 
 
 def test_action_compare_key_c_queues_compare_screen_on_second_selection(
@@ -3825,8 +3844,43 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
     app._mode = "versions"
 
     assert (
-        app._footer_text()
+        cast(Text, app._footer_text()).plain
         == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+    )
+
+
+def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._compare_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+
+    footer = cast(Text, app._footer_text())
+
+    assert footer.plain == (
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+    )
+    compare_start = footer.plain.index("Compare: C")
+    compare_end = compare_start + len("Compare: C")
+    assert any(
+        span.start == compare_start
+        and span.end == compare_end
+        and span.style == "#ec4899"
+        for span in footer.spans
+        if isinstance(span.style, str)
+    )
+    assert not any(
+        footer.plain[span.start : span.end] == "Download: d"
+        for span in footer.spans
+        if isinstance(span.style, str)
     )
 
 
@@ -3863,7 +3917,7 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
     app._search_query = "polars"
 
     assert (
-        app._footer_text()
+        cast(Text, app._footer_text()).plain
         == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
     )
 
@@ -4319,12 +4373,15 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     assert app._download_in_progress is False
     assert main_panel.subtitle_history == []
     assert status.updates[-1] == "0 entries across 0 platform."
+    footer_updates = [
+        value.plain if isinstance(value, Text) else value for value in footer.updates
+    ]
     assert (
         f"Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Downloading {entry.file_name}... | Help: ?"
-        in footer.updates
+        in footer_updates
     )
     assert (
         "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
-        in footer.updates
+        in footer_updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]

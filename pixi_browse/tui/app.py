@@ -1825,7 +1825,7 @@ class CondaMetadataTui(App[None]):
             reverse=True,
         )
 
-    def _footer_text(self) -> str:
+    def _footer_text(self) -> str | Text:
         if self._channel_edit_mode:
             return f"Channel: {self._channel_draft}_"
 
@@ -1837,11 +1837,19 @@ class CondaMetadataTui(App[None]):
                 "Compare: Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
             )
 
-        footer = "Search: / | Platform: p | Channel: c | MatchSpec: m"
         if self._mode == "versions":
-            footer += f" | Compare: C | {self._download_indicator_text().plain}"
-        footer += " | Help: ?"
-        return footer
+            footer = Text("Search: / | Platform: p | Channel: c | MatchSpec: m")
+            footer.append(" | ")
+            compare_start = len(footer)
+            footer.append("Compare: C")
+            if self._compare_selection is not None:
+                footer.stylize("#ec4899", compare_start, len(footer))
+            footer.append(" | ")
+            footer.append_text(self._download_indicator_text())
+            footer.append(" | Help: ?")
+            return footer
+
+        return "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
 
     def _sidebar_title_text(self, *, selected: bool) -> Text:
         if self._mode == "versions":
@@ -1865,9 +1873,7 @@ class CondaMetadataTui(App[None]):
         if self._download_indicator_override is not None:
             return Text(self._download_indicator_override, style="dim")
 
-        indicator = Text("Download: d", style="dim")
-        indicator.stylize("bold red", len("Download: "), len("Download: d"))
-        return indicator
+        return Text("Download: d")
 
     def _set_download_indicator(self, value: str | None) -> None:
         self._download_indicator_override = value
@@ -2022,6 +2028,7 @@ class CondaMetadataTui(App[None]):
 
         if self._compare_selection is None:
             self._compare_selection = selection
+            self.query_one("#footer", Static).update(self._footer_text())
             self.notify(
                 f"Stored {self._compare_selection_label(selection)} as compare A.",
                 title="Compare",
