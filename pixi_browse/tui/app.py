@@ -713,11 +713,17 @@ class CondaMetadataTui(App[None]):
     def _selected_file_size_in_bytes(self) -> int | None:
         return self.query_one("#main-panel", MainPanel).selected_file_size_in_bytes()
 
+    def _selected_file_sha256(self) -> bytes | None:
+        return self.query_one("#main-panel", MainPanel).selected_file_sha256()
+
     def _file_path_at(self, index: int) -> str | None:
         return self.query_one("#main-panel", MainPanel).file_path_at(index)
 
     def _file_size_at(self, index: int) -> int | None:
         return self.query_one("#main-panel", MainPanel).file_size_at(index)
+
+    def _file_sha256_at(self, index: int) -> bytes | None:
+        return self.query_one("#main-panel", MainPanel).file_sha256_at(index)
 
     def _open_matchspec_screen(
         self, initial_value: str, *, select_on_focus: bool = True
@@ -1153,6 +1159,7 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
+        sha256: bytes | None,
     ) -> None:
         self.push_screen(
             FileActionScreen(
@@ -1164,9 +1171,10 @@ class CondaMetadataTui(App[None]):
                         label="Download as file",
                     ),
                 ),
+                metadata_lines=self._file_action_metadata_lines(sha256=sha256),
             ),
             lambda result: self._handle_file_action_result(
-                package_name, entry, file_path, size_in_bytes, result
+                package_name, entry, file_path, size_in_bytes, sha256, result
             ),
         )
 
@@ -1176,10 +1184,11 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
+        sha256: bytes | None,
     ) -> None:
         self.call_after_refresh(
             lambda: self._open_file_action_screen(
-                package_name, entry, file_path, size_in_bytes
+                package_name, entry, file_path, size_in_bytes, sha256
             )
         )
 
@@ -1192,11 +1201,14 @@ class CondaMetadataTui(App[None]):
             return
 
         size_in_bytes = self._selected_file_size_in_bytes()
+        sha256 = self._selected_file_sha256()
         package_name = self._selected_package
         entry = self._highlighted_version_entry()
         assert package_name is not None
         assert entry is not None
-        self._defer_file_action_screen(package_name, entry, file_path, size_in_bytes)
+        self._defer_file_action_screen(
+            package_name, entry, file_path, size_in_bytes, sha256
+        )
 
     def _selected_compare_file_row(self) -> CompareFileRow | None:
         if not self._compare_screen_open or not isinstance(self.screen, CompareScreen):
@@ -1239,6 +1251,7 @@ class CondaMetadataTui(App[None]):
             FileActionScreen(
                 row.label,
                 actions=tuple(actions),
+                metadata_lines=self._compare_file_action_metadata_lines(row),
             ),
             lambda result: self._handle_compare_file_action_result(row, result),
         )
@@ -1301,6 +1314,33 @@ class CondaMetadataTui(App[None]):
             return file_path
         return f"{file_path} ({format_human_byte_size(size_in_bytes)})"
 
+    @staticmethod
+    def _file_action_metadata_lines(
+        *, sha256: bytes | None, label: str = "SHA256"
+    ) -> tuple[str, ...]:
+        if sha256 is None:
+            return ()
+        return (f"{label}: {sha256.hex()}",)
+
+    @classmethod
+    def _compare_file_action_metadata_lines(
+        cls, row: CompareFileRow
+    ) -> tuple[str, ...]:
+        metadata_lines: list[str] = []
+        if row.left_file is not None and row.left_file.sha256 is not None:
+            metadata_lines.extend(
+                cls._file_action_metadata_lines(
+                    sha256=row.left_file.sha256, label="Left SHA256"
+                )
+            )
+        if row.right_file is not None and row.right_file.sha256 is not None:
+            metadata_lines.extend(
+                cls._file_action_metadata_lines(
+                    sha256=row.right_file.sha256, label="Right SHA256"
+                )
+            )
+        return tuple(metadata_lines)
+
     async def _download_selected_package_file(
         self,
         package_name: str,
@@ -1343,6 +1383,7 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None = None,
+        sha256: bytes | None = None,
         *,
         title_prefix: str | None = None,
     ) -> None:
@@ -1387,6 +1428,7 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
+        sha256: bytes | None,
         action: FileActionOption,
         destination_path: str | None = None,
     ) -> None:
@@ -1401,7 +1443,7 @@ class CondaMetadataTui(App[None]):
                 return
             if action.action == "preview":
                 await self._preview_selected_package_file(
-                    package_name, entry, file_path, size_in_bytes
+                    package_name, entry, file_path, size_in_bytes, sha256
                 )
                 return
         finally:
@@ -1413,6 +1455,7 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
+        sha256: bytes | None,
         action: FileActionOption | None,
     ) -> None:
         if action is None or self._file_action_in_progress:
@@ -1427,6 +1470,7 @@ class CondaMetadataTui(App[None]):
                     entry,
                     file_path,
                     size_in_bytes,
+                    sha256,
                     action,
                     destination,
                 ),
@@ -1437,7 +1481,7 @@ class CondaMetadataTui(App[None]):
         try:
             self.run_worker(
                 self._run_file_action(
-                    package_name, entry, file_path, size_in_bytes, action
+                    package_name, entry, file_path, size_in_bytes, sha256, action
                 ),
                 group="file-action",
                 exclusive=True,
@@ -1471,6 +1515,7 @@ class CondaMetadataTui(App[None]):
                     selection.entry,
                     package_file.path,
                     package_file.size_in_bytes,
+                    package_file.sha256,
                     title_prefix=title_prefix,
                 )
                 return
@@ -1564,6 +1609,7 @@ class CondaMetadataTui(App[None]):
         entry: VersionEntry,
         file_path: str,
         size_in_bytes: int | None,
+        sha256: bytes | None,
         action: FileActionOption,
         destination: str | None,
     ) -> None:
@@ -1578,6 +1624,7 @@ class CondaMetadataTui(App[None]):
                     entry,
                     file_path,
                     size_in_bytes,
+                    sha256,
                     action,
                     destination_path=destination,
                 ),

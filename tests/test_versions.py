@@ -2362,21 +2362,29 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
         subdir="noarch",
         file_name="demo-1.2.3-py313h123_0.conda",
     )
-    opened: list[tuple[str, str, str, int | None]] = []
+    opened: list[tuple[str, str, str, int | None, bytes | None]] = []
     scheduled: list[object] = []
 
     monkeypatch.setattr(
         app,
         "_open_file_action_screen",
-        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
-            (package_name, selected_entry.file_name, file_path, size_in_bytes)
+        lambda package_name, selected_entry, file_path, size_in_bytes, sha256: (
+            opened.append(
+                (
+                    package_name,
+                    selected_entry.file_name,
+                    file_path,
+                    size_in_bytes,
+                    sha256,
+                )
+            )
         ),
     )
     monkeypatch.setattr(
         app, "call_after_refresh", lambda callback: scheduled.append(callback)
     )
 
-    app._defer_file_action_screen("demo", entry, "info/about.json", 17)
+    app._defer_file_action_screen("demo", entry, "info/about.json", 17, None)
 
     assert opened == []
     assert len(scheduled) == 1
@@ -2385,7 +2393,7 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
     assert callable(callback)
     callback()
 
-    assert opened == [("demo", entry.file_name, "info/about.json", 17)]
+    assert opened == [("demo", entry.file_name, "info/about.json", 17, None)]
 
 
 def test_request_file_action_for_selected_file_is_noop_without_file_path(
@@ -4016,6 +4024,7 @@ def test_handle_file_action_result_opens_download_path_screen(monkeypatch) -> No
         entry,
         "info/about.json",
         None,
+        None,
         FileActionOption(action="download", label="Download as file"),
     )
 
@@ -4044,6 +4053,7 @@ def test_handle_file_action_result_spawns_worker_for_preview(monkeypatch) -> Non
         "demo",
         entry,
         "info/about.json",
+        None,
         None,
         FileActionOption(action="preview", label="Preview"),
     )
@@ -4127,7 +4137,14 @@ def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
     monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
 
-    asyncio.run(app._preview_selected_package_file("demo", entry, "info/about.json"))
+    asyncio.run(
+        app._preview_selected_package_file(
+            "demo",
+            entry,
+            "info/about.json",
+            sha256=bytes.fromhex("11" * 32),
+        )
+    )
 
     assert len(pushed) == 1
     assert isinstance(pushed[0], FilePreviewScreen)
@@ -4170,6 +4187,16 @@ def test_preview_selected_package_file_skips_fetch_when_cached_size_is_too_large
     assert pushed[0]._title == "info/about.json (293.0 KiB)"
     assert "File too large to preview in-app" in pushed[0]._content
     assert "300,000 bytes" in pushed[0]._content
+
+
+def test_file_action_metadata_lines_formats_sha256() -> None:
+    rendered = CondaMetadataTui._file_action_metadata_lines(
+        sha256=bytes.fromhex("ab" * 32)
+    )
+
+    assert rendered == (
+        "SHA256: abababababababababababababababababababababababababababababababab",
+    )
 
 
 def test_preview_content_rejects_binary_files() -> None:
@@ -4229,11 +4256,15 @@ def test_file_action_screen_uses_plain_static_text() -> None:
                     FileActionOption(action="preview", label="Preview"),
                     FileActionOption(action="download", label="Download"),
                 ),
+                metadata_lines=(
+                    "SHA256: abababababababababababababababababababababababababababababababab",
+                ),
             )
             app.push_screen(screen)
             await pilot.pause()
 
             assert screen.query_one("#file-action-path")._render_markup is False
+            assert screen.query_one("#file-action-metadata")._render_markup is False
 
     asyncio.run(_run())
 

@@ -59,6 +59,7 @@ class FileListEntry:
     label: str
     path: str | None
     size_in_bytes: int | None = None
+    sha256: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -356,6 +357,19 @@ class VersionDetailsView(Vertical):
             return None
         return self.file_size_at(highlighted)
 
+    def file_sha256_at(self, index: int) -> bytes | None:
+        entries = self._current_file_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].sha256
+
+    def selected_file_sha256(self) -> bytes | None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_sha256_at(highlighted)
+
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
 
@@ -467,6 +481,7 @@ class VersionDetailsView(Vertical):
                     ),
                     path=package_file.path,
                     size_in_bytes=package_file.size_in_bytes,
+                    sha256=package_file.sha256,
                 )
                 for package_file in self._details.file_paths
             )
@@ -676,6 +691,11 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).selected_file_size_in_bytes()
 
+    def selected_file_sha256(self) -> bytes | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_file_sha256()
+
     def file_path_at(self, index: int) -> str | None:
         return self.query_one("#version-details-view", VersionDetailsView).file_path_at(
             index
@@ -685,6 +705,11 @@ class MainPanel(Vertical):
         return self.query_one("#version-details-view", VersionDetailsView).file_size_at(
             index
         )
+
+    def file_sha256_at(self, index: int) -> bytes | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).file_sha256_at(index)
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -1554,6 +1579,11 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
         margin-bottom: 1;
     }
 
+    #file-action-metadata {
+        color: $text;
+        margin-bottom: 1;
+    }
+
     #file-action-list {
         border: none;
         background: $background;
@@ -1582,6 +1612,7 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
         file_path: str,
         *,
         actions: tuple[FileActionOption, ...] | None = None,
+        metadata_lines: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -1589,11 +1620,18 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
             FileActionOption(action="preview", label="Preview"),
             FileActionOption(action="download", label="Download as file"),
         )
+        self._metadata_lines = metadata_lines
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
             yield Static(self._file_path, id="file-action-path", markup=False)
+            if self._metadata_lines:
+                yield Static(
+                    "\n".join(self._metadata_lines),
+                    id="file-action-metadata",
+                    markup=False,
+                )
             yield OptionList(
                 *(action.label for action in self._actions),
                 id="file-action-list",
