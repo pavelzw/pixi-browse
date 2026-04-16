@@ -86,4 +86,4 @@ Down@500ms 3
 Enter
 Sleep 1s
 Enter
-Sleep 1s
+Sleep 5s
