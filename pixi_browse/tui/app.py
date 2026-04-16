@@ -999,6 +999,8 @@ class CondaMetadataTui(App[None]):
                 pair[1].name.source,
             ),
         )
+        # Deliberately normalize the compare pane order for a stable display,
+        # even when the user picked compare A/B in the opposite order.
         (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
             ordered_pairs
         )
