@@ -3026,6 +3026,29 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     assert opened == [("demo", "info/about.json")]
 
 
+def test_compare_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[str] = []
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = type(
+                "OptionListEvent", (), {"id": "compare-option-list-2"}
+            )()
+            self.option_index = 0
+
+    monkeypatch.setattr(
+        app,
+        "_request_file_action_for_selected_compare_file",
+        lambda: opened.append("compare"),
+    )
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert opened == ["compare"]
+
+
 def test_clicking_detail_section_activates_and_focuses_pane() -> None:
     activated: list[int] = []
     section = DetailSection("Files", 2, on_activate=activated.append)

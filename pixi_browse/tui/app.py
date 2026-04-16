@@ -2579,6 +2579,10 @@ class CondaMetadataTui(App[None]):
             self._request_file_action_for_selected_file()
             return
 
+        if event.option_list.id == "compare-option-list-2":
+            self._request_file_action_for_selected_compare_file()
+            return
+
         if event.option_list.id != "sidebar-list":
             return
 
