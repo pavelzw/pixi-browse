@@ -398,9 +398,8 @@ def build_version_artifact_data(
         ),
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
-        run_exports=tuple(_format_plain_run_exports_lines(run_exports)),
         file_paths=tuple(package_paths or ()),
-        raw_run_exports=run_exports,
+        run_exports=run_exports,
     )
 
 
@@ -572,6 +571,11 @@ def build_version_compare_data(
     right_selection: CompareSelection,
     right_artifact: VersionArtifactData,
 ) -> VersionCompareData:
+    left_run_exports = tuple(_format_plain_run_exports_lines(left_artifact.run_exports))
+    right_run_exports = tuple(
+        _format_plain_run_exports_lines(right_artifact.run_exports)
+    )
+
     left_metadata = {
         field.label: field.value for field in left_artifact.metadata_fields
     }
@@ -612,8 +616,8 @@ def build_version_compare_data(
             run_export=False,
         ),
         run_exports=_diff_dependency_group(
-            left_artifact.run_exports,
-            right_artifact.run_exports,
+            left_run_exports,
+            right_run_exports,
             run_export=True,
         ),
         files=_build_file_compare_rows(left_artifact, right_artifact),

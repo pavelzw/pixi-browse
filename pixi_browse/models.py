@@ -50,9 +50,8 @@ class VersionArtifactData:
     metadata_fields: tuple[MetadataField, ...]
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
-    run_exports: tuple[str, ...]
     file_paths: tuple[PackageFile, ...] = ()
-    raw_run_exports: RunExportsJson | None = None
+    run_exports: RunExportsJson | None = None
 
 
 @dataclass(frozen=True)

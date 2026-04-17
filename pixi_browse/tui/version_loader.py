@@ -178,7 +178,7 @@ class VersionDataLoader:
 
         if artifact_data is not None:
             package_paths = artifact_data.file_paths
-            run_exports = artifact_data.raw_run_exports
+            run_exports = artifact_data.run_exports
         else:
             package_paths = None
             run_exports = None
