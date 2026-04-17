@@ -25,10 +25,14 @@ from pixi_browse.models import (
     CompareRow,
     CompareSelection,
     DependencyTab,
+    VersionArtifactData,
     VersionCompareData,
-    VersionDetailsData,
 )
-from pixi_browse.rendering import format_human_byte_size
+from pixi_browse.rendering import (
+    format_human_byte_size,
+    format_version_details_metadata_lines,
+    format_version_details_run_exports,
+)
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -187,7 +191,7 @@ class DetailSection(Vertical):
 class VersionDetailsView(Vertical):
     def __init__(self) -> None:
         super().__init__(id="version-details-view", classes="detail-view")
-        self._details: VersionDetailsData | None = None
+        self._details: VersionArtifactData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
         self._dependency_entries: dict[
@@ -223,7 +227,7 @@ class VersionDetailsView(Vertical):
             use_option_list=True,
         )
 
-    def set_details(self, details: VersionDetailsData) -> None:
+    def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
         self._file_highlighted = 0
@@ -390,7 +394,9 @@ class VersionDetailsView(Vertical):
             return
 
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body("\n".join(self._details.metadata_lines))
+        self._section(0).update_body(
+            "\n".join(format_version_details_metadata_lines(self._details))
+        )
 
         self._refresh_dependency_section()
 
@@ -424,7 +430,9 @@ class VersionDetailsView(Vertical):
             return self._details.dependencies or ("No dependencies.",)
         if tab == "constraints":
             return self._details.constraints or ("No constraints.",)
-        return self._details.run_exports or ("No run exports.",)
+        return format_version_details_run_exports(self._details.run_exports) or (
+            "No run exports.",
+        )
 
     def _current_dependency_entries(self) -> tuple[DependencyListEntry, ...]:
         return self._dependency_entries[self._active_dependency_tab()]
@@ -485,9 +493,7 @@ class VersionDetailsView(Vertical):
                 )
                 for package_file in self._details.file_paths
             )
-        return tuple(
-            FileListEntry(label=line, path=None) for line in self._details.files
-        )
+        return (FileListEntry(label="No files listed.", path=None),)
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-2", DetailOptionList)
@@ -515,7 +521,10 @@ class VersionDetailsView(Vertical):
             labels = {
                 "dependencies": f"Dependencies ({len(self._details.dependencies)})",
                 "constraints": f"Constraints ({len(self._details.constraints)})",
-                "run_exports": f"Run exports ({len(self._details.run_exports)})",
+                "run_exports": (
+                    "Run exports "
+                    f"({len(format_version_details_run_exports(self._details.run_exports))})"
+                ),
             }
         tab_text = Text()
         for index, tab in enumerate(DEPENDENCY_TABS):
@@ -613,7 +622,7 @@ class MainPanel(Vertical):
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
-    def show_version_details(self, details: VersionDetailsData) -> None:
+    def show_version_details(self, details: VersionArtifactData) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = False
         placeholder.border_title = ""

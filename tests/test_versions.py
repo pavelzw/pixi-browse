@@ -26,15 +26,16 @@ from pixi_browse.models import (
     CompareRow,
     CompareSelection,
     PackageFile,
+    VersionArtifactData,
     VersionCompareData,
-    VersionDetailsData,
 )
 from pixi_browse.rendering import (
     build_version_artifact_data,
     build_version_compare_data,
-    build_version_details_data,
     format_clickable_github_handle,
     format_clickable_url,
+    format_version_details_metadata_lines,
+    format_version_details_run_exports,
     render_package_preview,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
@@ -75,6 +76,23 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+def _make_artifact_data(
+    *,
+    metadata_rows: tuple[tuple[str, str], ...] = (("Meta", "meta"),),
+    dependencies: tuple[str, ...] = (),
+    constraints: tuple[str, ...] = (),
+    run_exports: RunExportsJson | None = None,
+    file_paths: tuple[PackageFile, ...] = (),
+) -> VersionArtifactData:
+    return VersionArtifactData(
+        metadata_rows=metadata_rows,
+        dependencies=dependencies,
+        constraints=constraints,
+        file_paths=file_paths,
+        run_exports=run_exports,
+    )
 
 
 def _make_repo_data_record(
@@ -218,7 +236,7 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
-def test_build_version_details_data_includes_package_paths() -> None:
+def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -228,7 +246,7 @@ def test_build_version_details_data_includes_package_paths() -> None:
         depends=["python >=3.13"],
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         package_paths=(
@@ -237,14 +255,13 @@ def test_build_version_details_data_includes_package_paths() -> None:
         ),
     )
 
-    assert details.files == ("bin/demo", "lib/python3.13/site-packages/demo.py")
     assert details.file_paths == (
         PackageFile("bin/demo"),
         PackageFile("lib/python3.13/site-packages/demo.py"),
     )
 
 
-def test_build_version_details_data_aligns_metadata_rows() -> None:
+def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -253,30 +270,33 @@ def test_build_version_details_data_aligns_metadata_rows() -> None:
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
     )
+    metadata_lines = format_version_details_metadata_lines(details)
 
-    assert "Package               demo" in details.metadata_lines
-    assert "Python Site-Packages  not available" in details.metadata_lines
+    assert "Package               demo" in metadata_lines
+    assert "Python Site-Packages  not available" in metadata_lines
     assert any(
         line.startswith("Repository            [@click=app.open_external_url(")
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert (
         "Built with            rattler-build 0.47.0"
-        in build_version_details_data(
-            "demo",
-            record,
-            rattler_build_version="0.47.0",
-        ).metadata_lines
+        in format_version_details_metadata_lines(
+            build_version_artifact_data(
+                "demo",
+                record,
+                rattler_build_version="0.47.0",
+            )
+        )
     )
 
 
-def test_build_version_details_data_formats_run_exports_from_py_rattler() -> None:
+def test_format_version_details_run_exports_from_py_rattler() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -285,7 +305,7 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         run_exports=RunExportsJson(
@@ -295,14 +315,14 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         ),
     )
 
-    assert details.run_exports == (
+    assert format_version_details_run_exports(details.run_exports) == (
         "weak: python_abi 3.13.* *_cp313",
         "strong: libdemo >=1.2.3",
         "noarch: python",
     )
     assert details.dependencies == ()
     assert details.constraints == ()
-    assert len(details.run_exports) == 3
+    assert len(format_version_details_run_exports(details.run_exports)) == 3
 
 
 def test_load_version_details_reuses_cached_artifact_run_exports(monkeypatch) -> None:
@@ -335,7 +355,7 @@ def test_load_version_details_reuses_cached_artifact_run_exports(monkeypatch) ->
         loader.load_version_details("demo", record, preview_key=preview_key)
     )
 
-    assert details.run_exports == (
+    assert format_version_details_run_exports(details.run_exports) == (
         "weak: python_abi 3.13.* *_cp313",
         "strong: libdemo >=1",
     )
@@ -361,7 +381,7 @@ def test_load_version_details_raises_when_package_paths_are_unavailable(
         )
 
 
-def test_load_version_details_raises_when_about_urls_are_unavailable(
+def test_load_version_details_tolerates_unavailable_about_urls(
     monkeypatch,
 ) -> None:
     loader = VersionDataLoader(client=cast(Client, object()))
@@ -378,13 +398,21 @@ def test_load_version_details_raises_when_about_urls_are_unavailable(
     ) -> AboutUrls:
         raise RuntimeError("about.json missing")
 
+    async def _fake_get_run_exports(_url: str) -> RunExportsJson:
+        return RunExportsJson()
+
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
+    monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
 
-    with pytest.raises(RuntimeError, match="about.json missing"):
-        asyncio.run(
-            loader.load_version_details("demo", record, preview_key=preview_key)
-        )
+    details = asyncio.run(
+        loader.load_version_details("demo", record, preview_key=preview_key)
+    )
+
+    assert not any(
+        line.startswith("Repository")
+        for line in format_version_details_metadata_lines(details)
+    )
 
 
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
@@ -539,7 +567,7 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
     assert lib_demo_row.changed is True
 
 
-def test_build_version_details_data_includes_about_urls() -> None:
+def test_format_version_details_metadata_lines_include_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -548,7 +576,7 @@ def test_build_version_details_data_includes_about_urls() -> None:
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         repository_urls=["https://github.com/example/demo"],
@@ -559,29 +587,30 @@ def test_build_version_details_data_includes_about_urls() -> None:
         provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
         rattler_build_version="0.38.0",
     )
+    metadata_lines = format_version_details_metadata_lines(details)
 
     assert any(
         line.startswith("Package URL")
         and "https://example.invalid/demo-1.2.3-py313h123_0.conda" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Repository") and "https://github.com/example/demo" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Documentation") and "https://docs.example.com/demo" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Homepage") and "https://example.com/demo" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Recipe maintainers")
         and "@click=app.open_external_url('https://github.com/pavelzw')" in line
         and "@click=app.open_external_url('https://github.com/xhochy')" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Provenance")
@@ -589,11 +618,11 @@ def test_build_version_details_data_includes_about_urls() -> None:
         in line
         and "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
         in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert any(
         line.startswith("Built with") and "rattler-build 0.38.0" in line
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
 
 
@@ -1239,15 +1268,15 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
         "osx-arm64",
         "polars-1.33.1-u64_idx_habc1234_1.conda",
     )
-    cached_details = VersionDetailsData(
-        metadata_lines=("cached preview",),
+    cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached preview"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
+        file_paths=(PackageFile("file"),),
     )
-    app._version_details_cache = {preview_key: cached_details}
-    updates: list[VersionDetailsData] = []
+    app._version_artifact_data_cache = {preview_key: cached_details}
+    updates: list[VersionArtifactData] = []
     reset_calls: list[str] = []
     monkeypatch.setattr(
         app, "_show_version_details", lambda value: updates.append(value)
@@ -1460,14 +1489,14 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
     app._mode = "versions"
     app._selected_package = "demo"
     app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
-    stale_cached_details = VersionDetailsData(
-        metadata_lines=("cached",),
+    stale_cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["export"]),
+        file_paths=(PackageFile("file"),),
     )
-    app._version_details_cache = {
+    app._version_artifact_data_cache = {
         ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
     }
 
@@ -1488,7 +1517,7 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
 
     app._rerender_visible_version_preview()
 
-    assert app._version_details_cache == {
+    assert app._version_artifact_data_cache == {
         ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
     }
     assert preview_calls == [("demo", entry)]
@@ -1511,18 +1540,18 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
         "noarch",
         "demo-1.2.3-py313h123_0.conda",
     )
-    cached_details = VersionDetailsData(
-        metadata_lines=("cached",),
+    cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["export"]),
+        file_paths=(PackageFile("file"),),
     )
     app._mode = "versions"
     app._selected_package = "demo"
     app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
-    app._version_details_cache = {preview_key: cached_details}
-    shown: list[VersionDetailsData] = []
+    app._version_artifact_data_cache = {preview_key: cached_details}
+    shown: list[VersionArtifactData] = []
 
     class _FakeOptionList:
         highlighted = 0
@@ -2013,12 +2042,10 @@ def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() ->
     view = VersionDetailsView()
     view._active_section = 0
     view._dependency_tab_index = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
     )
 
     header = view._render_dependency_header()
@@ -2037,12 +2064,10 @@ def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> 
     view = VersionDetailsView()
     view._active_section = 0
     view._dependency_tab_index = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
     )
 
     header = view._render_dependency_header()
@@ -2059,13 +2084,7 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
     view = VersionDetailsView()
     view._pane_selected = True
     view._active_section = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=("dep",),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
-    )
+    view._details = _make_artifact_data(dependencies=("dep",))
 
     header = view._render_dependency_header()
 
@@ -2074,13 +2093,7 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
 
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
-    )
+    view._details = _make_artifact_data()
 
     header = view._render_dependency_header()
 
@@ -2102,12 +2115,8 @@ def test_dependency_header_omits_counts_before_details_are_loaded() -> None:
 
 def test_run_export_list_entry_uses_plain_matchspec() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=("weak: python_abi 3.13.* *_cp313",),
-        files=("file",),
+    view._details = _make_artifact_data(
+        run_exports=RunExportsJson(weak=["python_abi 3.13.* *_cp313"])
     )
 
     entries = view._dependency_entries_for_tab("run_exports")
@@ -2118,12 +2127,8 @@ def test_run_export_list_entry_uses_plain_matchspec() -> None:
 
 def test_dependency_list_entry_unescapes_matchspec_text() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=(r"demo \[version='>=1'\]",),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
     )
 
     entries = view._dependency_entries_for_tab("dependencies")
@@ -2134,12 +2139,7 @@ def test_dependency_list_entry_unescapes_matchspec_text() -> None:
 
 def test_file_list_entry_uses_plain_file_path() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=(),
-        files=("site-packages/demo.py",),
+    view._details = _make_artifact_data(
         file_paths=(PackageFile("site-packages/demo.py", 1536),),
     )
 

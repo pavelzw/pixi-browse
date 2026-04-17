@@ -20,7 +20,6 @@ from pixi_browse.models import (
     PackageFile,
     VersionArtifactData,
     VersionCompareData,
-    VersionDetailsData,
 )
 
 
@@ -364,8 +363,16 @@ def build_version_artifact_data(
         ),
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
+        package_url=str(record.url),
         file_paths=tuple(package_paths),
         run_exports=run_exports,
+        repository_urls=tuple(repository_urls),
+        documentation_urls=tuple(documentation_urls),
+        homepage_urls=tuple(homepage_urls),
+        recipe_maintainers=tuple(recipe_maintainers),
+        provenance_remote_url=provenance_remote_url,
+        provenance_sha=provenance_sha,
+        rattler_build_version=rattler_build_version,
     )
 
 
@@ -586,56 +593,49 @@ def build_version_compare_data(
     )
 
 
-def build_version_details_data(
-    package_name: str,
-    record: RepoDataRecord,
-    *,
-    package_paths: Sequence[PackageFile] = (),
-    repository_urls: Sequence[str] = (),
-    documentation_urls: Sequence[str] = (),
-    homepage_urls: Sequence[str] = (),
-    recipe_maintainers: Sequence[str] = (),
-    provenance_remote_url: str | None = None,
-    provenance_sha: str | None = None,
-    rattler_build_version: str | None = None,
-    run_exports: RunExportsJson | None = None,
-) -> VersionDetailsData:
-    metadata_rows = _metadata_rows_for_record(
-        package_name,
-        record,
-        clickable=True,
-        repository_urls=repository_urls,
-        documentation_urls=documentation_urls,
-        homepage_urls=homepage_urls,
-        recipe_maintainers=recipe_maintainers,
-        provenance_remote_url=provenance_remote_url,
-        provenance_sha=provenance_sha,
-        rattler_build_version=rattler_build_version,
-    )
-    metadata_lines = format_detail_rows(metadata_rows)
+def format_version_details_metadata_lines(
+    artifact: VersionArtifactData,
+) -> tuple[str, ...]:
+    clickable_rows: list[MetadataRow] = []
+    for label, value in artifact.metadata_rows:
+        if label == "Package URL":
+            clickable_rows.append((label, format_clickable_url(artifact.package_url)))
+            continue
+        if label == "Repository":
+            clickable_rows.append(
+                (label, _clickable_url_list_value(artifact.repository_urls))
+            )
+            continue
+        if label == "Documentation":
+            clickable_rows.append(
+                (label, _clickable_url_list_value(artifact.documentation_urls))
+            )
+            continue
+        if label == "Homepage":
+            clickable_rows.append(
+                (label, _clickable_url_list_value(artifact.homepage_urls))
+            )
+            continue
+        if label == "Recipe maintainers":
+            clickable_rows.append(
+                (
+                    label,
+                    _clickable_recipe_maintainers_value(artifact.recipe_maintainers),
+                )
+            )
+            continue
+        if label == "Provenance":
+            clickable_provenance = _clickable_provenance_value(
+                artifact.provenance_remote_url,
+                artifact.provenance_sha,
+            )
+            clickable_rows.append((label, clickable_provenance or value))
+            continue
+        clickable_rows.append((label, value))
+    return tuple(format_detail_rows(clickable_rows))
 
-    if package_paths:
-        file_lines = [escape(package_file.path) for package_file in package_paths]
-    else:
-        file_lines = ["No files listed."]
 
-    dependencies = (
-        tuple(escape(str(dependency)) for dependency in record.depends)
-        if record.depends
-        else ()
-    )
-    constraints = (
-        tuple(escape(str(constraint)) for constraint in record.constrains)
-        if record.constrains
-        else ()
-    )
-    run_export_lines = tuple(_format_run_exports_lines(run_exports))
-
-    return VersionDetailsData(
-        metadata_lines=tuple(metadata_lines),
-        dependencies=dependencies,
-        constraints=constraints,
-        run_exports=run_export_lines,
-        files=tuple(file_lines),
-        file_paths=tuple(package_paths),
-    )
+def format_version_details_run_exports(
+    run_exports: RunExportsJson | None,
+) -> tuple[str, ...]:
+    return tuple(_format_run_exports_lines(run_exports))

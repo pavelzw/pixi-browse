@@ -45,8 +45,16 @@ class VersionArtifactData:
     metadata_rows: tuple[MetadataRow, ...]
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
+    package_url: str = ""
     file_paths: tuple[PackageFile, ...] = ()
     run_exports: RunExportsJson | None = None
+    repository_urls: tuple[str, ...] = ()
+    documentation_urls: tuple[str, ...] = ()
+    homepage_urls: tuple[str, ...] = ()
+    recipe_maintainers: tuple[str, ...] = ()
+    provenance_remote_url: str | None = None
+    provenance_sha: str | None = None
+    rattler_build_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,13 +97,3 @@ class VersionCompareData:
     constraints: tuple[CompareRow, ...]
     run_exports: tuple[CompareRow, ...]
     files: tuple[CompareFileRow, ...]
-
-
-@dataclass(frozen=True)
-class VersionDetailsData:
-    metadata_lines: tuple[str, ...]
-    dependencies: tuple[str, ...]
-    constraints: tuple[str, ...]
-    run_exports: tuple[str, ...]
-    files: tuple[str, ...]
-    file_paths: tuple[PackageFile, ...] = ()

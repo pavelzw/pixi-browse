@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import yaml
 from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson, RunExportsJson
@@ -12,13 +10,9 @@ from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
     VersionArtifactData,
-    VersionDetailsData,
     VersionPreviewKey,
 )
-from pixi_browse.rendering import (
-    build_version_artifact_data,
-    build_version_details_data,
-)
+from pixi_browse.rendering import build_version_artifact_data
 
 from .state import AboutUrls
 
@@ -29,13 +23,11 @@ class VersionDataLoader:
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
-        self.details_cache: dict[VersionPreviewKey, VersionDetailsData] = {}
 
     def clear_caches(self) -> None:
         self.about_urls_cache.clear()
         self.paths_cache.clear()
         self.artifact_data_cache.clear()
-        self.details_cache.clear()
 
     def restore_caches(
         self,
@@ -43,7 +35,6 @@ class VersionDataLoader:
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
-        details_cache: dict[VersionPreviewKey, VersionDetailsData],
     ) -> None:
         self.about_urls_cache.clear()
         self.about_urls_cache.update(about_urls_cache)
@@ -51,8 +42,6 @@ class VersionDataLoader:
         self.paths_cache.update(paths_cache)
         self.artifact_data_cache.clear()
         self.artifact_data_cache.update(artifact_data_cache)
-        self.details_cache.clear()
-        self.details_cache.update(details_cache)
 
     @staticmethod
     def _path_type_name(path_type: object) -> PackageFilePathType | None:
@@ -167,44 +156,12 @@ class VersionDataLoader:
         record: RepoDataRecord,
         *,
         preview_key: VersionPreviewKey,
-    ) -> VersionDetailsData:
-        cached = self.details_cache.get(preview_key)
-        if cached is not None:
-            return cached
-
-        artifact_data = self.artifact_data_cache.get(preview_key)
-        package_paths: Sequence[PackageFile]
-
-        if artifact_data is not None:
-            package_paths = artifact_data.file_paths
-            run_exports = artifact_data.run_exports
-        else:
-            package_paths = await self.get_package_paths(preview_key, str(record.url))
-            run_exports = None
-            try:
-                run_exports = await self.get_run_exports(str(record.url))
-            except Exception:
-                pass
-
-        about_urls = self.about_urls_cache.get(preview_key)
-        if about_urls is None:
-            about_urls = await self.get_about_urls(preview_key, str(record.url))
-
-        details = build_version_details_data(
+    ) -> VersionArtifactData:
+        return await self.load_version_artifact_data(
             package_name,
             record,
-            package_paths=package_paths,
-            repository_urls=about_urls.repository,
-            documentation_urls=about_urls.documentation,
-            homepage_urls=about_urls.homepage,
-            recipe_maintainers=about_urls.recipe_maintainers,
-            provenance_remote_url=about_urls.provenance_remote_url,
-            provenance_sha=about_urls.provenance_sha,
-            rattler_build_version=about_urls.rattler_build_version,
-            run_exports=run_exports,
+            preview_key=preview_key,
         )
-        self.details_cache[preview_key] = details
-        return details
 
     async def load_version_artifact_data(
         self,

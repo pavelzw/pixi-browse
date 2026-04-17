@@ -31,7 +31,6 @@ from pixi_browse.models import (
     DependencyTab,
     PackageFile,
     VersionArtifactData,
-    VersionDetailsData,
     VersionEntry,
     VersionPreviewKey,
     VersionRow,
@@ -128,7 +127,6 @@ class CondaMetadataTui(App[None]):
         self._version_about_urls_cache = self._version_loader.about_urls_cache
         self._version_paths_cache = self._version_loader.paths_cache
         self._version_artifact_data_cache = self._version_loader.artifact_data_cache
-        self._version_details_cache = self._version_loader.details_cache
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
         self._selected_package: str | None = None
@@ -475,7 +473,6 @@ class CondaMetadataTui(App[None]):
                 for preview_key, paths in self._version_paths_cache.items()
             },
             version_artifact_data_cache=dict(self._version_artifact_data_cache),
-            version_details_cache=dict(self._version_details_cache),
             compare_selection=self._compare_selection,
             last_package_highlight=self._last_package_highlight,
             last_package_scroll_y=self._last_package_scroll_y,
@@ -510,7 +507,6 @@ class CondaMetadataTui(App[None]):
             about_urls_cache=snapshot.version_about_urls_cache,
             paths_cache=snapshot.version_paths_cache,
             artifact_data_cache=snapshot.version_artifact_data_cache,
-            details_cache=snapshot.version_details_cache,
         )
         self._compare_selection = snapshot.compare_selection
         self._compare_screen_open = False
@@ -686,7 +682,7 @@ class CondaMetadataTui(App[None]):
     def _show_main_placeholder(self, content: str | Text) -> None:
         self.query_one("#main-panel", MainPanel).show_placeholder(content)
 
-    def _show_version_details(self, details: VersionDetailsData) -> None:
+    def _show_version_details(self, details: VersionArtifactData) -> None:
         self.query_one("#main-panel", MainPanel).show_version_details(details)
 
     def _set_active_main_section(self, index: int) -> None:
@@ -1071,7 +1067,7 @@ class CondaMetadataTui(App[None]):
         if self._previewed_version_key == preview_key:
             return
 
-        cached = self._version_details_cache.get(preview_key)
+        cached = self._version_artifact_data_cache.get(preview_key)
         if cached is not None:
             self._show_version_details(cached)
             self._reset_main_panel_scroll()
@@ -2500,7 +2496,7 @@ class CondaMetadataTui(App[None]):
             return
 
         preview_key = self._version_preview_key(package_name, row.entry)
-        cached = self._version_details_cache.get(preview_key)
+        cached = self._version_artifact_data_cache.get(preview_key)
         if cached is not None:
             self._show_version_details(cached)
             self._previewed_version_key = preview_key
