@@ -2206,7 +2206,7 @@ class CondaMetadataTui(App[None]):
 
         if self._channel_edit_mode:
             self._reset_sidebar_vim_pending()
-            if event.key in {"p", "c", "slash", "q"}:
+            if event.key in {"p", "c", "C", "slash", "q"}:
                 return
 
             if event.key == "enter":
@@ -2412,7 +2412,7 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or self._mode != "packages":
             return
 
-        if event.key in {"p", "c", "slash", "q"}:
+        if event.key in {"p", "c", "C", "slash", "q"}:
             return
 
         if event.key == "backspace":

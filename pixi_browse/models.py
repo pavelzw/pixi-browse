@@ -11,7 +11,6 @@ VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
-CompareLineKind = Literal["added", "removed", "changed"]
 MetadataRow = tuple[str, str]
 
 
@@ -61,13 +60,6 @@ class VersionArtifactData:
 class CompareSelection:
     package_name: str
     entry: VersionEntry
-
-
-@dataclass(frozen=True)
-class MetadataDiff:
-    label: str
-    before: str
-    after: str
 
 
 @dataclass(frozen=True)

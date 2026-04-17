@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import yaml
 from rattler.networking import Client
-from rattler.package import AboutJson, PathsJson, RunExportsJson
+from rattler.package import AboutJson, PathsJson, PathType, RunExportsJson
 from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.repo_data import RepoDataRecord
 
@@ -44,12 +44,12 @@ class VersionDataLoader:
         self.artifact_data_cache.update(artifact_data_cache)
 
     @staticmethod
-    def _path_type_name(path_type: object) -> PackageFilePathType | None:
-        if getattr(path_type, "hardlink", False):
+    def _path_type_name(path_type: PathType) -> PackageFilePathType | None:
+        if path_type.hardlink:
             return "hardlink"
-        if getattr(path_type, "softlink", False):
+        if path_type.softlink:
             return "softlink"
-        if getattr(path_type, "directory", False):
+        if path_type.directory:
             return "directory"
         return None
 

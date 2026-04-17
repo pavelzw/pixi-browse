@@ -61,7 +61,7 @@ from pixi_browse.tui import (
 )
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
-from pixi_browse.tui.widgets import FileActionOption
+from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
 
 
 @dataclass(frozen=True)
@@ -375,7 +375,7 @@ def test_load_version_details_raises_when_package_paths_are_unavailable(
 
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
-    with pytest.raises(RuntimeError, match="paths.json missing"):
+    with pytest.raises(RuntimeError, match=r"paths\.json missing"):
         asyncio.run(
             loader.load_version_details("demo", record, preview_key=preview_key)
         )
@@ -429,7 +429,7 @@ def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
 
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
-    with pytest.raises(RuntimeError, match="paths.json missing"):
+    with pytest.raises(RuntimeError, match=r"paths\.json missing"):
         asyncio.run(
             loader.load_version_artifact_data(
                 "demo",
@@ -565,6 +565,53 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
     assert lib_demo_row.left == ""
     assert lib_demo_row.right.startswith("lib/demo.py")
     assert lib_demo_row.changed is True
+
+
+def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> None:
+    record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    left_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(PackageFile("bin/demo", size_in_bytes=None),),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(PackageFile("bin/demo", size_in_bytes=1234),),
+    )
+
+    compare_data = build_version_compare_data(
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        left_artifact,
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        right_artifact,
+    )
+
+    file_row = next(row for row in compare_data.files if row.label == "bin/demo")
+    assert file_row.changed is False
 
 
 def test_format_version_details_metadata_lines_include_about_urls() -> None:
@@ -1839,7 +1886,7 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
     assert all(isinstance(section, DetailSection) for section in sections)
 
 
-def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
+def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
     view = VersionDetailsView()
     view._pane_selected = False
 
@@ -1967,75 +2014,90 @@ def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -
     assert cast(Text, table.columns[1]._cells[1]).plain == "pydantic >=2"
 
 
-def test_compare_file_body_uses_single_column_with_status_colors() -> None:
-    view = CompareDetailsView(
-        VersionCompareData(
-            left_selection=CompareSelection(
-                "demo",
-                VersionEntry(
-                    version=Version("1.0.0"),
-                    build="py313h123_0",
-                    build_number=0,
-                    subdir="noarch",
-                    file_name="demo-1.0.0-py313h123_0.conda",
-                ),
-            ),
-            right_selection=CompareSelection(
-                "demo",
-                VersionEntry(
-                    version=Version("1.0.1"),
-                    build="py313h123_0",
-                    build_number=0,
-                    subdir="noarch",
-                    file_name="demo-1.0.1-py313h123_0.conda",
-                ),
-            ),
-            metadata_rows=(),
-            dependencies=(),
-            constraints=(),
-            run_exports=(),
-            files=(
-                CompareFileRow(
-                    label="same.txt",
-                    left="same.txt",
-                    right="same.txt",
-                    changed=False,
-                ),
-                CompareFileRow(
-                    label="changed.txt",
-                    left="changed.txt",
-                    right="changed.txt",
-                    changed=True,
-                ),
-                CompareFileRow(
-                    label="left-only.txt",
-                    left="left-only.txt",
-                    right="",
-                    changed=True,
-                ),
-                CompareFileRow(
-                    label="right-only.txt",
-                    left="",
-                    right="right-only.txt",
-                    changed=True,
-                ),
-            ),
-        )
-    )
+def test_compare_file_section_renders_option_list_rows_with_status_colors() -> None:
+    class _HostApp(App[None]):
+        pass
 
-    same = view._render_compare_file_option(view._compare_data.files[0])
-    changed = view._render_compare_file_option(view._compare_data.files[1])
-    left_only = view._render_compare_file_option(view._compare_data.files[2])
-    right_only = view._render_compare_file_option(view._compare_data.files[3])
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = CompareScreen(
+                VersionCompareData(
+                    left_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.0"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.0-py313h123_0.conda",
+                        ),
+                    ),
+                    right_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.1"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.1-py313h123_0.conda",
+                        ),
+                    ),
+                    metadata_rows=(),
+                    dependencies=(),
+                    constraints=(),
+                    run_exports=(),
+                    files=(
+                        CompareFileRow(
+                            label="same.txt",
+                            left="same.txt",
+                            right="same.txt",
+                            changed=False,
+                        ),
+                        CompareFileRow(
+                            label="changed.txt",
+                            left="changed.txt",
+                            right="changed.txt",
+                            changed=True,
+                        ),
+                        CompareFileRow(
+                            label="left-only.txt",
+                            left="left-only.txt",
+                            right="",
+                            changed=True,
+                        ),
+                        CompareFileRow(
+                            label="right-only.txt",
+                            left="",
+                            right="right-only.txt",
+                            changed=True,
+                        ),
+                    ),
+                )
+            )
+            app.push_screen(screen)
+            await pilot.pause()
 
-    assert same.plain == "= same.txt"
-    assert changed.plain == "~ changed.txt"
-    assert left_only.plain == "- left-only.txt"
-    assert right_only.plain == "+ right-only.txt"
-    assert same.style == "#5c6370"
-    assert changed.style == "#7a5c00"
-    assert left_only.style == "#8b1e1e"
-    assert right_only.style == "#1f5f2b"
+            option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
+            prompts = [
+                cast(Text, option_list.get_option_at_index(index).prompt)
+                for index in range(option_list.option_count)
+            ]
+
+            assert [prompt.plain for prompt in prompts] == [
+                "= same.txt",
+                "~ changed.txt",
+                "- left-only.txt",
+                "+ right-only.txt",
+            ]
+            assert [prompt.style for prompt in prompts] == [
+                "#5c6370",
+                "#7a5c00",
+                "#8b1e1e",
+                "#1f5f2b",
+            ]
+
+    asyncio.run(_run())
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
@@ -2416,7 +2478,7 @@ def test_request_file_action_for_selected_file_is_noop_without_file_path(
     monkeypatch.setattr(
         app,
         "_defer_file_action_screen",
-        lambda package_name, selected_entry, file_path, size_in_bytes: (
+        lambda package_name, selected_entry, file_path, size_in_bytes, sha256: (
             _ for _ in ()
         ).throw(AssertionError("should not open file action screen")),
     )
@@ -3316,6 +3378,41 @@ def test_action_channel_key_c_starts_channel_edit_mode() -> None:
     assert app._channel_draft == "custom-channel"
 
 
+def test_on_key_uppercase_c_is_not_double_appended_in_channel_edit_mode(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_edit_mode = True
+    app._channel_draft = ""
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+
+    app.action_compare_key_c()
+    event = _FakeKeyEvent("C", "C")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._channel_draft == "C"
+    assert event.stopped is False
+
+
+def test_on_key_uppercase_c_is_not_double_appended_in_filter_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    app._filter_mode = True
+    app._search_query = ""
+    app._sidebar_is_focused = lambda: False  # type: ignore[method-assign]
+    monkeypatch.setattr(app, "_filter_packages", lambda: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+
+    app.action_compare_key_c()
+    event = _FakeKeyEvent("C", "C")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._search_query == "C"
+    assert event.stopped is False
+
+
 def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -3423,16 +3520,6 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     first_selection = CompareSelection(
         "demo",
         VersionEntry(
-            version=Version("1.2.3"),
-            build="py313h123_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.2.3-py313h123_0.conda",
-        ),
-    )
-    second_selection = CompareSelection(
-        "demo",
-        VersionEntry(
             version=Version("1.2.4"),
             build="py313h456_0",
             build_number=0,
@@ -3440,15 +3527,25 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
             file_name="demo-1.2.4-py313h456_0.conda",
         ),
     )
-    first_record = _make_repo_data_record(
-        version="1.2.3",
-        build="py313h123_0",
-        file_name="demo-1.2.3-py313h123_0.conda",
+    second_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
     )
-    second_record = _make_repo_data_record(
+    first_record = _make_repo_data_record(
         version="1.2.4",
         build="py313h456_0",
         file_name="demo-1.2.4-py313h456_0.conda",
+    )
+    second_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
     )
     first_artifact = build_version_artifact_data("demo", first_record)
     second_artifact = build_version_artifact_data("demo", second_record)
@@ -3465,8 +3562,8 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
         raise AssertionError(f"unexpected selection {selection}")
 
     monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
-    monkeypatch.setattr(app, "_compare_selection", first_selection)
-    monkeypatch.setattr(app, "_compare_screen_open", False)
+    app._compare_selection = first_selection
+    app._compare_screen_open = False
     monkeypatch.setattr(
         app,
         "query_one",
@@ -3486,8 +3583,11 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     asyncio.run(app._open_compare_screen(first_selection, second_selection))
 
     assert len(pushed) == 1
-    assert pushed[0].left_selection == first_selection
-    assert pushed[0].right_selection == second_selection
+    assert pushed[0].left_selection == second_selection
+    assert pushed[0].right_selection == first_selection
+    version_row = next(row for row in pushed[0].metadata_rows if row.label == "Version")
+    assert version_row.left == "1.2.3"
+    assert version_row.right == "1.2.4"
 
 
 def test_open_compare_screen_notifies_when_compare_file_metadata_load_fails(

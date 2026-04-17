@@ -474,13 +474,28 @@ def _package_file_summary(package_file: PackageFile) -> str:
 
 
 def _files_differ(left: PackageFile, right: PackageFile) -> bool:
-    if left.sha256 is not None or right.sha256 is not None:
-        if left.sha256 != right.sha256:
-            return True
+    if (
+        left.sha256 is not None
+        and right.sha256 is not None
+        and left.sha256 != right.sha256
+    ):
+        return True
     return (
-        left.size_in_bytes != right.size_in_bytes
-        or left.no_link != right.no_link
-        or left.path_type != right.path_type
+        (
+            left.size_in_bytes is not None
+            and right.size_in_bytes is not None
+            and left.size_in_bytes != right.size_in_bytes
+        )
+        or (
+            left.no_link is not None
+            and right.no_link is not None
+            and left.no_link != right.no_link
+        )
+        or (
+            left.path_type is not None
+            and right.path_type is not None
+            and left.path_type != right.path_type
+        )
     )
 
 
