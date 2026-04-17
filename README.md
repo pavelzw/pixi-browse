@@ -18,6 +18,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **Fuzzy search** to quickly filter through thousands of packages
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
+- **Compare artifacts side by side** to inspect metadata, dependencies, and file-level differences
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
 - **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
@@ -63,6 +64,9 @@ pixi-browse -c https://prefix.dev/conda-forge -p linux-64 -m "python >=3.13"
 pixi-browse --version
 ```
 
+In the versions view, press `C` on one artifact to store it as compare A, move to another
+artifact, then press `C` again to open the compare view.
+
 ### CLI Options
 
 | Option              | Description                                         |
@@ -94,6 +98,7 @@ pixi-browse --version
 | `/` or `f` | Start package filter                          |
 | `p`        | Open platform selector                        |
 | `c`        | Edit channel                                  |
+| `C`        | Compare selected artifacts in versions view   |
 | `d`        | Download selected artifact (in versions view) |
 | `q`        | Quit                                          |
 
