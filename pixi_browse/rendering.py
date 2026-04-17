@@ -375,7 +375,6 @@ def build_version_artifact_data(
     record: RepoDataRecord,
     *,
     package_paths: Sequence[PackageFile] | None = None,
-    package_paths_error: str | None = None,
     repository_urls: Sequence[str] | None = None,
     documentation_urls: Sequence[str] | None = None,
     homepage_urls: Sequence[str] | None = None,
@@ -385,14 +384,6 @@ def build_version_artifact_data(
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
 ) -> VersionArtifactData:
-    file_lines: tuple[str, ...]
-    if package_paths_error is not None:
-        file_lines = (f"Unavailable: {package_paths_error}",)
-    elif package_paths:
-        file_lines = tuple(package_file.path for package_file in package_paths)
-    else:
-        file_lines = ("No files listed.",)
-
     return VersionArtifactData(
         metadata_fields=_metadata_fields_for_artifact(
             package_name,
@@ -408,7 +399,6 @@ def build_version_artifact_data(
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
         run_exports=tuple(_format_plain_run_exports_lines(run_exports)),
-        files=file_lines,
         file_paths=tuple(package_paths or ()),
         raw_run_exports=run_exports,
     )
@@ -570,49 +560,10 @@ def _diff_file_paths(
     return tuple(rows)
 
 
-def _file_compare_error(artifact: VersionArtifactData) -> str | None:
-    if (
-        len(artifact.files) == 1
-        and artifact.files[0].startswith("Unavailable: ")
-        and not artifact.file_paths
-    ):
-        return artifact.files[0]
-    return None
-
-
 def _build_file_compare_rows(
     left_artifact: VersionArtifactData, right_artifact: VersionArtifactData
 ) -> tuple[CompareFileRow, ...]:
-    left_error = _file_compare_error(left_artifact)
-    right_error = _file_compare_error(right_artifact)
-
-    if left_error is None and right_error is None:
-        return _diff_file_paths(left_artifact.file_paths, right_artifact.file_paths)
-
-    if left_error is not None and right_error is not None:
-        if left_error == right_error:
-            return (
-                CompareFileRow(
-                    label=left_error,
-                    left=left_error,
-                    right=right_error,
-                    changed=False,
-                ),
-            )
-        return (
-            CompareFileRow(label=left_error, left=left_error, right="", changed=True),
-            CompareFileRow(label=right_error, left="", right=right_error, changed=True),
-        )
-
-    if left_error is not None:
-        return (
-            CompareFileRow(label=left_error, left=left_error, right="", changed=True),
-        )
-
-    assert right_error is not None
-    return (
-        CompareFileRow(label=right_error, left="", right=right_error, changed=True),
-    )
+    return _diff_file_paths(left_artifact.file_paths, right_artifact.file_paths)
 
 
 def build_version_compare_data(

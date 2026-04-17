@@ -306,7 +306,7 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
     assert len(details.run_exports) == 3
 
 
-def test_load_version_details_reuses_artifact_run_exports(monkeypatch) -> None:
+def test_load_version_details_reuses_cached_artifact_run_exports(monkeypatch) -> None:
     loader = VersionDataLoader(client=cast(Client, object()))
     record = _make_repo_data_record(name="demo")
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
@@ -319,31 +319,16 @@ def test_load_version_details_reuses_artifact_run_exports(monkeypatch) -> None:
         ),
     )
 
-    async def _fake_load_version_artifact_data(
-        package_name: str,
-        _record: RepoDataRecord,
-        *,
-        preview_key: tuple[str, str, str, int, str, str],
-    ):
-        assert package_name == "demo"
-        assert preview_key == (
-            "demo",
-            "1.2.3",
-            "py313h123_0",
-            0,
-            "noarch",
-            record.file_name,
-        )
-        return artifact_data
+    async def _unexpected_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise AssertionError("load_version_details should reuse cached artifact paths")
 
     async def _unexpected_get_run_exports(_url: str) -> RunExportsJson:
         raise AssertionError("load_version_details should reuse artifact run exports")
 
-    monkeypatch.setattr(
-        loader,
-        "load_version_artifact_data",
-        _fake_load_version_artifact_data,
-    )
+    loader.artifact_data_cache[preview_key] = artifact_data
+    monkeypatch.setattr(loader, "get_package_paths", _unexpected_get_package_paths)
     monkeypatch.setattr(loader, "get_run_exports", _unexpected_get_run_exports)
     loader.about_urls_cache[preview_key] = AboutUrls()
 
@@ -355,6 +340,30 @@ def test_load_version_details_reuses_artifact_run_exports(monkeypatch) -> None:
         "weak: python_abi 3.13.* *_cp313",
         "strong: libdemo >=1",
     )
+
+
+def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise RuntimeError("paths.json missing")
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+
+    with pytest.raises(RuntimeError, match="paths.json missing"):
+        asyncio.run(
+            loader.load_version_artifact_data(
+                "demo",
+                record,
+                preview_key=preview_key,
+            )
+        )
 
 
 def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (
@@ -483,72 +492,6 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
     assert lib_demo_row.left == ""
     assert lib_demo_row.right.startswith("lib/demo.py")
     assert lib_demo_row.changed is True
-
-
-def test_build_version_compare_data_surfaces_unavailable_file_metadata() -> None:
-    left_record = _make_repo_data_record(
-        version="1.2.3",
-        build="py313h123_0",
-        file_name="demo-1.2.3-py313h123_0.conda",
-    )
-    right_record = _make_repo_data_record(
-        version="1.2.4",
-        build="py313h456_0",
-        file_name="demo-1.2.4-py313h456_0.conda",
-    )
-
-    left_artifact = build_version_artifact_data(
-        "demo",
-        left_record,
-        package_paths_error="paths.json missing",
-    )
-    right_artifact = build_version_artifact_data(
-        "demo",
-        right_record,
-        package_paths=(
-            PackageFile(
-                "bin/demo",
-                2048,
-                bytes.fromhex("22" * 32),
-                False,
-                "hardlink",
-            ),
-        ),
-    )
-
-    compare_data = build_version_compare_data(
-        CompareSelection(
-            "demo",
-            VersionEntry(
-                version=Version("1.2.3"),
-                build="py313h123_0",
-                build_number=0,
-                subdir="noarch",
-                file_name="demo-1.2.3-py313h123_0.conda",
-            ),
-        ),
-        left_artifact,
-        CompareSelection(
-            "demo",
-            VersionEntry(
-                version=Version("1.2.4"),
-                build="py313h456_0",
-                build_number=0,
-                subdir="noarch",
-                file_name="demo-1.2.4-py313h456_0.conda",
-            ),
-        ),
-        right_artifact,
-    )
-
-    assert compare_data.files == (
-        CompareFileRow(
-            label="Unavailable: paths.json missing",
-            left="Unavailable: paths.json missing",
-            right="",
-            changed=True,
-        ),
-    )
 
 
 def test_render_selected_version_details_includes_about_urls() -> None:
@@ -3541,6 +3484,64 @@ def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> Non
     assert len(pushed) == 1
     assert pushed[0].left_selection == first_selection
     assert pushed[0].right_selection == second_selection
+
+
+def test_open_compare_screen_notifies_when_compare_file_metadata_load_fails(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    first_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    second_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.4"),
+            build="py313h456_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.4-py313h456_0.conda",
+        ),
+    )
+    notifications: list[tuple[str, str | None, str | None]] = []
+
+    async def _fake_load_compare_artifact(
+        _selection: CompareSelection,
+    ) -> tuple[RepoDataRecord, object] | None:
+        raise RuntimeError("Failed to load compare file metadata for demo")
+
+    monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, title=None, severity=None: notifications.append(
+            (message, title, severity)
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("compare screen should not open on path loading failure")
+        ),
+    )
+
+    asyncio.run(app._open_compare_screen(first_selection, second_selection))
+
+    assert notifications == [
+        (
+            "Failed to load compare file metadata for demo",
+            "Compare",
+            "error",
+        )
+    ]
 
 
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:

@@ -955,13 +955,19 @@ class CondaMetadataTui(App[None]):
         )
         if record is None:
             return None
-        artifact = await self._version_loader.load_version_artifact_data(
-            selection.package_name,
-            record,
-            preview_key=self._version_preview_key(
-                selection.package_name, selection.entry
-            ),
-        )
+        try:
+            artifact = await self._version_loader.load_version_artifact_data(
+                selection.package_name,
+                record,
+                preview_key=self._version_preview_key(
+                    selection.package_name, selection.entry
+                ),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to load compare file metadata for "
+                f"{self._compare_selection_label(selection)}: {exc!s}"
+            ) from exc
         return record, artifact
 
     def _handle_compare_screen_dismissed(self, _result: None) -> None:
@@ -970,8 +976,16 @@ class CondaMetadataTui(App[None]):
     async def _open_compare_screen(
         self, left_selection: CompareSelection, right_selection: CompareSelection
     ) -> None:
-        left_result = await self._load_compare_artifact(left_selection)
-        right_result = await self._load_compare_artifact(right_selection)
+        try:
+            left_result = await self._load_compare_artifact(left_selection)
+            right_result = await self._load_compare_artifact(right_selection)
+        except Exception as exc:
+            self.notify(
+                str(exc),
+                title="Compare",
+                severity="error",
+            )
+            return
 
         if left_result is None or right_result is None:
             self.notify(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import yaml
 from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson, RunExportsJson
@@ -170,24 +172,39 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        artifact_data = await self.load_version_artifact_data(
-            package_name,
-            record,
-            preview_key=preview_key,
-        )
-        about_urls = self.about_urls_cache.get(preview_key, AboutUrls())
+        artifact_data = self.artifact_data_cache.get(preview_key)
+        package_paths: Sequence[PackageFile] | None
+        package_paths_error: str | None = None
+
+        if artifact_data is not None:
+            package_paths = artifact_data.file_paths
+            run_exports = artifact_data.raw_run_exports
+        else:
+            package_paths = None
+            run_exports = None
+            try:
+                package_paths = await self.get_package_paths(
+                    preview_key, str(record.url)
+                )
+            except Exception as exc:
+                package_paths_error = str(exc)
+            try:
+                run_exports = await self.get_run_exports(str(record.url))
+            except Exception:
+                pass
+
+        about_urls = self.about_urls_cache.get(preview_key)
+        if about_urls is None:
+            try:
+                about_urls = await self.get_about_urls(preview_key, str(record.url))
+            except Exception:
+                about_urls = AboutUrls()
 
         details = build_version_details_data(
             package_name,
             record,
-            package_paths=artifact_data.file_paths,
-            package_paths_error=(
-                artifact_data.files[0].removeprefix("Unavailable: ")
-                if artifact_data.files
-                and len(artifact_data.files) == 1
-                and artifact_data.files[0].startswith("Unavailable: ")
-                else None
-            ),
+            package_paths=package_paths,
+            package_paths_error=package_paths_error,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,
@@ -195,7 +212,7 @@ class VersionDataLoader:
             provenance_remote_url=about_urls.provenance_remote_url,
             provenance_sha=about_urls.provenance_sha,
             rattler_build_version=about_urls.rattler_build_version,
-            run_exports=artifact_data.raw_run_exports,
+            run_exports=run_exports,
         )
         self.details_cache[preview_key] = details
         return details
@@ -211,15 +228,9 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        package_paths: list[PackageFile] | None = None
-        package_paths_error: str | None = None
+        package_paths = await self.get_package_paths(preview_key, str(record.url))
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
-
-        try:
-            package_paths = await self.get_package_paths(preview_key, str(record.url))
-        except Exception as exc:
-            package_paths_error = str(exc)
 
         try:
             about_urls = await self.get_about_urls(preview_key, str(record.url))
@@ -235,7 +246,6 @@ class VersionDataLoader:
             package_name,
             record,
             package_paths=package_paths,
-            package_paths_error=package_paths_error,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,

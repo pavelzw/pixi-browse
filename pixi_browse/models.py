@@ -51,7 +51,6 @@ class VersionArtifactData:
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
     run_exports: tuple[str, ...]
-    files: tuple[str, ...]
     file_paths: tuple[PackageFile, ...] = ()
     raw_run_exports: RunExportsJson | None = None
 
