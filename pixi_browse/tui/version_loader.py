@@ -221,6 +221,7 @@ class VersionDataLoader:
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
 
+        # TODO: clean up once https://github.com/conda/rattler/issues/2349 is fixed.
         try:
             about_urls = await self.get_about_urls(preview_key, str(record.url))
         except Exception:
