@@ -173,21 +173,14 @@ class VersionDataLoader:
             return cached
 
         artifact_data = self.artifact_data_cache.get(preview_key)
-        package_paths: Sequence[PackageFile] | None
-        package_paths_error: str | None = None
+        package_paths: Sequence[PackageFile]
 
         if artifact_data is not None:
             package_paths = artifact_data.file_paths
             run_exports = artifact_data.run_exports
         else:
-            package_paths = None
+            package_paths = await self.get_package_paths(preview_key, str(record.url))
             run_exports = None
-            try:
-                package_paths = await self.get_package_paths(
-                    preview_key, str(record.url)
-                )
-            except Exception as exc:
-                package_paths_error = str(exc)
             try:
                 run_exports = await self.get_run_exports(str(record.url))
             except Exception:
@@ -195,16 +188,12 @@ class VersionDataLoader:
 
         about_urls = self.about_urls_cache.get(preview_key)
         if about_urls is None:
-            try:
-                about_urls = await self.get_about_urls(preview_key, str(record.url))
-            except Exception:
-                about_urls = AboutUrls()
+            about_urls = await self.get_about_urls(preview_key, str(record.url))
 
         details = build_version_details_data(
             package_name,
             record,
             package_paths=package_paths,
-            package_paths_error=package_paths_error,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,

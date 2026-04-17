@@ -341,6 +341,52 @@ def test_load_version_details_reuses_cached_artifact_run_exports(monkeypatch) ->
     )
 
 
+def test_load_version_details_raises_when_package_paths_are_unavailable(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise RuntimeError("paths.json missing")
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+
+    with pytest.raises(RuntimeError, match="paths.json missing"):
+        asyncio.run(
+            loader.load_version_details("demo", record, preview_key=preview_key)
+        )
+
+
+def test_load_version_details_raises_when_about_urls_are_unavailable(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_about_urls(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> AboutUrls:
+        raise RuntimeError("about.json missing")
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
+
+    with pytest.raises(RuntimeError, match="about.json missing"):
+        asyncio.run(
+            loader.load_version_details("demo", record, preview_key=preview_key)
+        )
+
+
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
     monkeypatch,
 ) -> None:

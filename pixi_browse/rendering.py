@@ -259,10 +259,10 @@ def _metadata_rows_for_record(
     record: RepoDataRecord,
     *,
     clickable: bool = False,
-    repository_urls: Sequence[str] | None = None,
-    documentation_urls: Sequence[str] | None = None,
-    homepage_urls: Sequence[str] | None = None,
-    recipe_maintainers: Sequence[str] | None = None,
+    repository_urls: Sequence[str] = (),
+    documentation_urls: Sequence[str] = (),
+    homepage_urls: Sequence[str] = (),
+    recipe_maintainers: Sequence[str] = (),
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
@@ -340,11 +340,11 @@ def build_version_artifact_data(
     package_name: str,
     record: RepoDataRecord,
     *,
-    package_paths: Sequence[PackageFile] | None = None,
-    repository_urls: Sequence[str] | None = None,
-    documentation_urls: Sequence[str] | None = None,
-    homepage_urls: Sequence[str] | None = None,
-    recipe_maintainers: Sequence[str] | None = None,
+    package_paths: Sequence[PackageFile] = (),
+    repository_urls: Sequence[str] = (),
+    documentation_urls: Sequence[str] = (),
+    homepage_urls: Sequence[str] = (),
+    recipe_maintainers: Sequence[str] = (),
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
@@ -364,7 +364,7 @@ def build_version_artifact_data(
         ),
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
-        file_paths=tuple(package_paths or ()),
+        file_paths=tuple(package_paths),
         run_exports=run_exports,
     )
 
@@ -590,12 +590,11 @@ def build_version_details_data(
     package_name: str,
     record: RepoDataRecord,
     *,
-    package_paths: Sequence[PackageFile] | None = None,
-    package_paths_error: str | None = None,
-    repository_urls: Sequence[str] | None = None,
-    documentation_urls: Sequence[str] | None = None,
-    homepage_urls: Sequence[str] | None = None,
-    recipe_maintainers: Sequence[str] | None = None,
+    package_paths: Sequence[PackageFile] = (),
+    repository_urls: Sequence[str] = (),
+    documentation_urls: Sequence[str] = (),
+    homepage_urls: Sequence[str] = (),
+    recipe_maintainers: Sequence[str] = (),
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
@@ -615,9 +614,7 @@ def build_version_details_data(
     )
     metadata_lines = format_detail_rows(metadata_rows)
 
-    if package_paths_error is not None:
-        file_lines = [f"Unavailable: {escape(package_paths_error)}"]
-    elif package_paths:
+    if package_paths:
         file_lines = [escape(package_file.path) for package_file in package_paths]
     else:
         file_lines = ["No files listed."]
@@ -640,5 +637,5 @@ def build_version_details_data(
         constraints=constraints,
         run_exports=run_export_lines,
         files=tuple(file_lines),
-        file_paths=tuple(package_paths or ()),
+        file_paths=tuple(package_paths),
     )
