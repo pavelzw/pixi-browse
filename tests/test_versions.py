@@ -34,12 +34,8 @@ from pixi_browse.rendering import (
     build_version_compare_data,
     build_version_details_data,
     format_clickable_github_handle,
-    format_clickable_github_handle_list,
     format_clickable_url,
-    format_clickable_url_list,
-    format_provenance,
     render_package_preview,
-    render_selected_version_details,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
@@ -222,7 +218,7 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
-def test_render_selected_version_details_includes_package_paths() -> None:
+def test_build_version_details_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -232,17 +228,20 @@ def test_render_selected_version_details_includes_package_paths() -> None:
         depends=["python >=3.13"],
     )
 
-    rendered = render_selected_version_details(
+    details = build_version_details_data(
         "demo",
         record,
-        content_width=90,
-        package_paths=["bin/demo", "lib/python3.13/site-packages/demo.py"],
+        package_paths=(
+            PackageFile("bin/demo"),
+            PackageFile("lib/python3.13/site-packages/demo.py"),
+        ),
     )
 
-    assert "Files:" in rendered
-    assert " - bin/demo" in rendered
-    assert " - lib/python3.13/site-packages/demo.py" in rendered
-    assert "placeholder: coming soon" not in rendered
+    assert details.files == ("bin/demo", "lib/python3.13/site-packages/demo.py")
+    assert details.file_paths == (
+        PackageFile("bin/demo"),
+        PackageFile("lib/python3.13/site-packages/demo.py"),
+    )
 
 
 def test_build_version_details_data_aligns_metadata_rows() -> None:
@@ -494,7 +493,7 @@ def test_build_version_compare_data_reports_metadata_dependency_and_file_changes
     assert lib_demo_row.changed is True
 
 
-def test_render_selected_version_details_includes_about_urls() -> None:
+def test_build_version_details_data_includes_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -503,10 +502,9 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    rendered = render_selected_version_details(
+    details = build_version_details_data(
         "demo",
         record,
-        content_width=90,
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
         homepage_urls=["https://example.com/demo"],
@@ -516,39 +514,41 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         rattler_build_version="0.38.0",
     )
 
-    assert (
-        "URL: [@click=app.open_external_url('https://example.invalid/demo-1.2.3-py313h123_0.conda')]"
-        in rendered
+    assert any(
+        line.startswith("Package URL")
+        and "https://example.invalid/demo-1.2.3-py313h123_0.conda" in line
+        for line in details.metadata_lines
     )
-    assert (
-        "Repository: [@click=app.open_external_url('https://github.com/example/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Repository") and "https://github.com/example/demo" in line
+        for line in details.metadata_lines
     )
-    assert (
-        "Documentation: [@click=app.open_external_url('https://docs.example.com/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Documentation") and "https://docs.example.com/demo" in line
+        for line in details.metadata_lines
     )
-    assert (
-        "Homepage: [@click=app.open_external_url('https://example.com/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Homepage") and "https://example.com/demo" in line
+        for line in details.metadata_lines
     )
-    assert (
-        "Recipe maintainers: "
-        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
-        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
-        in rendered
+    assert any(
+        line.startswith("Recipe maintainers")
+        and "@click=app.open_external_url('https://github.com/pavelzw')" in line
+        and "@click=app.open_external_url('https://github.com/xhochy')" in line
+        for line in details.metadata_lines
     )
-    assert (
-        "Provenance: "
-        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
-        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
-        in rendered
+    assert any(
+        line.startswith("Provenance")
+        and "https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in line
+        and "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in line
+        for line in details.metadata_lines
     )
-    assert "Built with rattler-build 0.38.0" in rendered
-    assert "https://github.com/example/demo" in rendered
-    assert "https://docs.example.com/demo" in rendered
-    assert "https://example.com/demo" in rendered
-    assert "@click=app.open_external_url(" in rendered
+    assert any(
+        line.startswith("Built with") and "rattler-build 0.38.0" in line
+        for line in details.metadata_lines
+    )
 
 
 def test_format_clickable_url_uses_textual_click_action() -> None:
@@ -560,22 +560,6 @@ def test_format_clickable_url_uses_textual_click_action() -> None:
     )
 
 
-def test_format_clickable_url_list_compacts_urls_to_single_line() -> None:
-    rendered = format_clickable_url_list(
-        "Repository:",
-        [
-            "https://example.com/one",
-            "https://example.com/two",
-        ],
-    )
-
-    assert rendered == [
-        "Repository: "
-        "[@click=app.open_external_url('https://example.com/one')]https://example.com/one[/], "
-        "[@click=app.open_external_url('https://example.com/two')]https://example.com/two[/]"
-    ]
-
-
 def test_format_clickable_github_handle_uses_github_profile() -> None:
     rendered = format_clickable_github_handle("@pavelzw")
 
@@ -583,32 +567,6 @@ def test_format_clickable_github_handle_uses_github_profile() -> None:
         rendered
         == "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]"
     )
-
-
-def test_format_clickable_github_handle_list_compacts_handles_to_single_line() -> None:
-    rendered = format_clickable_github_handle_list(
-        "Recipe maintainers:",
-        ["@pavelzw", "xhochy"],
-    )
-
-    assert rendered == [
-        "Recipe maintainers: "
-        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
-        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
-    ]
-
-
-def test_format_provenance_uses_github_commit_link() -> None:
-    rendered = format_provenance(
-        "https://github.com/conda-forge/polars-feedstock.git",
-        "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
-    )
-
-    assert rendered == [
-        "Provenance: "
-        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
-        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
-    ]
 
 
 def test_render_package_preview_shows_version_selector_preview() -> None:

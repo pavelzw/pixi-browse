@@ -12,6 +12,7 @@ VersionPreviewKey = tuple[str, str, str, int, str, str]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 CompareLineKind = Literal["added", "removed", "changed"]
+MetadataRow = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -40,14 +41,8 @@ class PackageFile:
 
 
 @dataclass(frozen=True)
-class MetadataField:
-    label: str
-    value: str
-
-
-@dataclass(frozen=True)
 class VersionArtifactData:
-    metadata_fields: tuple[MetadataField, ...]
+    metadata_rows: tuple[MetadataRow, ...]
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
     file_paths: tuple[PackageFile, ...] = ()
