@@ -3,6 +3,7 @@ import shutil
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from rattler.exceptions import InvalidMatchSpecError
@@ -12,22 +13,30 @@ from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
+from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Paste
+from textual.widgets import Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.models import PackageFile, VersionDetailsData
+from pixi_browse.models import (
+    CompareFileRow,
+    CompareRow,
+    CompareSelection,
+    PackageFile,
+    VersionArtifactData,
+    VersionCompareData,
+)
 from pixi_browse.rendering import (
-    build_version_details_data,
+    build_version_artifact_data,
+    build_version_compare_data,
     format_clickable_github_handle,
-    format_clickable_github_handle_list,
     format_clickable_url,
-    format_clickable_url_list,
-    format_provenance,
+    format_version_details_metadata_lines,
+    format_version_details_run_exports,
     render_package_preview,
-    render_selected_version_details,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
@@ -36,7 +45,11 @@ from pixi_browse.tui import (
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
+    Client,
+    CompareDetailsView,
+    CompareScreen,
     DetailSection,
+    DownloadPathScreen,
     Empty,
     FileActionScreen,
     FilePreviewScreen,
@@ -47,6 +60,8 @@ from pixi_browse.tui import (
     VersionDetailsView,
 )
 from pixi_browse.tui.state import AboutUrls
+from pixi_browse.tui.version_loader import VersionDataLoader
+from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
 
 
 @dataclass(frozen=True)
@@ -61,6 +76,23 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+def _make_artifact_data(
+    *,
+    metadata_rows: tuple[tuple[str, str], ...] = (("Meta", "meta"),),
+    dependencies: tuple[str, ...] = (),
+    constraints: tuple[str, ...] = (),
+    run_exports: RunExportsJson | None = None,
+    file_paths: tuple[PackageFile, ...] = (),
+) -> VersionArtifactData:
+    return VersionArtifactData(
+        metadata_rows=metadata_rows,
+        dependencies=dependencies,
+        constraints=constraints,
+        file_paths=file_paths,
+        run_exports=run_exports,
+    )
 
 
 def _make_repo_data_record(
@@ -145,6 +177,14 @@ class _FakeClickEvent:
         self.stopped = True
 
 
+class _FakeFooter:
+    def __init__(self) -> None:
+        self.updates: list[object] = []
+
+    def update(self, value: object) -> None:
+        self.updates.append(value)
+
+
 def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) -> None:
     shared_client = object()
     gateway_calls: list[object] = []
@@ -196,7 +236,7 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
-def test_render_selected_version_details_includes_package_paths() -> None:
+def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -206,20 +246,22 @@ def test_render_selected_version_details_includes_package_paths() -> None:
         depends=["python >=3.13"],
     )
 
-    rendered = render_selected_version_details(
+    details = build_version_artifact_data(
         "demo",
         record,
-        content_width=90,
-        package_paths=["bin/demo", "lib/python3.13/site-packages/demo.py"],
+        package_paths=(
+            PackageFile("bin/demo"),
+            PackageFile("lib/python3.13/site-packages/demo.py"),
+        ),
     )
 
-    assert "Files:" in rendered
-    assert " - bin/demo" in rendered
-    assert " - lib/python3.13/site-packages/demo.py" in rendered
-    assert "placeholder: coming soon" not in rendered
+    assert details.file_paths == (
+        PackageFile("bin/demo"),
+        PackageFile("lib/python3.13/site-packages/demo.py"),
+    )
 
 
-def test_build_version_details_data_aligns_metadata_rows() -> None:
+def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -228,30 +270,33 @@ def test_build_version_details_data_aligns_metadata_rows() -> None:
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
     )
+    metadata_lines = format_version_details_metadata_lines(details)
 
-    assert "Package               demo" in details.metadata_lines
-    assert "Python Site-Packages  not available" in details.metadata_lines
+    assert "Package               demo" in metadata_lines
+    assert "Python Site-Packages  not available" in metadata_lines
     assert any(
         line.startswith("Repository            [@click=app.open_external_url(")
-        for line in details.metadata_lines
+        for line in metadata_lines
     )
     assert (
         "Built with            rattler-build 0.47.0"
-        in build_version_details_data(
-            "demo",
-            record,
-            rattler_build_version="0.47.0",
-        ).metadata_lines
+        in format_version_details_metadata_lines(
+            build_version_artifact_data(
+                "demo",
+                record,
+                rattler_build_version="0.47.0",
+            )
+        )
     )
 
 
-def test_build_version_details_data_formats_run_exports_from_py_rattler() -> None:
+def test_format_version_details_run_exports_from_py_rattler() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -260,7 +305,7 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    details = build_version_details_data(
+    details = build_version_artifact_data(
         "demo",
         record,
         run_exports=RunExportsJson(
@@ -270,17 +315,306 @@ def test_build_version_details_data_formats_run_exports_from_py_rattler() -> Non
         ),
     )
 
-    assert details.run_exports == (
+    assert format_version_details_run_exports(details.run_exports) == (
         "weak: python_abi 3.13.* *_cp313",
         "strong: libdemo >=1.2.3",
         "noarch: python",
     )
     assert details.dependencies == ()
     assert details.constraints == ()
-    assert len(details.run_exports) == 3
+    assert len(format_version_details_run_exports(details.run_exports)) == 3
 
 
-def test_render_selected_version_details_includes_about_urls() -> None:
+def test_load_version_details_reuses_cached_artifact_run_exports(monkeypatch) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+    artifact_data = build_version_artifact_data(
+        "demo",
+        record,
+        run_exports=RunExportsJson(
+            weak=["python_abi 3.13.* *_cp313"],
+            strong=["libdemo >=1"],
+        ),
+    )
+
+    async def _unexpected_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise AssertionError("load_version_details should reuse cached artifact paths")
+
+    async def _unexpected_get_run_exports(_url: str) -> RunExportsJson:
+        raise AssertionError("load_version_details should reuse artifact run exports")
+
+    loader.artifact_data_cache[preview_key] = artifact_data
+    monkeypatch.setattr(loader, "get_package_paths", _unexpected_get_package_paths)
+    monkeypatch.setattr(loader, "get_run_exports", _unexpected_get_run_exports)
+    loader.about_urls_cache[preview_key] = AboutUrls()
+
+    details = asyncio.run(
+        loader.load_version_details("demo", record, preview_key=preview_key)
+    )
+
+    assert format_version_details_run_exports(details.run_exports) == (
+        "weak: python_abi 3.13.* *_cp313",
+        "strong: libdemo >=1",
+    )
+
+
+def test_load_version_details_raises_when_package_paths_are_unavailable(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise RuntimeError("paths.json missing")
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+
+    with pytest.raises(RuntimeError, match=r"paths\.json missing"):
+        asyncio.run(
+            loader.load_version_details("demo", record, preview_key=preview_key)
+        )
+
+
+def test_load_version_details_tolerates_unavailable_about_urls(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_about_urls(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> AboutUrls:
+        raise RuntimeError("about.json missing")
+
+    async def _fake_get_run_exports(_url: str) -> RunExportsJson:
+        return RunExportsJson()
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
+    monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
+
+    details = asyncio.run(
+        loader.load_version_details("demo", record, preview_key=preview_key)
+    )
+
+    assert not any(
+        line.startswith("Repository")
+        for line in format_version_details_metadata_lines(details)
+    )
+
+
+def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _url: str
+    ) -> list[PackageFile]:
+        raise RuntimeError("paths.json missing")
+
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+
+    with pytest.raises(RuntimeError, match=r"paths\.json missing"):
+        asyncio.run(
+            loader.load_version_artifact_data(
+                "demo",
+                record,
+                preview_key=preview_key,
+            )
+        )
+
+
+def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (
+    None
+):
+    left_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+        depends=["python >=3.12", "numpy >=1.0"],
+        constrains=["libdemo >=1"],
+    )
+    right_record = _make_repo_data_record(
+        version="1.2.4",
+        build="py313h456_0",
+        file_name="demo-1.2.4-py313h456_0.conda",
+        depends=["python >=3.13", "pydantic >=2"],
+        constrains=[],
+    )
+
+    left_artifact = build_version_artifact_data(
+        "demo",
+        left_record,
+        package_paths=(
+            PackageFile(
+                "bin/demo",
+                1234,
+                bytes.fromhex("00" * 32),
+                False,
+                "hardlink",
+            ),
+            PackageFile(
+                "info/about.json",
+                256,
+                bytes.fromhex("11" * 32),
+                False,
+                "hardlink",
+            ),
+        ),
+        run_exports=RunExportsJson(weak=["python_abi 3.12.* *_cp312"]),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        right_record,
+        package_paths=(
+            PackageFile(
+                "bin/demo",
+                2048,
+                bytes.fromhex("22" * 32),
+                False,
+                "hardlink",
+            ),
+            PackageFile(
+                "lib/demo.py",
+                512,
+                bytes.fromhex("33" * 32),
+                False,
+                "hardlink",
+            ),
+        ),
+        run_exports=RunExportsJson(weak=["python_abi 3.13.* *_cp313"]),
+    )
+
+    compare_data = build_version_compare_data(
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        left_artifact,
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.4"),
+                build="py313h456_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.4-py313h456_0.conda",
+            ),
+        ),
+        right_artifact,
+    )
+
+    version_row = next(
+        row for row in compare_data.metadata_rows if row.label == "Version"
+    )
+    assert version_row.left == "1.2.3"
+    assert version_row.right == "1.2.4"
+    assert version_row.changed is True
+
+    python_row = next(row for row in compare_data.dependencies if row.label == "python")
+    assert python_row.left == "python >=3.12"
+    assert python_row.right == "python >=3.13"
+    assert python_row.changed is True
+
+    numpy_row = next(row for row in compare_data.dependencies if row.label == "numpy")
+    assert numpy_row.left == "numpy >=1.0"
+    assert numpy_row.right == ""
+    assert numpy_row.changed is True
+
+    pydantic_row = next(
+        row for row in compare_data.dependencies if row.label == "pydantic"
+    )
+    assert pydantic_row.left == ""
+    assert pydantic_row.right == "pydantic >=2"
+    assert pydantic_row.changed is True
+
+    bin_demo_row = next(row for row in compare_data.files if row.label == "bin/demo")
+    assert "1.2 KiB" in bin_demo_row.left
+    assert "2.0 KiB" in bin_demo_row.right
+    assert bin_demo_row.changed is True
+
+    about_row = next(
+        row for row in compare_data.files if row.label == "info/about.json"
+    )
+    assert about_row.left.startswith("info/about.json")
+    assert about_row.right == ""
+    assert about_row.changed is True
+
+    lib_demo_row = next(row for row in compare_data.files if row.label == "lib/demo.py")
+    assert lib_demo_row.left == ""
+    assert lib_demo_row.right.startswith("lib/demo.py")
+    assert lib_demo_row.changed is True
+
+
+def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> None:
+    record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    left_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(PackageFile("bin/demo", size_in_bytes=None),),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(PackageFile("bin/demo", size_in_bytes=1234),),
+    )
+
+    compare_data = build_version_compare_data(
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        left_artifact,
+        CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.2.3"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.2.3-py313h123_0.conda",
+            ),
+        ),
+        right_artifact,
+    )
+
+    file_row = next(row for row in compare_data.files if row.label == "bin/demo")
+    assert file_row.changed is False
+
+
+def test_format_version_details_metadata_lines_include_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -289,10 +623,9 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         file_name="demo-1.2.3-py313h123_0.conda",
     )
 
-    rendered = render_selected_version_details(
+    details = build_version_artifact_data(
         "demo",
         record,
-        content_width=90,
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
         homepage_urls=["https://example.com/demo"],
@@ -301,40 +634,43 @@ def test_render_selected_version_details_includes_about_urls() -> None:
         provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
         rattler_build_version="0.38.0",
     )
+    metadata_lines = format_version_details_metadata_lines(details)
 
-    assert (
-        "URL: [@click=app.open_external_url('https://example.invalid/demo-1.2.3-py313h123_0.conda')]"
-        in rendered
+    assert any(
+        line.startswith("Package URL")
+        and "https://example.invalid/demo-1.2.3-py313h123_0.conda" in line
+        for line in metadata_lines
     )
-    assert (
-        "Repository: [@click=app.open_external_url('https://github.com/example/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Repository") and "https://github.com/example/demo" in line
+        for line in metadata_lines
     )
-    assert (
-        "Documentation: [@click=app.open_external_url('https://docs.example.com/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Documentation") and "https://docs.example.com/demo" in line
+        for line in metadata_lines
     )
-    assert (
-        "Homepage: [@click=app.open_external_url('https://example.com/demo')]"
-        in rendered
+    assert any(
+        line.startswith("Homepage") and "https://example.com/demo" in line
+        for line in metadata_lines
     )
-    assert (
-        "Recipe maintainers: "
-        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
-        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
-        in rendered
+    assert any(
+        line.startswith("Recipe maintainers")
+        and "@click=app.open_external_url('https://github.com/pavelzw')" in line
+        and "@click=app.open_external_url('https://github.com/xhochy')" in line
+        for line in metadata_lines
     )
-    assert (
-        "Provenance: "
-        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
-        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
-        in rendered
+    assert any(
+        line.startswith("Provenance")
+        and "https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in line
+        and "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in line
+        for line in metadata_lines
     )
-    assert "Built with rattler-build 0.38.0" in rendered
-    assert "https://github.com/example/demo" in rendered
-    assert "https://docs.example.com/demo" in rendered
-    assert "https://example.com/demo" in rendered
-    assert "@click=app.open_external_url(" in rendered
+    assert any(
+        line.startswith("Built with") and "rattler-build 0.38.0" in line
+        for line in metadata_lines
+    )
 
 
 def test_format_clickable_url_uses_textual_click_action() -> None:
@@ -346,22 +682,6 @@ def test_format_clickable_url_uses_textual_click_action() -> None:
     )
 
 
-def test_format_clickable_url_list_compacts_urls_to_single_line() -> None:
-    rendered = format_clickable_url_list(
-        "Repository:",
-        [
-            "https://example.com/one",
-            "https://example.com/two",
-        ],
-    )
-
-    assert rendered == [
-        "Repository: "
-        "[@click=app.open_external_url('https://example.com/one')]https://example.com/one[/], "
-        "[@click=app.open_external_url('https://example.com/two')]https://example.com/two[/]"
-    ]
-
-
 def test_format_clickable_github_handle_uses_github_profile() -> None:
     rendered = format_clickable_github_handle("@pavelzw")
 
@@ -369,32 +689,6 @@ def test_format_clickable_github_handle_uses_github_profile() -> None:
         rendered
         == "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]"
     )
-
-
-def test_format_clickable_github_handle_list_compacts_handles_to_single_line() -> None:
-    rendered = format_clickable_github_handle_list(
-        "Recipe maintainers:",
-        ["@pavelzw", "xhochy"],
-    )
-
-    assert rendered == [
-        "Recipe maintainers: "
-        "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/], "
-        "[@click=app.open_external_url('https://github.com/xhochy')]@xhochy[/]"
-    ]
-
-
-def test_format_provenance_uses_github_commit_link() -> None:
-    rendered = format_provenance(
-        "https://github.com/conda-forge/polars-feedstock.git",
-        "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
-    )
-
-    assert rendered == [
-        "Provenance: "
-        "[@click=app.open_external_url('https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c')]"
-        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c[/]"
-    ]
 
 
 def test_render_package_preview_shows_version_selector_preview() -> None:
@@ -441,15 +735,43 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
+    class _FakePathType:
+        def __init__(self, name: str) -> None:
+            self.hardlink = name == "hardlink"
+            self.softlink = name == "softlink"
+            self.directory = name == "directory"
+
     class _FakePathEntry:
-        def __init__(self, relative_path: str, size_in_bytes: int | None) -> None:
+        def __init__(
+            self,
+            relative_path: str,
+            size_in_bytes: int | None,
+            sha256: bytes | None,
+            no_link: bool,
+            path_type: str,
+        ) -> None:
             self.relative_path = relative_path
             self.size_in_bytes = size_in_bytes
+            self.sha256 = sha256
+            self.no_link = no_link
+            self.path_type = _FakePathType(path_type)
 
     class _FakePathsJson:
         paths = [
-            _FakePathEntry("bin/demo", 1234),
-            _FakePathEntry("lib/python3.13/site-packages/demo.py", None),
+            _FakePathEntry(
+                "bin/demo",
+                1234,
+                bytes.fromhex("00" * 32),
+                False,
+                "hardlink",
+            ),
+            _FakePathEntry(
+                "lib/python3.13/site-packages/demo.py",
+                None,
+                None,
+                True,
+                "softlink",
+            ),
         ]
 
     async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
@@ -467,8 +789,20 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
 
     assert paths == [
-        PackageFile("bin/demo", 1234),
-        PackageFile("lib/python3.13/site-packages/demo.py", None),
+        PackageFile(
+            "bin/demo",
+            1234,
+            bytes.fromhex("00" * 32),
+            False,
+            "hardlink",
+        ),
+        PackageFile(
+            "lib/python3.13/site-packages/demo.py",
+            None,
+            None,
+            True,
+            "softlink",
+        ),
     ]
     assert cached_paths == paths
     assert calls == [url]
@@ -981,15 +1315,15 @@ def test_request_selected_version_preview_resets_scroll_for_cached_details(
         "osx-arm64",
         "polars-1.33.1-u64_idx_habc1234_1.conda",
     )
-    cached_details = VersionDetailsData(
-        metadata_lines=("cached preview",),
+    cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached preview"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
+        file_paths=(PackageFile("file"),),
     )
-    app._version_details_cache = {preview_key: cached_details}
-    updates: list[VersionDetailsData] = []
+    app._version_artifact_data_cache = {preview_key: cached_details}
+    updates: list[VersionArtifactData] = []
     reset_calls: list[str] = []
     monkeypatch.setattr(
         app, "_show_version_details", lambda value: updates.append(value)
@@ -1060,6 +1394,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
     assert "Tab / Shift+Tab" in help_text
     assert "Cycle focused section" in help_text
+    assert "x                 Swap compare left / right" in help_text
     assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
@@ -1201,14 +1536,14 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
     app._mode = "versions"
     app._selected_package = "demo"
     app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
-    stale_cached_details = VersionDetailsData(
-        metadata_lines=("cached",),
+    stale_cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["export"]),
+        file_paths=(PackageFile("file"),),
     )
-    app._version_details_cache = {
+    app._version_artifact_data_cache = {
         ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
     }
 
@@ -1229,7 +1564,7 @@ def test_rerender_visible_version_preview_requests_fresh_preview_when_not_cached
 
     app._rerender_visible_version_preview()
 
-    assert app._version_details_cache == {
+    assert app._version_artifact_data_cache == {
         ("demo", "1.2.3", "py313h123_0", 0, "noarch", "old"): stale_cached_details
     }
     assert preview_calls == [("demo", entry)]
@@ -1252,18 +1587,18 @@ def test_rerender_visible_version_preview_uses_cached_details(monkeypatch) -> No
         "noarch",
         "demo-1.2.3-py313h123_0.conda",
     )
-    cached_details = VersionDetailsData(
-        metadata_lines=("cached",),
+    cached_details = _make_artifact_data(
+        metadata_rows=(("Meta", "cached"),),
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["export"]),
+        file_paths=(PackageFile("file"),),
     )
     app._mode = "versions"
     app._selected_package = "demo"
     app._version_rows = [VersionRow(kind="entry", subdir="noarch", entry=entry)]
-    app._version_details_cache = {preview_key: cached_details}
-    shown: list[VersionDetailsData] = []
+    app._version_artifact_data_cache = {preview_key: cached_details}
+    shown: list[VersionArtifactData] = []
 
     class _FakeOptionList:
         highlighted = 0
@@ -1487,7 +1822,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
 
     assert text.plain == "Constraints (1)"
     assert any(
-        span.style.meta == {"@click": ("app.select_dependency_tab", ("constraints",))}
+        span.style.meta == {"@click": ("select_dependency_tab", ("constraints",))}
         for span in text.spans
         if isinstance(span.style, Style)
     )
@@ -1495,8 +1830,7 @@ def test_dependency_header_tabs_are_clickable() -> None:
         span.style == INACTIVE_TAB_STYLE
         for span in text.spans
         if isinstance(span.style, Style)
-        and span.style.meta
-        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+        and span.style.meta != {"@click": ("select_dependency_tab", ("constraints",))}
     )
 
 
@@ -1512,12 +1846,47 @@ def test_selected_dependency_tab_is_not_bold_when_pane_is_inactive() -> None:
         span.style.bold is False
         for span in text.spans
         if isinstance(span.style, Style)
-        and span.style.meta
-        != {"@click": ("app.select_dependency_tab", ("constraints",))}
+        and span.style.meta != {"@click": ("select_dependency_tab", ("constraints",))}
     )
 
 
-def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
+def test_compare_details_view_uses_detail_sections_with_selected_pane_class() -> None:
+    compare_data = VersionCompareData(
+        left_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.0"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.0-py313h123_0.conda",
+            ),
+        ),
+        right_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.1"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.1-py313h123_0.conda",
+            ),
+        ),
+        metadata_rows=(),
+        dependencies=(),
+        constraints=(),
+        run_exports=(),
+        files=(),
+    )
+    view = CompareDetailsView(compare_data)
+    sections = list(view.compose())
+
+    assert "-pane-selected" in view.classes
+    assert len(sections) == 3
+    assert all(isinstance(section, DetailSection) for section in sections)
+
+
+def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
     view = VersionDetailsView()
     view._pane_selected = False
 
@@ -1532,16 +1901,213 @@ def test_dependency_header_hint_is_only_shown_for_active_pane() -> None:
     assert "[ / ]" not in active_header.plain
 
 
+def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_green() -> (
+    None
+):
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(
+                CompareRow(
+                    label="Name",
+                    left="demo",
+                    right="demo",
+                    changed=False,
+                ),
+                CompareRow(
+                    label="Version",
+                    left="1.0.0",
+                    right="1.0.1",
+                    changed=True,
+                ),
+            ),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    table = cast(Table, view._render_metadata_body())
+
+    assert table.columns[0].header == "Field"
+    assert table.columns[1].header == "Left"
+    assert table.columns[2].header == "Right"
+    assert table.rows[0].style is None
+    assert cast(Text, table.columns[1]._cells[0]).style == "white"
+    assert cast(Text, table.columns[2]._cells[0]).style == "white"
+    assert cast(Text, table.columns[1]._cells[1]).style == "red"
+    assert cast(Text, table.columns[2]._cells[1]).style == "green"
+
+
+def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -> None:
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(
+                CompareRow(
+                    label="numpy",
+                    left="numpy >=1.0",
+                    right="",
+                    changed=True,
+                ),
+                CompareRow(
+                    label="pydantic",
+                    left="",
+                    right="pydantic >=2",
+                    changed=True,
+                ),
+            ),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    table = cast(Table, view._render_dependency_body("dependencies"))
+
+    assert len(table.columns) == 2
+    assert table.columns[0].header == "Left"
+    assert table.columns[1].header == "Right"
+    assert cast(Text, table.columns[0]._cells[0]).plain == "numpy >=1.0"
+    assert cast(Text, table.columns[1]._cells[0]).plain == ""
+    assert cast(Text, table.columns[0]._cells[1]).plain == ""
+    assert cast(Text, table.columns[1]._cells[1]).plain == "pydantic >=2"
+
+
+def test_compare_file_section_renders_option_list_rows_with_status_colors() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = CompareScreen(
+                VersionCompareData(
+                    left_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.0"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.0-py313h123_0.conda",
+                        ),
+                    ),
+                    right_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.1"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.1-py313h123_0.conda",
+                        ),
+                    ),
+                    metadata_rows=(),
+                    dependencies=(),
+                    constraints=(),
+                    run_exports=(),
+                    files=(
+                        CompareFileRow(
+                            label="same.txt",
+                            left="same.txt",
+                            right="same.txt",
+                            changed=False,
+                        ),
+                        CompareFileRow(
+                            label="changed.txt",
+                            left="changed.txt",
+                            right="changed.txt",
+                            changed=True,
+                        ),
+                        CompareFileRow(
+                            label="left-only.txt",
+                            left="left-only.txt",
+                            right="",
+                            changed=True,
+                        ),
+                        CompareFileRow(
+                            label="right-only.txt",
+                            left="",
+                            right="right-only.txt",
+                            changed=True,
+                        ),
+                    ),
+                )
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
+            prompts = [
+                cast(Text, option_list.get_option_at_index(index).prompt)
+                for index in range(option_list.option_count)
+            ]
+
+            assert [prompt.plain for prompt in prompts] == [
+                "= same.txt",
+                "~ changed.txt",
+                "- left-only.txt",
+                "+ right-only.txt",
+            ]
+            assert [prompt.style for prompt in prompts] == [
+                "#5c6370",
+                "#7a5c00",
+                "#8b1e1e",
+                "#1f5f2b",
+            ]
+
+    asyncio.run(_run())
+
+
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
     view = VersionDetailsView()
     view._active_section = 0
     view._dependency_tab_index = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
     )
 
     header = view._render_dependency_header()
@@ -1560,12 +2126,10 @@ def test_dependency_header_uses_inactive_section_style_for_unselected_tabs() -> 
     view = VersionDetailsView()
     view._active_section = 0
     view._dependency_tab_index = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
-        run_exports=("run export",),
-        files=("file",),
+        run_exports=RunExportsJson(weak=["run export"]),
     )
 
     header = view._render_dependency_header()
@@ -1582,13 +2146,7 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
     view = VersionDetailsView()
     view._pane_selected = True
     view._active_section = 1
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=("dep",),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
-    )
+    view._details = _make_artifact_data(dependencies=("dep",))
 
     header = view._render_dependency_header()
 
@@ -1597,13 +2155,7 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
 
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
-    )
+    view._details = _make_artifact_data()
 
     header = view._render_dependency_header()
 
@@ -1625,12 +2177,8 @@ def test_dependency_header_omits_counts_before_details_are_loaded() -> None:
 
 def test_run_export_list_entry_uses_plain_matchspec() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=("weak: python_abi 3.13.* *_cp313",),
-        files=("file",),
+    view._details = _make_artifact_data(
+        run_exports=RunExportsJson(weak=["python_abi 3.13.* *_cp313"])
     )
 
     entries = view._dependency_entries_for_tab("run_exports")
@@ -1641,12 +2189,8 @@ def test_run_export_list_entry_uses_plain_matchspec() -> None:
 
 def test_dependency_list_entry_unescapes_matchspec_text() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
+    view._details = _make_artifact_data(
         dependencies=(r"demo \[version='>=1'\]",),
-        constraints=(),
-        run_exports=(),
-        files=("file",),
     )
 
     entries = view._dependency_entries_for_tab("dependencies")
@@ -1657,12 +2201,7 @@ def test_dependency_list_entry_unescapes_matchspec_text() -> None:
 
 def test_file_list_entry_uses_plain_file_path() -> None:
     view = VersionDetailsView()
-    view._details = VersionDetailsData(
-        metadata_lines=("meta",),
-        dependencies=(),
-        constraints=(),
-        run_exports=(),
-        files=("site-packages/demo.py",),
+    view._details = _make_artifact_data(
         file_paths=(PackageFile("site-packages/demo.py", 1536),),
     )
 
@@ -1885,21 +2424,29 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
         subdir="noarch",
         file_name="demo-1.2.3-py313h123_0.conda",
     )
-    opened: list[tuple[str, str, str, int | None]] = []
+    opened: list[tuple[str, str, str, int | None, bytes | None]] = []
     scheduled: list[object] = []
 
     monkeypatch.setattr(
         app,
         "_open_file_action_screen",
-        lambda package_name, selected_entry, file_path, size_in_bytes: opened.append(
-            (package_name, selected_entry.file_name, file_path, size_in_bytes)
+        lambda package_name, selected_entry, file_path, size_in_bytes, sha256: (
+            opened.append(
+                (
+                    package_name,
+                    selected_entry.file_name,
+                    file_path,
+                    size_in_bytes,
+                    sha256,
+                )
+            )
         ),
     )
     monkeypatch.setattr(
         app, "call_after_refresh", lambda callback: scheduled.append(callback)
     )
 
-    app._defer_file_action_screen("demo", entry, "info/about.json", 17)
+    app._defer_file_action_screen("demo", entry, "info/about.json", 17, None)
 
     assert opened == []
     assert len(scheduled) == 1
@@ -1908,7 +2455,7 @@ def test_defer_file_action_screen_waits_until_after_refresh(monkeypatch) -> None
     assert callable(callback)
     callback()
 
-    assert opened == [("demo", entry.file_name, "info/about.json", 17)]
+    assert opened == [("demo", entry.file_name, "info/about.json", 17, None)]
 
 
 def test_request_file_action_for_selected_file_is_noop_without_file_path(
@@ -1931,7 +2478,7 @@ def test_request_file_action_for_selected_file_is_noop_without_file_path(
     monkeypatch.setattr(
         app,
         "_defer_file_action_screen",
-        lambda package_name, selected_entry, file_path, size_in_bytes: (
+        lambda package_name, selected_entry, file_path, size_in_bytes, sha256: (
             _ for _ in ()
         ).throw(AssertionError("should not open file action screen")),
     )
@@ -2034,6 +2581,329 @@ def test_on_key_tab_does_nothing_in_versions_preview_with_main_focus(
     assert event.stopped is True
 
 
+def test_action_tab_key_cycles_compare_screen_sections(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    calls: list[str] = []
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    monkeypatch.setattr(screen, "action_next_section", lambda: calls.append("next"))
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda self: screen))
+
+    app.action_tab_key()
+
+    assert calls == ["next"]
+
+
+def test_on_key_backtab_cycles_compare_screen_sections(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    calls: list[str] = []
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+
+    monkeypatch.setattr(
+        screen, "action_previous_section", lambda: calls.append("previous")
+    )
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda self: screen))
+
+    event = _FakeKeyEvent("shift+tab")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert calls == ["previous"]
+    assert event.stopped is True
+
+
+def test_compare_screen_swap_sides_flips_compare_data(monkeypatch) -> None:
+    compare_data = VersionCompareData(
+        left_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.0"),
+                build="py313h123_0",
+                build_number=0,
+                subdir="noarch",
+                file_name="demo-1.0.0-py313h123_0.conda",
+            ),
+        ),
+        right_selection=CompareSelection(
+            "demo",
+            VersionEntry(
+                version=Version("1.0.1"),
+                build="py313h456_0",
+                build_number=0,
+                subdir="linux-64",
+                file_name="demo-1.0.1-py313h456_0.conda",
+            ),
+        ),
+        metadata_rows=(
+            CompareRow(
+                label="Version",
+                left="1.0.0",
+                right="1.0.1",
+                changed=True,
+            ),
+        ),
+        dependencies=(
+            CompareRow(
+                label="python",
+                left="python >=3.12",
+                right="python >=3.13",
+                changed=True,
+            ),
+        ),
+        constraints=(),
+        run_exports=(),
+        files=(
+            CompareFileRow(
+                label="bin/demo",
+                left="",
+                right="bin/demo",
+                changed=True,
+            ),
+        ),
+    )
+    screen = CompareScreen(compare_data)
+    title_updates: list[Text] = []
+    detail_updates: list[VersionCompareData] = []
+    focused: list[str] = []
+
+    class _FakeTitle:
+        def update(self, value: Text) -> None:
+            title_updates.append(value)
+
+    class _FakeDetails:
+        def set_compare_data(self, value: VersionCompareData) -> None:
+            detail_updates.append(value)
+
+        def focus(self) -> None:
+            focused.append("compare")
+
+    def _fake_query_one(
+        selector: str, _widget_type: object = None
+    ) -> _FakeTitle | _FakeDetails:
+        if selector == "#compare-title":
+            return _FakeTitle()
+        assert selector == "#compare-details-view"
+        return _FakeDetails()
+
+    monkeypatch.setattr(screen, "query_one", _fake_query_one)
+
+    screen.action_swap_sides()
+
+    assert screen._compare_data.left_selection == compare_data.right_selection
+    assert screen._compare_data.right_selection == compare_data.left_selection
+    assert screen._compare_data.metadata_rows[0].left == "1.0.1"
+    assert screen._compare_data.metadata_rows[0].right == "1.0.0"
+    assert screen._compare_data.dependencies[0].left == "python >=3.13"
+    assert screen._compare_data.dependencies[0].right == "python >=3.12"
+    assert screen._compare_data.files[0].left == "bin/demo"
+    assert screen._compare_data.files[0].right == ""
+    assert len(title_updates) == 1
+    assert (
+        title_updates[0].plain
+        == "demo 1.0.1 py313h456_0 [linux-64] vs demo 1.0.0 py313h123_0 [noarch]"
+    )
+    assert any(
+        span.style == "red"
+        and title_updates[0].plain[span.start : span.end]
+        == "demo 1.0.1 py313h456_0 [linux-64]"
+        for span in title_updates[0].spans
+    )
+    assert any(
+        span.style == "green"
+        and title_updates[0].plain[span.start : span.end]
+        == "demo 1.0.0 py313h123_0 [noarch]"
+        for span in title_updates[0].spans
+    )
+    assert detail_updates == [screen._compare_data]
+    assert focused == ["compare"]
+
+
+def test_compare_screen_renders_footer_with_keybinds() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = CompareScreen(
+                VersionCompareData(
+                    left_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.0"),
+                            build="py313h123_0",
+                            build_number=0,
+                            subdir="noarch",
+                            file_name="demo-1.0.0-py313h123_0.conda",
+                        ),
+                    ),
+                    right_selection=CompareSelection(
+                        "demo",
+                        VersionEntry(
+                            version=Version("1.0.1"),
+                            build="py313h456_0",
+                            build_number=0,
+                            subdir="linux-64",
+                            file_name="demo-1.0.1-py313h456_0.conda",
+                        ),
+                    ),
+                    metadata_rows=(),
+                    dependencies=(),
+                    constraints=(),
+                    run_exports=(),
+                    files=(),
+                )
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert (
+                str(screen.query_one("#compare-footer", Static).render())
+                == "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | Quit: q | Help: ?"
+            )
+
+    asyncio.run(_run())
+
+
+def test_compare_screen_escape_dismisses_overlay(monkeypatch) -> None:
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h456_0",
+                    build_number=0,
+                    subdir="linux-64",
+                    file_name="demo-1.0.1-py313h456_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    dismissed: list[str] = []
+
+    monkeypatch.setattr(screen, "dismiss", lambda: dismissed.append("dismiss"))
+
+    screen.action_back()
+
+    assert dismissed == ["dismiss"]
+
+
+def test_compare_screen_q_exits_app(monkeypatch) -> None:
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h456_0",
+                    build_number=0,
+                    subdir="linux-64",
+                    file_name="demo-1.0.1-py313h456_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    exited: list[str] = []
+
+    class _FakeApp:
+        def exit(self) -> None:
+            exited.append("exit")
+
+    monkeypatch.setattr(CompareScreen, "app", property(lambda self: _FakeApp()))
+
+    screen.action_quit()
+
+    assert exited == ["exit"]
+
+
 def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -2125,6 +2995,57 @@ def test_select_dependency_tab_focuses_main_panel(monkeypatch) -> None:
     assert focused == ["main"]
 
 
+def test_compare_select_dependency_tab_focuses_compare_view(monkeypatch) -> None:
+    view = CompareDetailsView(
+        VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-py313h123_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="py313h123_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-py313h123_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+        )
+    )
+    active_sections: list[int] = []
+    refreshed: list[str] = []
+    focused: list[str] = []
+
+    monkeypatch.setattr(
+        view,
+        "set_active_section",
+        lambda value: active_sections.append(value),
+    )
+    monkeypatch.setattr(
+        view, "_refresh_dependency_section", lambda: refreshed.append("refresh")
+    )
+    monkeypatch.setattr(view, "focus", lambda: focused.append("compare"))
+
+    view.select_dependency_tab("constraints", focus_view=True)
+
+    assert active_sections == [1]
+    assert refreshed == ["refresh"]
+    assert focused == ["compare"]
+
+
 def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._selected_package = "demo"
@@ -2167,62 +3088,62 @@ def test_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
     assert opened == [("demo", "info/about.json")]
 
 
-def test_clicking_detail_section_activates_and_focuses_pane(monkeypatch) -> None:
-    section = DetailSection("Files", 2)
-    activated: list[tuple[int, bool]] = []
+def test_compare_option_list_selection_opens_file_action_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    opened: list[str] = []
 
-    class _FakeView:
-        def activate_section(
-            self, index: int, *, focus_main_panel: bool = False
-        ) -> None:
-            activated.append((index, focus_main_panel))
-
-    class _FakeApp:
-        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
-            assert selector == "#version-details-view"
-            return _FakeView()
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self.option_list = type(
+                "OptionListEvent", (), {"id": "compare-option-list-2"}
+            )()
+            self.option_index = 0
 
     monkeypatch.setattr(
-        DetailSection,
-        "app",
-        property(lambda self: _FakeApp()),
+        app,
+        "_request_file_action_for_selected_compare_file",
+        lambda: opened.append("compare"),
     )
+
+    event = _FakeEvent()
+    asyncio.run(app.on_option_list_option_selected(event))  # type: ignore[arg-type]
+
+    assert opened == ["compare"]
+
+
+def test_clicking_detail_section_activates_and_focuses_pane() -> None:
+    activated: list[int] = []
+    section = DetailSection("Files", 2, on_activate=activated.append)
 
     event = _FakeClickEvent()
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert activated == [(2, True)]
+    assert activated == [2]
     assert event.stopped is True
 
 
-def test_clicking_dependency_tab_dispatches_without_hover_link_action(
-    monkeypatch,
-) -> None:
-    section = DetailSection("Dependencies", 1)
-    selected_tabs: list[tuple[str, bool]] = []
-
-    class _FakeView:
-        def select_dependency_tab(
-            self, tab: str, *, focus_main_panel: bool = False
-        ) -> None:
-            selected_tabs.append((tab, focus_main_panel))
-
-    class _FakeApp:
-        def query_one(self, selector: str, _widget_type: object = None) -> _FakeView:
-            assert selector == "#version-details-view"
-            return _FakeView()
-
-    monkeypatch.setattr(
-        DetailSection,
-        "app",
-        property(lambda self: _FakeApp()),
+def test_clicking_dependency_tab_dispatches_without_hover_link_action() -> None:
+    selected_tabs: list[str] = []
+    section = DetailSection(
+        "Dependencies",
+        1,
+        on_activate=lambda _index: None,
+        on_select_dependency_tab=selected_tabs.append,
     )
+
+    section.action_select_dependency_tab("constraints")
+    assert selected_tabs == ["constraints"]
+
+
+def test_clicking_dependency_tab_does_not_activate_section_click_handler() -> None:
+    activated: list[int] = []
+    section = DetailSection("Dependencies", 1, on_activate=activated.append)
 
     event = _FakeClickEvent(
         Style(
             meta={
                 "@click": (
-                    "app.select_dependency_tab",
+                    "select_dependency_tab",
                     ("constraints",),
                 )
             }
@@ -2230,7 +3151,7 @@ def test_clicking_dependency_tab_dispatches_without_hover_link_action(
     )
     section.on_click(event)  # type: ignore[arg-type]
 
-    assert selected_tabs == [("constraints", False)]
+    assert activated == []
     assert event.stopped is True
 
 
@@ -2457,6 +3378,276 @@ def test_action_channel_key_c_starts_channel_edit_mode() -> None:
     assert app._channel_draft == "custom-channel"
 
 
+def test_on_key_uppercase_c_is_not_double_appended_in_channel_edit_mode(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_edit_mode = True
+    app._channel_draft = ""
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+
+    app.action_compare_key_c()
+    event = _FakeKeyEvent("C", "C")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._channel_draft == "C"
+    assert event.stopped is False
+
+
+def test_on_key_uppercase_c_is_not_double_appended_in_filter_mode(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "packages"
+    app._filter_mode = True
+    app._search_query = ""
+    app._sidebar_is_focused = lambda: False  # type: ignore[method-assign]
+    monkeypatch.setattr(app, "_filter_packages", lambda: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+
+    app.action_compare_key_c()
+    event = _FakeKeyEvent("C", "C")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert app._search_query == "C"
+    assert event.stopped is False
+
+
+def test_action_compare_key_c_stores_first_selection(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    notifications: list[tuple[str, str | None, str | None]] = []
+    footer = _FakeFooter()
+
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, title=None, severity=None: notifications.append(
+            (message, title, severity)
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
+
+    app.action_compare_key_c()
+
+    assert app._compare_selection == selection
+    assert notifications == [
+        (
+            "Stored demo 1.2.3 py313h123_0 [noarch] as compare A.",
+            "Compare",
+            None,
+        )
+    ]
+    assert len(footer.updates) == 1
+    footer_text = footer.updates[0]
+    assert isinstance(footer_text, Text)
+    assert any(
+        footer_text.plain[span.start : span.end] == "Compare: C"
+        and span.style == "#ec4899"
+        for span in footer_text.spans
+        if isinstance(span.style, str)
+    )
+
+
+def test_action_compare_key_c_queues_compare_screen_on_second_selection(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    first = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    second = CompareSelection(
+        "other",
+        VersionEntry(
+            version=Version("2.0.0"),
+            build="py313h999_0",
+            build_number=0,
+            subdir="linux-64",
+            file_name="other-2.0.0-py313h999_0.conda",
+        ),
+    )
+    app._compare_selection = first
+    worker_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: second)
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app.action_compare_key_c()
+
+    assert worker_calls == [
+        {
+            "group": "version-compare",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_open_compare_screen_orders_sides_by_repodata_record(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    first_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.4"),
+            build="py313h456_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.4-py313h456_0.conda",
+        ),
+    )
+    second_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    first_record = _make_repo_data_record(
+        version="1.2.4",
+        build="py313h456_0",
+        file_name="demo-1.2.4-py313h456_0.conda",
+    )
+    second_record = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    first_artifact = build_version_artifact_data("demo", first_record)
+    second_artifact = build_version_artifact_data("demo", second_record)
+    pushed: list[VersionCompareData] = []
+    footer = _FakeFooter()
+
+    async def _fake_load_compare_artifact(
+        selection: CompareSelection,
+    ) -> tuple[RepoDataRecord, object] | None:
+        if selection == first_selection:
+            return first_record, first_artifact
+        if selection == second_selection:
+            return second_record, second_artifact
+        raise AssertionError(f"unexpected selection {selection}")
+
+    monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
+    app._compare_selection = first_selection
+    app._compare_screen_open = False
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen._compare_data),
+    )
+    monkeypatch.setattr(app, "notify", lambda *args, **kwargs: None)
+
+    asyncio.run(app._open_compare_screen(first_selection, second_selection))
+
+    assert len(pushed) == 1
+    assert pushed[0].left_selection == second_selection
+    assert pushed[0].right_selection == first_selection
+    version_row = next(row for row in pushed[0].metadata_rows if row.label == "Version")
+    assert version_row.left == "1.2.3"
+    assert version_row.right == "1.2.4"
+
+
+def test_open_compare_screen_notifies_when_compare_file_metadata_load_fails(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    first_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    second_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.4"),
+            build="py313h456_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.4-py313h456_0.conda",
+        ),
+    )
+    notifications: list[tuple[str, str | None, str | None]] = []
+
+    async def _fake_load_compare_artifact(
+        _selection: CompareSelection,
+    ) -> tuple[RepoDataRecord, object] | None:
+        raise RuntimeError("Failed to load compare file metadata for demo")
+
+    monkeypatch.setattr(app, "_load_compare_artifact", _fake_load_compare_artifact)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, title=None, severity=None: notifications.append(
+            (message, title, severity)
+        ),
+    )
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("compare screen should not open on path loading failure")
+        ),
+    )
+
+    asyncio.run(app._open_compare_screen(first_selection, second_selection))
+
+    assert notifications == [
+        (
+            "Failed to load compare file metadata for demo",
+            "Compare",
+            "error",
+        )
+    ]
+
+
 def test_confirm_channel_edit_queues_channel_reload_worker(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._channel_edit_mode = True
@@ -2576,12 +3767,22 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     filtered: list[str] = []
     updated: list[str] = []
     focused: list[str] = []
+    footer = _FakeFooter()
 
     monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
     monkeypatch.setattr(
         app, "_update_filter_indicator", lambda: updated.append("updated")
     )
     monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
 
     asyncio.run(app._apply_matchspec_query(None))
 
@@ -2729,6 +3930,7 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
 
     status = _FakeStatus()
     option_list = _FakeOptionList()
+    footer = _FakeFooter()
     reapplications: list[str] = []
 
     def _fake_query_one(selector: str, _widget_type: object = None) -> object:
@@ -2736,6 +3938,8 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
             return status
         if selector == "#sidebar-list":
             return option_list
+        if selector == "#footer":
+            return footer
         raise AssertionError(selector)
 
     async def _fake_fetch_package_names_with_gateway() -> list[str]:
@@ -2787,11 +3991,15 @@ def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
             self.focused = True
 
     option_list = _FakeOptionList()
+    footer = _FakeFooter()
     notifications: list[str] = []
 
-    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeOptionList:
-        assert selector == "#sidebar-list"
-        return option_list
+    def _fake_query_one(selector: str, _widget_type: object = None) -> object:
+        if selector == "#sidebar-list":
+            return option_list
+        if selector == "#footer":
+            return footer
+        raise AssertionError(selector)
 
     async def _fake_load_packages() -> bool:
         return True
@@ -2825,8 +4033,53 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
     app._mode = "versions"
 
     assert (
+        cast(Text, app._footer_text()).plain
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+    )
+
+
+def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._compare_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+
+    footer = cast(Text, app._footer_text())
+
+    assert footer.plain == (
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+    )
+    compare_start = footer.plain.index("Compare: C")
+    compare_end = compare_start + len("Compare: C")
+    assert any(
+        span.start == compare_start
+        and span.end == compare_end
+        and span.style == "#ec4899"
+        for span in footer.spans
+        if isinstance(span.style, str)
+    )
+    assert not any(
+        footer.plain[span.start : span.end] == "Download: d"
+        for span in footer.spans
+        if isinstance(span.style, str)
+    )
+
+
+def test_footer_text_shows_compare_keybinds_when_compare_screen_is_open() -> None:
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+
+    assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        == "Compare: Tab/Shift+Tab panes | Swap: x | Back: esc | Quit: q | Help: ?"
     )
 
 
@@ -2853,8 +4106,8 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
     app._search_query = "polars"
 
     assert (
-        app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
+        cast(Text, app._footer_text()).plain
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -2933,7 +4186,34 @@ def test_request_download_is_ignored_while_download_in_progress(monkeypatch) -> 
     assert worker_calls == []
 
 
-def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
+def test_handle_file_action_result_opens_download_path_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    entry = VersionEntry(
+        version=Version("1.2.3"),
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+    pushed: list[DownloadPathScreen] = []
+    monkeypatch.setattr(
+        app, "push_screen", lambda screen, callback: pushed.append(screen)
+    )
+
+    app._handle_file_action_result(
+        "demo",
+        entry,
+        "info/about.json",
+        None,
+        None,
+        FileActionOption(action="download", label="Download as file"),
+    )
+
+    assert len(pushed) == 1
+    assert isinstance(pushed[0], DownloadPathScreen)
+
+
+def test_handle_file_action_result_spawns_worker_for_preview(monkeypatch) -> None:
     app = CondaMetadataTui()
     entry = VersionEntry(
         version=Version("1.2.3"),
@@ -2950,7 +4230,14 @@ def test_handle_file_action_result_spawns_worker(monkeypatch) -> None:
 
     monkeypatch.setattr(app, "run_worker", _fake_run_worker)
 
-    app._handle_file_action_result("demo", entry, "info/about.json", None, "download")
+    app._handle_file_action_result(
+        "demo",
+        entry,
+        "info/about.json",
+        None,
+        None,
+        FileActionOption(action="preview", label="Preview"),
+    )
 
     assert worker_calls == [
         {
@@ -3031,7 +4318,14 @@ def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     monkeypatch.setattr(app, "_fetch_package_file_bytes", _fake_fetch)
     monkeypatch.setattr(app, "push_screen", lambda screen: pushed.append(screen))
 
-    asyncio.run(app._preview_selected_package_file("demo", entry, "info/about.json"))
+    asyncio.run(
+        app._preview_selected_package_file(
+            "demo",
+            entry,
+            "info/about.json",
+            sha256=bytes.fromhex("11" * 32),
+        )
+    )
 
     assert len(pushed) == 1
     assert isinstance(pushed[0], FilePreviewScreen)
@@ -3074,6 +4368,16 @@ def test_preview_selected_package_file_skips_fetch_when_cached_size_is_too_large
     assert pushed[0]._title == "info/about.json (293.0 KiB)"
     assert "File too large to preview in-app" in pushed[0]._content
     assert "300,000 bytes" in pushed[0]._content
+
+
+def test_file_action_metadata_lines_formats_sha256() -> None:
+    rendered = CondaMetadataTui._file_action_metadata_lines(
+        sha256=bytes.fromhex("ab" * 32)
+    )
+
+    assert rendered == (
+        "SHA256: abababababababababababababababababababababababababababababababab",
+    )
 
 
 def test_preview_content_rejects_binary_files() -> None:
@@ -3127,11 +4431,40 @@ def test_file_action_screen_uses_plain_static_text() -> None:
     async def _run() -> None:
         app = _HostApp()
         async with app.run_test() as pilot:
-            screen = FileActionScreen("info/[about].json")
+            screen = FileActionScreen(
+                "info/[about].json",
+                actions=(
+                    FileActionOption(action="preview", label="Preview"),
+                    FileActionOption(action="download", label="Download"),
+                ),
+                metadata_lines=(
+                    "SHA256: abababababababababababababababababababababababababababababababab",
+                ),
+            )
             app.push_screen(screen)
             await pilot.pause()
 
             assert screen.query_one("#file-action-path")._render_markup is False
+            assert screen.query_one("#file-action-metadata")._render_markup is False
+
+    asyncio.run(_run())
+
+
+def test_download_path_screen_uses_plain_static_text() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = DownloadPathScreen(
+                "info/[about].json",
+                default_destination="info/[about].json",
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            assert screen.query_one("#download-path-file")._render_markup is False
 
     asyncio.run(_run())
 
@@ -3252,12 +4585,15 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
     assert app._download_in_progress is False
     assert main_panel.subtitle_history == []
     assert status.updates[-1] == "0 entries across 0 platform."
+    footer_updates = [
+        value.plain if isinstance(value, Text) else value for value in footer.updates
+    ]
     assert (
-        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Downloading {entry.file_name}... | Help: ?"
-        in footer.updates
+        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Downloading {entry.file_name}... | Help: ?"
+        in footer_updates
     )
     assert (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Download: d | Help: ?"
-        in footer.updates
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        in footer_updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]

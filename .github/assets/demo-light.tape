@@ -62,13 +62,28 @@ Sleep 3
 Enter
 Sleep 3s
 
-Type "c"
+# compare view
+Type "m"
 Sleep 1s
-Backspace 11
-Type@250ms "bioconda" Enter
-Sleep 3s
-
-Down@500ms 5 Enter
-Sleep 1s
+Backspace 1
+Type@250ms "polars=1.39.*" Enter
+Sleep 2s
 Down@500ms 2
+Sleep 1s
+Type "C"
+Sleep 1s
+Down@500ms 3
+Sleep 1s
+Type "C"
+Sleep 3s
+Tab
+Sleep 1s
+Type "]"
+Sleep 2s
+Tab
+Sleep 1s
+Down@500ms 3
+Enter
+Sleep 1s
+Enter
 Sleep 5s

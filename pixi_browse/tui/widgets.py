@@ -1,22 +1,38 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, cast
 
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
+from rich import box
+from rich.console import RenderableType
 from rich.style import Style
+from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
 
-from pixi_browse.models import DependencyTab, VersionDetailsData
-from pixi_browse.rendering import format_human_byte_size
+from pixi_browse.models import (
+    CompareFileRow,
+    CompareRow,
+    CompareSelection,
+    DependencyTab,
+    VersionArtifactData,
+    VersionCompareData,
+)
+from pixi_browse.rendering import (
+    format_human_byte_size,
+    format_version_details_metadata_lines,
+    format_version_details_run_exports,
+)
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -28,6 +44,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 
 
 @dataclass(frozen=True)
@@ -46,12 +63,27 @@ class FileListEntry:
     label: str
     path: str | None
     size_in_bytes: int | None = None
+    sha256: bytes | None = None
+
+
+@dataclass(frozen=True)
+class CompareFileListEntry:
+    option: Text
+    row: CompareFileRow
 
 
 EMPTY_MATCHSPEC_RESULT = Empty()
 
 
 FileAction = Literal["download", "preview"]
+FileActionSource = Literal["default", "left", "right"]
+
+
+@dataclass(frozen=True)
+class FileActionOption:
+    action: FileAction
+    label: str
+    source: FileActionSource = "default"
 
 
 class DetailOptionList(OptionList):
@@ -64,12 +96,18 @@ class DetailSection(Vertical):
         title: str,
         index: int,
         *,
+        on_activate: Callable[[int], None],
+        on_select_dependency_tab: Callable[[DependencyTab], None] | None = None,
         show_tabs: bool = False,
         use_option_list: bool = False,
+        id_prefix: str = "detail",
     ) -> None:
         super().__init__(classes="detail-section")
         self._index = index
         self._use_option_list = use_option_list
+        self._id_prefix = id_prefix
+        self._on_activate = on_activate
+        self._on_select_dependency_tab = on_select_dependency_tab
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
@@ -77,47 +115,46 @@ class DetailSection(Vertical):
     def compose(self) -> ComposeResult:
         if self._use_option_list:
             yield DetailOptionList(
-                id=f"detail-option-list-{self._index}",
+                id=f"{self._id_prefix}-option-list-{self._index}",
                 classes="detail-option-list",
                 markup=False,
             )
             return
 
-        with VerticalScroll(id=f"detail-scroll-{self._index}", classes="detail-scroll"):
-            yield Static(id=f"detail-body-{self._index}", classes="detail-body")
+        with VerticalScroll(
+            id=f"{self._id_prefix}-scroll-{self._index}", classes="detail-scroll"
+        ):
+            yield Static(
+                id=f"{self._id_prefix}-body-{self._index}",
+                classes="detail-body",
+            )
 
     def on_click(self, event: Click) -> None:
         style = event.style
         meta = style.meta if style is not None else None
         click_meta = meta.get("@click") if meta is not None else None
         if click_meta is not None:
-            action_name, args = click_meta
-            if action_name == "app.select_dependency_tab":
-                self.app.query_one(
-                    "#version-details-view", VersionDetailsView
-                ).select_dependency_tab(
-                    *args,
-                    focus_main_panel=False,
-                )
-                event.stop()
-                return
-        self.app.query_one(
-            "#version-details-view", VersionDetailsView
-        ).activate_section(
-            self._index,
-            focus_main_panel=True,
-        )
+            event.stop()
+            return
+        self._on_activate(self._index)
         event.stop()
+
+    def action_select_dependency_tab(self, tab: DependencyTab) -> None:
+        if self._on_select_dependency_tab is None:
+            return
+        self._on_select_dependency_tab(tab)
 
     def update_header(self, title: str | Text) -> None:
         self.border_title = title
 
-    def update_body(self, body: str | Text) -> None:
-        self.query_one(f"#detail-body-{self._index}", Static).update(body)
+    def update_body(self, body: RenderableType) -> None:
+        self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
 
-    def update_options(self, labels: list[str], *, highlighted: int = 0) -> None:
+    def update_options(
+        self, labels: list[str | Text | Option], *, highlighted: int = 0
+    ) -> None:
         option_list = self.query_one(
-            f"#detail-option-list-{self._index}", DetailOptionList
+            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
         )
         option_list.clear_options()
         option_list.add_options(labels)
@@ -129,30 +166,32 @@ class DetailSection(Vertical):
         self.set_class(not active, "-collapsed")
 
     def scroll_body_home(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_home(
-            animate=False,
-            immediate=True,
-            x_axis=False,
-        )
+        self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        ).scroll_home(animate=False, immediate=True, x_axis=False)
 
     def scroll_body_end(self) -> None:
-        self.query_one(f"#detail-scroll-{self._index}", VerticalScroll).scroll_end(
-            animate=False
-        )
+        self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        ).scroll_end(animate=False)
 
     def scroll_body_by(self, delta: float) -> None:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        scroll = self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        )
         scroll.scroll_to(y=scroll.scroll_y + delta, animate=False)
 
     def page_step(self) -> int:
-        scroll = self.query_one(f"#detail-scroll-{self._index}", VerticalScroll)
+        scroll = self.query_one(
+            f"#{self._id_prefix}-scroll-{self._index}", VerticalScroll
+        )
         return max(1, scroll.size.height)
 
 
 class VersionDetailsView(Vertical):
     def __init__(self) -> None:
-        super().__init__(id="version-details-view")
-        self._details: VersionDetailsData | None = None
+        super().__init__(id="version-details-view", classes="detail-view")
+        self._details: VersionArtifactData | None = None
         self._active_section = 0
         self._dependency_tab_index = 0
         self._dependency_entries: dict[
@@ -168,11 +207,27 @@ class VersionDetailsView(Vertical):
         self._pane_selected = False
 
     def compose(self) -> ComposeResult:
-        yield DetailSection("Metadata", 0)
-        yield DetailSection("Dependencies", 1, show_tabs=True, use_option_list=True)
-        yield DetailSection("Files", 2, use_option_list=True)
+        yield DetailSection(
+            "Metadata",
+            0,
+            on_activate=self._activate_section_from_click,
+        )
+        yield DetailSection(
+            "Dependencies",
+            1,
+            on_activate=self._activate_section_from_click,
+            on_select_dependency_tab=self._select_dependency_tab_from_click,
+            show_tabs=True,
+            use_option_list=True,
+        )
+        yield DetailSection(
+            "Files",
+            2,
+            on_activate=self._activate_section_from_click,
+            use_option_list=True,
+        )
 
-    def set_details(self, details: VersionDetailsData) -> None:
+    def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
         self._file_highlighted = 0
@@ -185,12 +240,19 @@ class VersionDetailsView(Vertical):
 
     def set_pane_selected(self, selected: bool) -> None:
         self._pane_selected = selected
+        self.set_class(selected, "-pane-selected")
         self._apply_section_state()
 
     def activate_section(self, index: int, *, focus_main_panel: bool = False) -> None:
         self.set_active_section(index)
         if focus_main_panel:
             self.app.query_one("#main-panel", MainPanel).focus()
+
+    def _activate_section_from_click(self, index: int) -> None:
+        self.activate_section(index, focus_main_panel=True)
+
+    def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
+        self.select_dependency_tab(tab, focus_main_panel=True)
 
     def cycle_active_section(self, direction: int) -> None:
         self._active_section = (self._active_section + direction) % 3
@@ -299,6 +361,19 @@ class VersionDetailsView(Vertical):
             return None
         return self.file_size_at(highlighted)
 
+    def file_sha256_at(self, index: int) -> bytes | None:
+        entries = self._current_file_entries()
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].sha256
+
+    def selected_file_sha256(self) -> bytes | None:
+        option_list = self.query_one("#detail-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_sha256_at(highlighted)
+
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
 
@@ -319,7 +394,9 @@ class VersionDetailsView(Vertical):
             return
 
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body("\n".join(self._details.metadata_lines))
+        self._section(0).update_body(
+            "\n".join(format_version_details_metadata_lines(self._details))
+        )
 
         self._refresh_dependency_section()
 
@@ -353,7 +430,9 @@ class VersionDetailsView(Vertical):
             return self._details.dependencies or ("No dependencies.",)
         if tab == "constraints":
             return self._details.constraints or ("No constraints.",)
-        return self._details.run_exports or ("No run exports.",)
+        return format_version_details_run_exports(self._details.run_exports) or (
+            "No run exports.",
+        )
 
     def _current_dependency_entries(self) -> tuple[DependencyListEntry, ...]:
         return self._dependency_entries[self._active_dependency_tab()]
@@ -410,12 +489,11 @@ class VersionDetailsView(Vertical):
                     ),
                     path=package_file.path,
                     size_in_bytes=package_file.size_in_bytes,
+                    sha256=package_file.sha256,
                 )
                 for package_file in self._details.file_paths
             )
-        return tuple(
-            FileListEntry(label=line, path=None) for line in self._details.files
-        )
+        return (FileListEntry(label="No files listed.", path=None),)
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-2", DetailOptionList)
@@ -443,7 +521,10 @@ class VersionDetailsView(Vertical):
             labels = {
                 "dependencies": f"Dependencies ({len(self._details.dependencies)})",
                 "constraints": f"Constraints ({len(self._details.constraints)})",
-                "run_exports": f"Run exports ({len(self._details.run_exports)})",
+                "run_exports": (
+                    "Run exports "
+                    f"({len(format_version_details_run_exports(self._details.run_exports))})"
+                ),
             }
         tab_text = Text()
         for index, tab in enumerate(DEPENDENCY_TABS):
@@ -485,14 +566,7 @@ class VersionDetailsView(Vertical):
             else INACTIVE_TAB_STYLE
         )
         text.stylize(
-            Style(
-                meta={
-                    "@click": (
-                        "app.select_dependency_tab",
-                        (tab,),
-                    )
-                }
-            )
+            Style(meta={"@click": (DETAIL_SELECT_DEPENDENCY_TAB_ACTION, (tab,))})
         )
         return text
 
@@ -548,7 +622,7 @@ class MainPanel(Vertical):
         self.query_one("#main-placeholder", Static).update(content)
         self.query_one("#version-details-view", VersionDetailsView).display = False
 
-    def show_version_details(self, details: VersionDetailsData) -> None:
+    def show_version_details(self, details: VersionArtifactData) -> None:
         placeholder = self.query_one("#main-placeholder-scroll", VerticalScroll)
         placeholder.display = False
         placeholder.border_title = ""
@@ -626,6 +700,11 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).selected_file_size_in_bytes()
 
+    def selected_file_sha256(self) -> bytes | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).selected_file_sha256()
+
     def file_path_at(self, index: int) -> str | None:
         return self.query_one("#version-details-view", VersionDetailsView).file_path_at(
             index
@@ -635,6 +714,11 @@ class MainPanel(Vertical):
         return self.query_one("#version-details-view", VersionDetailsView).file_size_at(
             index
         )
+
+    def file_sha256_at(self, index: int) -> bytes | None:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).file_sha256_at(index)
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -786,6 +870,577 @@ class MainPanel(Vertical):
             event.stop()
 
 
+class CompareDetailsView(Vertical):
+    can_focus = True
+    _vim_g_pending = False
+
+    def __init__(self, compare_data: VersionCompareData) -> None:
+        super().__init__(
+            id="compare-details-view", classes="detail-view -pane-selected"
+        )
+        self._compare_data = compare_data
+        self._active_section = 0
+        self._dependency_tab_index = 0
+        self._file_entries: tuple[CompareFileListEntry, ...] = ()
+        self._file_highlighted = 0
+        self._pane_selected = True
+
+    def compose(self) -> ComposeResult:
+        yield DetailSection(
+            "Metadata",
+            0,
+            on_activate=self.set_active_section,
+            id_prefix="compare",
+        )
+        yield DetailSection(
+            "Dependencies",
+            1,
+            on_activate=self.set_active_section,
+            on_select_dependency_tab=self._select_dependency_tab_from_click,
+            id_prefix="compare",
+        )
+        yield DetailSection(
+            "Files",
+            2,
+            on_activate=self.set_active_section,
+            use_option_list=True,
+            id_prefix="compare",
+        )
+
+    def on_mount(self) -> None:
+        self._refresh_sections()
+
+    def set_compare_data(self, compare_data: VersionCompareData) -> None:
+        self._compare_data = compare_data
+        self._file_highlighted = 0
+        self._refresh_sections()
+
+    def set_active_section(self, index: int) -> None:
+        self._active_section = max(0, min(index, 2))
+        self._apply_section_state()
+
+    def cycle_active_section(self, direction: int) -> None:
+        self._active_section = (self._active_section + direction) % 3
+        self._apply_section_state()
+
+    def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
+        self.select_dependency_tab(tab, focus_view=True)
+
+    def select_dependency_tab(
+        self, tab: DependencyTab, *, focus_view: bool = False
+    ) -> None:
+        self.set_active_section(1)
+        self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
+        self._refresh_dependency_section()
+        if focus_view:
+            self.focus()
+
+    def cycle_dependency_tab(self, direction: int) -> None:
+        self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
+            DEPENDENCY_TABS
+        )
+        self._refresh_dependency_section()
+
+    def scroll_active(self, delta: float) -> None:
+        if self.file_section_is_active():
+            self._move_file_highlight(int(delta))
+            return
+        self._section(self._active_section).scroll_body_by(delta)
+
+    def scroll_home_active(self) -> None:
+        if self.file_section_is_active():
+            self._set_file_highlight(0)
+            return
+        self._section(self._active_section).scroll_body_home()
+
+    def scroll_end_active(self) -> None:
+        if self.file_section_is_active():
+            if self._file_entries:
+                self._set_file_highlight(len(self._file_entries) - 1)
+            return
+        self._section(self._active_section).scroll_body_end()
+
+    def active_page_step(self) -> int:
+        if self.file_section_is_active():
+            option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+            return max(1, option_list.size.height)
+        return self._section(self._active_section).page_step()
+
+    def file_section_is_active(self) -> bool:
+        return self._active_section == 2
+
+    def selected_file_row(self) -> CompareFileRow | None:
+        option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted
+        if highlighted is None:
+            return None
+        return self.file_row_at(highlighted)
+
+    def file_row_at(self, index: int) -> CompareFileRow | None:
+        entries = self._file_entries
+        if index < 0 or index >= len(entries):
+            return None
+        return entries[index].row
+
+    def _section(self, index: int) -> DetailSection:
+        return list(self.query(DetailSection))[index]
+
+    def _active_dependency_tab(self) -> DependencyTab:
+        return DEPENDENCY_TABS[self._dependency_tab_index]
+
+    def _apply_section_state(self) -> None:
+        for index, section in enumerate(self.query(DetailSection)):
+            section.set_active(index == self._active_section)
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(1).update_header(self._render_dependency_header())
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+
+    def _refresh_sections(self) -> None:
+        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(0).update_body(self._render_metadata_body())
+        self._refresh_dependency_section()
+        self._section(2).update_header(self._render_section_header(2, "Files"))
+        self._file_entries = self._file_entries_for_compare_data()
+        self._section(2).update_options(
+            [Option(entry.option) for entry in self._file_entries],
+            highlighted=self._file_highlighted,
+        )
+        self._apply_section_state()
+
+    def _refresh_dependency_section(self) -> None:
+        section = self._section(1)
+        section.update_header(self._render_dependency_header())
+        section.update_body(self._render_dependency_body(self._active_dependency_tab()))
+
+    def _render_section_header(self, index: int, label: str) -> Text:
+        return Text(
+            f"[{index + 1}] {label}",
+            style=(
+                ACTIVE_SECTION_TITLE_STYLE
+                if self._pane_selected and index == self._active_section
+                else INACTIVE_SECTION_TITLE_STYLE
+            ),
+        )
+
+    def _render_dependency_header(self) -> Text:
+        header = self._render_section_header(1, "")
+        header.append_text(self._render_dependency_tabs())
+        return header
+
+    def _render_dependency_tabs(self) -> Text:
+        labels = {
+            "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
+            "constraints": f"Constraints ({len(self._compare_data.constraints)})",
+            "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
+        }
+        text = Text()
+        for index, tab in enumerate(DEPENDENCY_TABS):
+            if index:
+                text.append(" - ", style=INACTIVE_TAB_STYLE)
+            text.append_text(
+                self._render_clickable_dependency_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_dependency_tab(),
+                    pane_active=self._pane_selected and self._active_section == 1,
+                )
+            )
+        return text
+
+    @staticmethod
+    def _render_clickable_dependency_tab(
+        tab: DependencyTab, label: str, *, active: bool, pane_active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(
+            Style(meta={"@click": (DETAIL_SELECT_DEPENDENCY_TAB_ACTION, (tab,))})
+        )
+        return text
+
+    def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareRow, ...]:
+        if tab == "dependencies":
+            return self._compare_data.dependencies
+        if tab == "constraints":
+            return self._compare_data.constraints
+        return self._compare_data.run_exports
+
+    def _render_metadata_body(self) -> RenderableType:
+        return self._render_compare_table(
+            self._compare_data.metadata_rows,
+            label_title="Field",
+            empty_message="No metadata available.",
+            show_label_column=True,
+        )
+
+    def _render_dependency_body(self, tab: DependencyTab) -> RenderableType:
+        return self._render_compare_table(
+            self._dependency_lines(tab),
+            empty_message="No dependency data.",
+            show_label_column=False,
+        )
+
+    @staticmethod
+    def _row_style(row: CompareRow) -> tuple[str, str]:
+        if row.changed:
+            return "red", "green"
+        return "white", "white"
+
+    @staticmethod
+    def _file_row_style(row: CompareFileRow) -> str:
+        if not row.changed:
+            return "#5c6370"
+        if row.left and row.right:
+            return "#7a5c00"
+        if row.left:
+            return "#8b1e1e"
+        return "#1f5f2b"
+
+    def _file_entries_for_compare_data(self) -> tuple[CompareFileListEntry, ...]:
+        if not self._compare_data.files:
+            return (
+                CompareFileListEntry(
+                    option=Text("No files listed.", style="dim"),
+                    row=CompareFileRow(
+                        label="No files listed.",
+                        left="",
+                        right="",
+                        changed=False,
+                    ),
+                ),
+            )
+
+        return tuple(
+            CompareFileListEntry(
+                option=self._render_compare_file_option(row),
+                row=row,
+            )
+            for row in self._compare_data.files
+        )
+
+    def _render_compare_file_option(self, row: CompareFileRow) -> Text:
+        text = Text(self._compare_file_prefix(row), style=self._file_row_style(row))
+        text.append(row.label, style=self._file_row_style(row))
+        suffix = self._compare_file_suffix(row)
+        if suffix:
+            text.append(suffix, style="dim")
+        return text
+
+    @staticmethod
+    def _compare_file_prefix(row: CompareFileRow) -> str:
+        if not row.changed:
+            return "= "
+        if row.left and row.right:
+            return "~ "
+        if row.left:
+            return "- "
+        return "+ "
+
+    @staticmethod
+    def _compare_file_suffix(row: CompareFileRow) -> str:
+        left_size = row.left_file.size_in_bytes if row.left_file is not None else None
+        right_size = (
+            row.right_file.size_in_bytes if row.right_file is not None else None
+        )
+        if row.left_file is not None and row.right_file is not None:
+            if not row.changed and left_size == right_size:
+                return (
+                    f" ({format_human_byte_size(left_size)})"
+                    if left_size is not None
+                    else ""
+                )
+            left_label = (
+                format_human_byte_size(left_size)
+                if left_size is not None
+                else "unknown"
+            )
+            right_label = (
+                format_human_byte_size(right_size)
+                if right_size is not None
+                else "unknown"
+            )
+            return f" [L: {left_label} | R: {right_label}]"
+        if row.left_file is not None:
+            return (
+                f" [left: {format_human_byte_size(left_size)}]"
+                if left_size is not None
+                else " [left]"
+            )
+        if row.right_file is not None:
+            return (
+                f" [right: {format_human_byte_size(right_size)}]"
+                if right_size is not None
+                else " [right]"
+            )
+        return ""
+
+    def _move_file_highlight(self, delta: int) -> None:
+        option_list = self.query_one("#compare-option-list-2", DetailOptionList)
+        highlighted = option_list.highlighted or 0
+        self._set_file_highlight(highlighted + delta)
+
+    def _set_file_highlight(self, index: int) -> None:
+        if not self._file_entries:
+            return
+        highlighted = max(0, min(index, len(self._file_entries) - 1))
+        self._file_highlighted = highlighted
+        self.query_one(
+            "#compare-option-list-2", DetailOptionList
+        ).highlighted = highlighted
+
+    def _render_compare_table(
+        self,
+        rows: tuple[CompareRow, ...],
+        *,
+        empty_message: str,
+        show_label_column: bool,
+        label_title: str = "",
+    ) -> RenderableType:
+        if not rows:
+            return Text(empty_message, style="dim")
+
+        table = Table(
+            box=box.SIMPLE,
+            expand=True,
+            show_edge=False,
+            pad_edge=False,
+            collapse_padding=True,
+        )
+        if show_label_column:
+            table.add_column(label_title, style="bold", ratio=1)
+        table.add_column("Left", ratio=2)
+        table.add_column("Right", ratio=2)
+
+        for row in rows:
+            left_style, right_style = self._row_style(row)
+            cells: list[RenderableType] = []
+            if show_label_column:
+                cells.append(row.label)
+            cells.append(Text(row.left, style=left_style))
+            cells.append(Text(row.right, style=right_style))
+            table.add_row(*cells)
+        return table
+
+    def on_key(self, event: Key) -> None:
+        page_height = self.active_page_step()
+        character = event.character
+
+        if event.key == "tab":
+            self.cycle_active_section(1)
+            event.stop()
+            return
+        if event.key in {"shift+tab", "backtab"}:
+            self.cycle_active_section(-1)
+            event.stop()
+            return
+        if character in {"1", "2", "3"}:
+            self.set_active_section(int(character) - 1)
+            event.stop()
+            return
+        if character == "[" and self._active_section == 1:
+            self.cycle_dependency_tab(-1)
+            event.stop()
+            return
+        if character == "]" and self._active_section == 1:
+            self.cycle_dependency_tab(1)
+            event.stop()
+            return
+        if character == "g":
+            if self._vim_g_pending:
+                self.scroll_home_active()
+                self._vim_g_pending = False
+            else:
+                self._vim_g_pending = True
+            event.stop()
+            return
+        if character == "G":
+            self.scroll_end_active()
+            self._vim_g_pending = False
+            event.stop()
+            return
+
+        self._vim_g_pending = False
+
+        if event.key in {"up", "k"}:
+            self.scroll_active(-1)
+            event.stop()
+            return
+        if event.key in {"down", "j"}:
+            self.scroll_active(1)
+            event.stop()
+            return
+        if event.key in {"pageup", "ctrl+u"}:
+            self.scroll_active(-page_height)
+            event.stop()
+            return
+        if event.key in {"pagedown", "ctrl+d"}:
+            self.scroll_active(page_height)
+            event.stop()
+            return
+        if event.key == "home":
+            self.scroll_home_active()
+            event.stop()
+            return
+        if event.key == "end":
+            self.scroll_end_active()
+            event.stop()
+
+
+class CompareScreen(Screen[None]):
+    DEFAULT_CSS = """
+    #compare-root {
+        height: 1fr;
+        padding: 0;
+    }
+
+    #compare-title {
+        height: auto;
+        padding: 0 0 1 0;
+        text-style: bold;
+    }
+
+    #compare-footer {
+        height: auto;
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    BINDINGS = [
+        Binding("tab", "next_section", show=False, priority=True),
+        Binding("shift+tab", "previous_section", show=False, priority=True),
+        Binding("x", "swap_sides", show=False),
+        Binding("escape", "back", show=False),
+        Binding("q", "quit", show=False),
+    ]
+
+    def __init__(self, compare_data: VersionCompareData) -> None:
+        super().__init__()
+        self._compare_data = compare_data
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="compare-root"):
+            yield Static(self._title_text(), id="compare-title", markup=False)
+            yield CompareDetailsView(self._compare_data)
+            yield Static(self._footer_text(), id="compare-footer", markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#compare-details-view", CompareDetailsView).focus()
+
+    def _title_text(self) -> Text:
+        left = self._selection_label(self._compare_data.left_selection)
+        right = self._selection_label(self._compare_data.right_selection)
+        title = Text()
+        title.append(left, style="red")
+        title.append(" vs ", style="white")
+        title.append(right, style="green")
+        return title
+
+    @staticmethod
+    def _footer_text() -> str:
+        return (
+            "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | "
+            "Quit: q | Help: ?"
+        )
+
+    @staticmethod
+    def _selection_label(selection: CompareSelection) -> str:
+        entry = selection.entry
+        return (
+            f"{selection.package_name} {entry.version} {entry.build} [{entry.subdir}]"
+        )
+
+    def action_next_section(self) -> None:
+        self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).cycle_active_section(1)
+
+    def action_previous_section(self) -> None:
+        self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).cycle_active_section(-1)
+
+    def action_back(self) -> None:
+        self.dismiss()
+
+    def action_quit(self) -> None:
+        self.app.exit()
+
+    @staticmethod
+    def _swap_rows(rows: tuple[CompareRow, ...]) -> tuple[CompareRow, ...]:
+        return tuple(
+            CompareRow(
+                label=row.label,
+                left=row.right,
+                right=row.left,
+                changed=row.changed,
+            )
+            for row in rows
+        )
+
+    @staticmethod
+    def _swap_file_rows(rows: tuple[CompareFileRow, ...]) -> tuple[CompareFileRow, ...]:
+        return tuple(
+            CompareFileRow(
+                label=row.label,
+                left=row.right,
+                right=row.left,
+                changed=row.changed,
+                left_file=row.right_file,
+                right_file=row.left_file,
+            )
+            for row in rows
+        )
+
+    @classmethod
+    def _swapped_compare_data(
+        cls, compare_data: VersionCompareData
+    ) -> VersionCompareData:
+        return VersionCompareData(
+            left_selection=compare_data.right_selection,
+            right_selection=compare_data.left_selection,
+            metadata_rows=cls._swap_rows(compare_data.metadata_rows),
+            dependencies=cls._swap_rows(compare_data.dependencies),
+            constraints=cls._swap_rows(compare_data.constraints),
+            run_exports=cls._swap_rows(compare_data.run_exports),
+            files=cls._swap_file_rows(compare_data.files),
+        )
+
+    def file_section_is_active(self) -> bool:
+        return self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).file_section_is_active()
+
+    def selected_file_row(self) -> CompareFileRow | None:
+        return self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).selected_file_row()
+
+    def selection_for_source(self, source: FileActionSource) -> CompareSelection:
+        if source == "left":
+            return self._compare_data.left_selection
+        if source == "right":
+            return self._compare_data.right_selection
+        raise RuntimeError(f"Unsupported compare file source: {source}")
+
+    def action_swap_sides(self) -> None:
+        self._compare_data = self._swapped_compare_data(self._compare_data)
+        self.query_one("#compare-title", Static).update(self._title_text())
+        self.query_one("#compare-details-view", CompareDetailsView).set_compare_data(
+            self._compare_data
+        )
+        self.query_one("#compare-details-view", CompareDetailsView).focus()
+
+    async def action_dismiss(self, result: None = None) -> None:
+        self.dismiss(result)
+
+
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
         from pixi_browse.tui.app import CondaMetadataTui
@@ -907,7 +1562,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         self.dismiss(result)
 
 
-class FileActionScreen(ModalScreen[FileAction | None]):
+class FileActionScreen(ModalScreen[FileActionOption | None]):
     DEFAULT_CSS = """
     FileActionScreen {
         align: center middle;
@@ -930,6 +1585,11 @@ class FileActionScreen(ModalScreen[FileAction | None]):
 
     #file-action-path {
         color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #file-action-metadata {
+        color: $text;
         margin-bottom: 1;
     }
 
@@ -956,21 +1616,33 @@ class FileActionScreen(ModalScreen[FileAction | None]):
         Binding("q", "dismiss", show=False),
     ]
 
-    _ACTIONS: tuple[tuple[FileAction, str], ...] = (
-        ("preview", "Preview"),
-        ("download", "Download as file"),
-    )
-
-    def __init__(self, file_path: str) -> None:
+    def __init__(
+        self,
+        file_path: str,
+        *,
+        actions: tuple[FileActionOption, ...] | None = None,
+        metadata_lines: tuple[str, ...] = (),
+    ) -> None:
         super().__init__()
         self._file_path = file_path
+        self._actions = actions or (
+            FileActionOption(action="preview", label="Preview"),
+            FileActionOption(action="download", label="Download as file"),
+        )
+        self._metadata_lines = metadata_lines
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
             yield Static(self._file_path, id="file-action-path", markup=False)
+            if self._metadata_lines:
+                yield Static(
+                    "\n".join(self._metadata_lines),
+                    id="file-action-metadata",
+                    markup=False,
+                )
             yield OptionList(
-                *(label for _, label in self._ACTIONS),
+                *(action.label for action in self._actions),
                 id="file-action-list",
                 markup=False,
             )
@@ -981,10 +1653,111 @@ class FileActionScreen(ModalScreen[FileAction | None]):
     @on(OptionList.OptionSelected, "#file-action-list")
     def _select_action(self, event: OptionList.OptionSelected) -> None:
         event.stop()
-        action, _label = self._ACTIONS[event.option_index]
+        action = self._actions[event.option_index]
         self.dismiss(action)
 
-    async def action_dismiss(self, result: FileAction | None = None) -> None:
+    async def action_dismiss(self, result: FileActionOption | None = None) -> None:
+        self.dismiss(result)
+
+
+class DownloadPathScreen(ModalScreen[str | None]):
+    DEFAULT_CSS = """
+    DownloadPathScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #download-path-dialog {
+        width: 88;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #download-path-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #download-path-file {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #download-path-input {
+        border: tall #ec4899;
+    }
+
+    #download-path-input:focus {
+        border: tall #ec4899;
+    }
+
+    #download-path-input > .input--selection {
+        background: #ec4899;
+        color: #ffffff;
+    }
+
+    #download-path-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #download-path-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, file_path: str, *, default_destination: str) -> None:
+        super().__init__()
+        self._file_path = file_path
+        self._default_destination = default_destination
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="download-path-dialog"):
+            yield Static("Download File", id="download-path-title")
+            yield Static(self._file_path, id="download-path-file", markup=False)
+            yield Input(
+                value=self._default_destination,
+                select_on_focus=True,
+                id="download-path-input",
+            )
+            yield Static(
+                "Edit the destination path and press Enter to download.",
+                id="download-path-help",
+            )
+            yield Static("", id="download-path-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#download-path-input", Input).focus()
+
+    def _destination_value(self) -> str | None:
+        destination = self.query_one("#download-path-input", Input).value.strip()
+        if destination:
+            self.query_one("#download-path-error", Static).update("")
+            return destination
+        self.query_one("#download-path-error", Static).update(
+            "Destination path cannot be empty."
+        )
+        return None
+
+    @on(Input.Submitted, "#download-path-input")
+    def _submit_destination(self, event: Input.Submitted) -> None:
+        event.stop()
+        destination = self._destination_value()
+        if destination is None:
+            return
+        self.dismiss(destination)
+
+    async def action_dismiss(self, result: str | None = None) -> None:
         self.dismiss(result)
 
 
