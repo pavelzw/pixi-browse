@@ -3,12 +3,14 @@ environments:
   default:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
+    - url: https://prefix.dev/skill-forge/
     options:
       pypi-prerelease-mode: if-necessary-or-explicit
     packages:
       linux-64:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
+      - conda: https://prefix.dev/skill-forge/noarch/agent-skill-textual-0.0.1-h4616a5c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.15.3-hb03c661_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/annotated-doc-0.0.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/aom-3.9.1-hac33072_0.conda
@@ -189,6 +191,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/python-librt-0.9.0-py314h0f05182_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/pyyaml-6.0.3-py314h67df5f8_1.conda
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=skills%2Fpy-rattler&branch=skills#cc3e483f1e2ffcf82993cb83cc214dce052b00be
       - conda: https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-2.33.1-pyhcf101f3_0.conda
@@ -249,6 +252,7 @@ environments:
       - conda: .
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
+      - conda: https://prefix.dev/skill-forge/noarch/agent-skill-textual-0.0.1-h4616a5c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/annotated-doc-0.0.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/aom-3.9.1-hf036a51_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_5.conda
@@ -394,6 +398,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/python-librt-0.9.0-py314h0b69929_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/pyyaml-6.0.3-py314h10d0514_1.conda
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=skills%2Fpy-rattler&branch=skills#cc3e483f1e2ffcf82993cb83cc214dce052b00be
       - conda: https://conda.anaconda.org/conda-forge/osx-64/readline-8.3-h68b038d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-2.33.1-pyhcf101f3_0.conda
@@ -437,6 +442,7 @@ environments:
       - conda: .
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
+      - conda: https://prefix.dev/skill-forge/noarch/agent-skill-textual-0.0.1-h4616a5c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/annotated-doc-0.0.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/aom-3.9.1-h7bae524_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_5.conda
@@ -579,6 +585,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-librt-0.9.0-py314ha14b1ff_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/pyyaml-6.0.3-py314h6e9b3f0_1.conda
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=skills%2Fpy-rattler&branch=skills#cc3e483f1e2ffcf82993cb83cc214dce052b00be
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h46df422_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-2.33.1-pyhcf101f3_0.conda
@@ -622,6 +629,7 @@ environments:
       - conda: .
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
+      - conda: https://prefix.dev/skill-forge/noarch/agent-skill-textual-0.0.1-h4616a5c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/annotated-doc-0.0.4-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/aom-3.9.1-he0c23c2_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/backports-1.0-pyhd8ed1ab_5.conda
@@ -738,6 +746,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/pywin32-ctypes-0.2.3-py314h86ab7b2_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/pyyaml-6.0.3-py314h2359020_1.conda
+      - conda: git+https://github.com/pavelzw/rattler?subdirectory=skills%2Fpy-rattler&branch=skills#cc3e483f1e2ffcf82993cb83cc214dce052b00be
       - conda: https://conda.anaconda.org/conda-forge/noarch/readme_renderer-44.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-2.33.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/requests-toolbelt-1.0.0-pyhd8ed1ab_1.conda
@@ -784,6 +793,7 @@ environments:
   py313:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
+    - url: https://prefix.dev/skill-forge/
     options:
       pypi-prerelease-mode: if-necessary-or-explicit
     packages:
@@ -1362,6 +1372,7 @@ environments:
   py314:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
+    - url: https://prefix.dev/skill-forge/
     options:
       pypi-prerelease-mode: if-necessary-or-explicit
     packages:
@@ -1961,6 +1972,25 @@ packages:
   license_family: MIT
   size: 8191
   timestamp: 1744137672556
+- conda: git+https://github.com/pavelzw/rattler?subdirectory=skills%2Fpy-rattler&branch=skills#cc3e483f1e2ffcf82993cb83cc214dce052b00be
+  name: agent-skill-py-rattler
+  version: 0.23.2
+  build: h4616a5c_0
+  subdir: noarch
+  variants:
+    target_platform: noarch
+  constrains:
+  - py-rattler ==0.23.2
+  channel: null
+  license: BSD-3-Clause
+- conda: https://prefix.dev/skill-forge/noarch/agent-skill-textual-0.0.1-h4616a5c_0.conda
+  sha256: 1a4125e6429f5be2c13940b4c9ab3e11fa7b9152b2c4809b6eb86d3a71d7ef88
+  md5: 4e9eefaad6b99bee601b68cf41a538c1
+  constrains:
+  - textual >=8.0.0,<9
+  license: MIT
+  size: 45239
+  timestamp: 1776931445445
 - conda: https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.15.3-hb03c661_0.conda
   sha256: d88aa7ae766cf584e180996e92fef2aa7d8e0a0a5ab1d4d49c32390c1b5fff31
   md5: dcdc58c15961dbf17a0621312b01f5cb
