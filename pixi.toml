@@ -46,6 +46,7 @@ check-wheel = "twine check dist/*"
 [feature.dev.dependencies]
 agent-skill-textual = "*"
 # agent-skill-py-rattler = "*"
+agent-skill-py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "skills", subdirectory = "skills/py-rattler" }
 
 [feature.lint.dependencies]
 lefthook = "*"
