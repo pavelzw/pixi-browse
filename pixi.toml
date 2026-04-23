@@ -1,6 +1,6 @@
 [workspace]
 name = "pixi-browse"
-channels = ["conda-forge"]
+channels = ["conda-forge", "https://prefix.dev/skill-forge"]
 platforms = ["osx-arm64", "osx-64", "linux-64", "win-64"]
 preview = ["pixi-build"]
 
@@ -43,6 +43,10 @@ twine = ">=6"
 build-wheel = "python -m build --no-isolation ."
 check-wheel = "twine check dist/*"
 
+[feature.dev.dependencies]
+agent-skill-textual = "*"
+# agent-skill-py-rattler = "*"
+
 [feature.lint.dependencies]
 lefthook = "*"
 docformatter = "*"
@@ -62,6 +66,6 @@ python = "3.13.*"
 python = "3.14.*"
 
 [environments]
-default = ["test", "build", "lint"]
+default = ["test", "build", "lint", "dev"]
 py313 = ["py313", "test"]
 py314 = ["py314", "test"]
