@@ -100,7 +100,7 @@ class CondaMetadataTui(App[None]):
         super().__init__()
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
-        self.theme = "textual-ansi"
+        self.theme = "ansi-light"
         self._client = Client.default_client()
 
         self._gateway: Gateway = create_gateway(client=self._client)
