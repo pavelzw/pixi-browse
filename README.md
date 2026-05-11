@@ -106,7 +106,6 @@ git clone https://github.com/pavelzw/pixi-browse
 cd pixi-browse
 
 pixi run pre-commit-install
-pixi run postinstall
 ```
 
 ### Running Tests
