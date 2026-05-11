@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/evilmartians/lefthook/refs/heads/master/schema.json
 output: [summary]
 templates:
-  run: run --quiet --no-progress
+  run: run --as-is --quiet --no-progress
 no_auto_install: true
 pre-commit:
   fail_on_changes: always
@@ -13,9 +13,6 @@ pre-commit:
     - group:
         parallel: true
         jobs:
-          - name: docformatter
-            glob: "*.py"
-            run: pixi {run} docformatter -i {staged_files}
           - name: ruff-check
             glob: "*.{py,pyi}"
             run: pixi {run} ruff check --fix --exit-non-zero-on-fix --force-exclude
@@ -49,7 +46,4 @@ pre-commit:
             run: pixi {run} typos --force-exclude {staged_files}
           - name: zizmor
             glob: "*.{yml,yaml}"
-            run: pixi {run} zizmor --no-progress --min-severity high --fix .
-          - name: conftest
-            glob: "Dockerfile*"
-            run: pixi {run} conftest-run {staged_files}
+            run: pixi {run} zizmor --no-progress --min-severity high --fix --offline .
