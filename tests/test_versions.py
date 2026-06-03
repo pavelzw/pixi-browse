@@ -188,14 +188,19 @@ class _FakeFooter:
 def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) -> None:
     shared_client = object()
     gateway_calls: list[object] = []
+    user_agents: list[str] = []
 
     def _fake_create_gateway(*, client: object | None = None) -> object:
         gateway_calls.append(client)
         return object()
 
+    def _fake_default_client(*, user_agent: str) -> object:
+        user_agents.append(user_agent)
+        return shared_client
+
     monkeypatch.setattr(
         "pixi_browse.tui.Client.default_client",
-        lambda: shared_client,
+        _fake_default_client,
     )
     monkeypatch.setattr(
         "pixi_browse.tui.app.create_gateway",
@@ -206,6 +211,7 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
 
     assert app._client is shared_client
     assert gateway_calls == [shared_client]
+    assert user_agents == [f"pixi-browse/{__version__}"]
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
