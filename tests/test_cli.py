@@ -1,10 +1,17 @@
-from click.utils import strip_ansi
+import re
+
 from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 from typer.testing import CliRunner
 
 import pixi_browse.__main__ as entrypoint
 from pixi_browse import __version__
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(value: str) -> str:
+    return _ANSI_ESCAPE.sub("", value)
 
 
 def test_help_includes_expected_options() -> None:
