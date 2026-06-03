@@ -10,6 +10,7 @@ demo = "vhs .github/assets/demo-dark.tape && vhs .github/assets/demo-light.tape"
 
 [exclude-newer]
 py-rattler = "0d"
+typer = "0d"
 
 [package]
 name = "pixi-browse"
