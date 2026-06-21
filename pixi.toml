@@ -7,6 +7,8 @@ preview = ["pixi-build"]
 
 [tasks]
 demo = "vhs .github/assets/demo-dark.tape && vhs .github/assets/demo-light.tape"
+dev = "textual run --dev pixi_browse/__main__.py"
+console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
 py-rattler = "0d"
@@ -27,6 +29,7 @@ py-rattler = ">=0.24.0,<0.25"
 typer = ">=0.26.5,<0.27"
 [dependencies]
 pixi-browse = { path = "." }
+textual-dev = "*"
 
 [feature.test.dependencies]
 pytest = "*"
