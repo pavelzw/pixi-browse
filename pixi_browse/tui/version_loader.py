@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import yaml
 from rattler.networking import Client
@@ -9,23 +9,37 @@ from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
+    ArtifactCacheKey,
+    ArtifactMetadata,
+    ArtifactSource,
+    LocalArtifactSource,
     PackageFile,
     PackageFilePathType,
     VersionArtifactData,
+    VersionEntry,
     VersionPreviewKey,
 )
-from pixi_browse.rendering import build_version_artifact_data
+from pixi_browse.rendering import build_artifact_data, build_version_artifact_data
 
 from .state import AboutUrls
+
+
+@dataclass(frozen=True)
+class LoadedArtifact:
+    source: ArtifactSource
+    metadata: ArtifactMetadata
+    entry: VersionEntry
+    archive: PackageArchive
+    data: VersionArtifactData
 
 
 class VersionDataLoader:
     def __init__(self, *, client: Client) -> None:
         self._client = client
-        self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
-        self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
-        self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
-        self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
+        self.archive_cache: dict[ArtifactCacheKey, PackageArchive] = {}
+        self.about_urls_cache: dict[ArtifactCacheKey, AboutUrls] = {}
+        self.paths_cache: dict[ArtifactCacheKey, list[PackageFile]] = {}
+        self.artifact_data_cache: dict[ArtifactCacheKey, VersionArtifactData] = {}
 
     def clear_caches(self) -> None:
         self.archive_cache.clear()
@@ -36,10 +50,10 @@ class VersionDataLoader:
     def restore_caches(
         self,
         *,
-        archive_cache: dict[VersionPreviewKey, PackageArchive],
-        about_urls_cache: dict[VersionPreviewKey, AboutUrls],
-        paths_cache: dict[VersionPreviewKey, list[PackageFile]],
-        artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
+        archive_cache: dict[ArtifactCacheKey, PackageArchive],
+        about_urls_cache: dict[ArtifactCacheKey, AboutUrls],
+        paths_cache: dict[ArtifactCacheKey, list[PackageFile]],
+        artifact_data_cache: dict[ArtifactCacheKey, VersionArtifactData],
     ) -> None:
         self.archive_cache.clear()
         self.archive_cache.update(archive_cache)
@@ -77,7 +91,7 @@ class VersionDataLoader:
         return str(rattler_build_version)
 
     async def get_package_paths(
-        self, preview_key: VersionPreviewKey, archive: PackageArchive
+        self, preview_key: ArtifactCacheKey, archive: PackageArchive
     ) -> list[PackageFile]:
         cached = self.paths_cache.get(preview_key)
         if cached is not None:
@@ -112,7 +126,7 @@ class VersionDataLoader:
         return paths
 
     async def get_package_archive(
-        self, preview_key: VersionPreviewKey, url: str
+        self, preview_key: ArtifactCacheKey, url: str
     ) -> PackageArchive:
         cached = self.archive_cache.get(preview_key)
         if cached is not None:
@@ -122,8 +136,20 @@ class VersionDataLoader:
         self.archive_cache[preview_key] = archive
         return archive
 
+    async def get_artifact_archive(self, source: ArtifactSource) -> PackageArchive:
+        cached = self.archive_cache.get(source.cache_key)
+        if cached is not None:
+            return cached
+
+        if isinstance(source, LocalArtifactSource):
+            archive = await PackageArchive.from_path(source.path)
+        else:
+            archive = await PackageArchive.from_url(self._client, source.url)
+        self.archive_cache[source.cache_key] = archive
+        return archive
+
     async def get_about_urls(
-        self, preview_key: VersionPreviewKey, archive: PackageArchive
+        self, preview_key: ArtifactCacheKey, archive: PackageArchive
     ) -> AboutUrls:
         cached = self.about_urls_cache.get(preview_key)
         if cached is not None:
@@ -257,3 +283,75 @@ class VersionDataLoader:
         )
         self.artifact_data_cache[preview_key] = artifact_data
         return artifact_data
+
+    async def load_artifact_source(self, source: ArtifactSource) -> LoadedArtifact:
+        archive = await self.get_artifact_archive(source)
+        index = await archive.index_json()
+        if isinstance(source, LocalArtifactSource):
+            file_name = source.path.name
+            size = source.path.stat().st_size
+        else:
+            file_name = source.display_name
+            size = None
+        if not file_name:
+            file_name = f"{index.name.source}-{index.version}-{index.build}.conda"
+
+        metadata = ArtifactMetadata(
+            name=index.name.normalized,
+            version=index.version,
+            build=index.build,
+            build_number=index.build_number,
+            subdir=index.subdir or "unknown",
+            file_name=file_name,
+            source=source,
+            dependencies=tuple(index.depends),
+            constraints=tuple(index.constrains),
+            size=size,
+            timestamp=index.timestamp,
+            license=index.license,
+            license_family=index.license_family,
+            arch=index.arch,
+            platform=index.platform,
+            features=index.features,
+            track_features=tuple(index.track_features),
+        )
+        entry = VersionEntry(
+            version=metadata.version,
+            build=metadata.build,
+            build_number=metadata.build_number,
+            subdir=metadata.subdir,
+            file_name=metadata.file_name,
+        )
+
+        cached = self.artifact_data_cache.get(source.cache_key)
+        if cached is not None:
+            return LoadedArtifact(source, metadata, entry, archive, cached)
+
+        package_paths = await self.get_package_paths(source.cache_key, archive)
+        info_files = await self.get_info_files(archive)
+        about_urls = AboutUrls()
+        run_exports: RunExportsJson | None = None
+        try:
+            about_urls = await self.get_about_urls(source.cache_key, archive)
+        except Exception:
+            pass
+        try:
+            run_exports = await self.get_run_exports(archive)
+        except Exception:
+            pass
+
+        artifact_data = build_artifact_data(
+            metadata,
+            package_paths=package_paths,
+            info_files=info_files,
+            repository_urls=about_urls.repository,
+            documentation_urls=about_urls.documentation,
+            homepage_urls=about_urls.homepage,
+            recipe_maintainers=about_urls.recipe_maintainers,
+            provenance_remote_url=about_urls.provenance_remote_url,
+            provenance_sha=about_urls.provenance_sha,
+            rattler_build_version=about_urls.rattler_build_version,
+            run_exports=run_exports,
+        )
+        self.artifact_data_cache[source.cache_key] = artifact_data
+        return LoadedArtifact(source, metadata, entry, archive, artifact_data)

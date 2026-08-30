@@ -6,7 +6,8 @@ from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 
 from pixi_browse import __version__
-from pixi_browse.models import VersionEntry, VersionRow
+from pixi_browse.artifacts import InvalidArtifactSourceError, parse_artifact_source
+from pixi_browse.models import ArtifactSource, VersionEntry, VersionRow
 from pixi_browse.tui import CondaMetadataTui
 
 __all__ = [
@@ -33,6 +34,7 @@ cli = typer.Typer(
 
 @cli.callback(invoke_without_command=True)
 def run(
+    ctx: typer.Context,
     channel: str = typer.Option(
         "conda-forge",
         "--channel",
@@ -59,6 +61,8 @@ def run(
         help="Show version and exit.",
     ),
 ) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
     requested_platforms: list[Platform] | None = None
     requested_matchspec: MatchSpec | None = None
     if platform is not None:
@@ -80,6 +84,43 @@ def run(
         default_channel=channel,
         default_platforms=requested_platforms,
         default_matchspec=requested_matchspec,
+    ).run()
+
+
+def _parse_source(value: str, *, argument_name: str) -> ArtifactSource:
+    try:
+        return parse_artifact_source(value)
+    except InvalidArtifactSourceError as exc:
+        raise typer.BadParameter(str(exc), param_hint=argument_name) from exc
+
+
+@cli.command("inspect")
+def inspect_artifact(
+    source: str = typer.Argument(
+        ...,
+        help="Local path or HTTP(S) URL to a .conda or .tar.bz2 artifact.",
+    ),
+) -> None:
+    artifact_source = _parse_source(source, argument_name="SOURCE")
+    CondaMetadataTui(artifact_sources=[artifact_source]).run()
+
+
+@cli.command("compare")
+def compare_artifacts(
+    left: str = typer.Argument(
+        ...,
+        help="Local path or HTTP(S) URL for the left artifact.",
+    ),
+    right: str = typer.Argument(
+        ...,
+        help="Local path or HTTP(S) URL for the right artifact.",
+    ),
+) -> None:
+    left_source = _parse_source(left, argument_name="LEFT")
+    right_source = _parse_source(right, argument_name="RIGHT")
+    CondaMetadataTui(
+        artifact_sources=[left_source, right_source],
+        compare_artifacts=True,
     ).run()
 
 

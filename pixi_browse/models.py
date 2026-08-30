@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote, urlparse
 
 from rattler.package import RunExportsJson
 from rattler.version import Version
@@ -9,10 +12,76 @@ from rattler.version import Version
 ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
+ArtifactCacheKey = VersionPreviewKey | str
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 MetadataRow = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class LocalArtifactSource:
+    path: Path
+
+    @property
+    def cache_key(self) -> str:
+        return f"path:{self.path}"
+
+    @property
+    def display_name(self) -> str:
+        return self.path.name
+
+    @property
+    def location(self) -> str:
+        return str(self.path)
+
+
+@dataclass(frozen=True)
+class RemoteArtifactSource:
+    url: str
+
+    @property
+    def cache_key(self) -> str:
+        return f"url:{self.url}"
+
+    @property
+    def display_name(self) -> str:
+        return Path(unquote(urlparse(self.url).path)).name or self.url
+
+    @property
+    def location(self) -> str:
+        return self.url
+
+
+ArtifactSource = LocalArtifactSource | RemoteArtifactSource
+
+
+@dataclass(frozen=True)
+class ArtifactMetadata:
+    name: str
+    version: Version
+    build: str
+    build_number: int
+    subdir: str
+    file_name: str
+    source: ArtifactSource
+    dependencies: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    channel: str | None = None
+    size: int | None = None
+    timestamp: datetime | None = None
+    license: str | None = None
+    license_family: str | None = None
+    arch: str | None = None
+    platform: str | None = None
+    noarch: str | None = None
+    features: str | None = None
+    track_features: tuple[str, ...] = ()
+    python_site_packages_path: str | None = None
+    md5: bytes | None = None
+    sha256: bytes | None = None
+    legacy_bz2_md5: bytes | None = None
+    legacy_bz2_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +136,7 @@ class VersionArtifactData:
 class CompareSelection:
     package_name: str
     entry: VersionEntry
+    source: ArtifactSource | None = None
 
 
 @dataclass(frozen=True)
