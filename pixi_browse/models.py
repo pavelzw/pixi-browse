@@ -80,6 +80,7 @@ class CompareFileRow:
     changed: bool
     left_file: PackageFile | None = None
     right_file: PackageFile | None = None
+    comparison_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -91,3 +92,4 @@ class VersionCompareData:
     constraints: tuple[CompareRow, ...]
     run_exports: tuple[CompareRow, ...]
     files: tuple[CompareFileRow, ...]
+    info_files: tuple[CompareFileRow, ...] = ()

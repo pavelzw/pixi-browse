@@ -555,6 +555,65 @@ def _build_file_compare_rows(
     return _diff_file_paths(left_artifact.file_paths, right_artifact.file_paths)
 
 
+def _display_info_compare_rows(
+    rows: Sequence[CompareFileRow], *, common_comparison_known: bool
+) -> tuple[CompareFileRow, ...]:
+    return tuple(
+        CompareFileRow(
+            label=row.label.removeprefix("info/"),
+            left=row.left,
+            right=row.right,
+            changed=row.changed,
+            left_file=row.left_file,
+            right_file=row.right_file,
+            comparison_known=(
+                common_comparison_known
+                if row.left_file is not None and row.right_file is not None
+                else True
+            ),
+        )
+        for row in rows
+    )
+
+
+def _build_info_file_compare_rows(
+    left_artifact: VersionArtifactData, right_artifact: VersionArtifactData
+) -> tuple[CompareFileRow, ...]:
+    rows = _diff_file_paths(
+        tuple(PackageFile(path) for path in left_artifact.info_paths),
+        tuple(PackageFile(path) for path in right_artifact.info_paths),
+    )
+    return _display_info_compare_rows(rows, common_comparison_known=False)
+
+
+def resolve_info_file_compare_rows(
+    rows: Sequence[CompareFileRow],
+    *,
+    left_sha256: dict[str, bytes],
+    right_sha256: dict[str, bytes],
+) -> tuple[CompareFileRow, ...]:
+    left_files = tuple(
+        PackageFile(
+            path=row.left_file.path,
+            sha256=left_sha256.get(row.left_file.path),
+        )
+        for row in rows
+        if row.left_file is not None
+    )
+    right_files = tuple(
+        PackageFile(
+            path=row.right_file.path,
+            sha256=right_sha256.get(row.right_file.path),
+        )
+        for row in rows
+        if row.right_file is not None
+    )
+    return _display_info_compare_rows(
+        _diff_file_paths(left_files, right_files),
+        common_comparison_known=True,
+    )
+
+
 def build_version_compare_data(
     left_selection: CompareSelection,
     left_artifact: VersionArtifactData,
@@ -607,6 +666,7 @@ def build_version_compare_data(
             run_export=True,
         ),
         files=_build_file_compare_rows(left_artifact, right_artifact),
+        info_files=_build_info_file_compare_rows(left_artifact, right_artifact),
     )
 
 

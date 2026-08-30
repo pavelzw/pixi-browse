@@ -20,11 +20,13 @@ from .state import AboutUrls
 class VersionDataLoader:
     def __init__(self, *, client: Client) -> None:
         self._client = client
+        self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
 
     def clear_caches(self) -> None:
+        self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
         self.artifact_data_cache.clear()
@@ -32,10 +34,13 @@ class VersionDataLoader:
     def restore_caches(
         self,
         *,
+        archive_cache: dict[VersionPreviewKey, PackageArchive],
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
+        self.archive_cache.clear()
+        self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
         self.about_urls_cache.update(about_urls_cache)
         self.paths_cache.clear()
@@ -89,6 +94,17 @@ class VersionDataLoader:
         ]
         self.paths_cache[preview_key] = paths
         return paths
+
+    async def get_package_archive(
+        self, preview_key: VersionPreviewKey, url: str
+    ) -> PackageArchive:
+        cached = self.archive_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        archive = await PackageArchive.from_url(self._client, url)
+        self.archive_cache[preview_key] = archive
+        return archive
 
     async def get_about_urls(
         self, preview_key: VersionPreviewKey, archive: PackageArchive
@@ -179,7 +195,7 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        archive = await PackageArchive.from_url(self._client, str(record.url))
+        archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
         info_paths = await self.get_info_paths(archive)
         about_urls = AboutUrls()

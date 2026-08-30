@@ -38,6 +38,7 @@ from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
     render_package_preview,
+    resolve_info_file_compare_rows,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
@@ -449,12 +450,16 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     details = asyncio.run(
         loader.load_version_details("demo", record, preview_key=preview_key)
     )
+    cached_archive = asyncio.run(
+        loader.get_package_archive(preview_key, str(record.url))
+    )
 
     assert not any(
         line.startswith("Repository")
         for line in format_version_details_metadata_lines(details)
     )
     assert details.info_paths == ("info/index.json",)
+    assert cached_archive is archive
     assert calls == [
         "from_url",
         "paths_json",
@@ -665,6 +670,88 @@ def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> 
 
     file_row = next(row for row in compare_data.files if row.label == "bin/demo")
     assert file_row.changed is False
+
+
+def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
+    record = _make_repo_data_record()
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name=record.file_name,
+        ),
+    )
+    left_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        info_paths=("info/index.json", "info/left-only.json"),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        info_paths=("info/index.json", "info/right-only.json"),
+    )
+
+    compare_data = build_version_compare_data(
+        selection,
+        left_artifact,
+        selection,
+        right_artifact,
+    )
+
+    assert [row.label for row in compare_data.info_files] == [
+        "index.json",
+        "left-only.json",
+        "right-only.json",
+    ]
+    assert compare_data.info_files[0].comparison_known is False
+    assert compare_data.info_files[0].left_file == PackageFile("info/index.json")
+    assert compare_data.info_files[0].right_file == PackageFile("info/index.json")
+    assert compare_data.info_files[1].comparison_known is True
+    assert compare_data.info_files[2].comparison_known is True
+
+
+def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
+    unknown_rows = (
+        CompareFileRow(
+            label="same.json",
+            left="info/same.json",
+            right="info/same.json",
+            changed=False,
+            left_file=PackageFile("info/same.json"),
+            right_file=PackageFile("info/same.json"),
+            comparison_known=False,
+        ),
+        CompareFileRow(
+            label="changed.json",
+            left="info/changed.json",
+            right="info/changed.json",
+            changed=False,
+            left_file=PackageFile("info/changed.json"),
+            right_file=PackageFile("info/changed.json"),
+            comparison_known=False,
+        ),
+    )
+
+    rows = resolve_info_file_compare_rows(
+        unknown_rows,
+        left_sha256={
+            "info/same.json": bytes.fromhex("11" * 32),
+            "info/changed.json": bytes.fromhex("22" * 32),
+        },
+        right_sha256={
+            "info/same.json": bytes.fromhex("11" * 32),
+            "info/changed.json": bytes.fromhex("33" * 32),
+        },
+    )
+
+    assert rows[0].comparison_known is True
+    assert rows[0].changed is False
+    assert rows[1].comparison_known is True
+    assert rows[1].changed is True
 
 
 def test_format_version_details_metadata_lines_include_about_urls() -> None:
@@ -2158,6 +2245,130 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
             ]
 
     asyncio.run(_run())
+
+
+def test_compare_info_tab_shows_unknown_rows_and_requests_lazy_hashes() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        requested: list[CompareScreen] = []
+        compare_data = VersionCompareData(
+            left_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.0"),
+                    build="left_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.0-left_0.conda",
+                ),
+            ),
+            right_selection=CompareSelection(
+                "demo",
+                VersionEntry(
+                    version=Version("1.0.1"),
+                    build="right_0",
+                    build_number=0,
+                    subdir="noarch",
+                    file_name="demo-1.0.1-right_0.conda",
+                ),
+            ),
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+            info_files=(
+                CompareFileRow(
+                    label="index.json",
+                    left="info/index.json",
+                    right="info/index.json",
+                    changed=False,
+                    left_file=PackageFile("info/index.json"),
+                    right_file=PackageFile("info/index.json"),
+                    comparison_known=False,
+                ),
+            ),
+        )
+        screen = CompareScreen(
+            compare_data,
+            on_info_tab_open=lambda value: requested.append(value),
+        )
+        async with app.run_test() as pilot:
+            app.push_screen(screen)
+            await pilot.pause()
+            view = screen.query_one(CompareDetailsView)
+
+            view.select_file_tab("info")
+            await pilot.pause()
+
+            option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
+            prompt = cast(Text, option_list.get_option_at_index(0).prompt)
+            assert prompt.plain == "? index.json"
+            assert prompt.style == "#7a5c00"
+            assert requested == [screen]
+            assert view._render_file_header().plain == "[3] pkg/ (0) - info/ (1)"
+
+            screen.set_info_files(
+                resolve_info_file_compare_rows(
+                    compare_data.info_files,
+                    left_sha256={"info/index.json": bytes.fromhex("11" * 32)},
+                    right_sha256={"info/index.json": bytes.fromhex("11" * 32)},
+                )
+            )
+            await pilot.pause()
+
+            prompt = cast(Text, option_list.get_option_at_index(0).prompt)
+            assert prompt.plain == "= index.json"
+            assert prompt.style == "#5c6370"
+
+    asyncio.run(_run())
+
+
+def test_info_file_sha256_streams_requested_archive_entries_once() -> None:
+    calls: list[str] = []
+
+    class _FakeEntry:
+        def __init__(self, name: str, contents: bytes) -> None:
+            self.name = name
+            self.is_file = True
+            self._contents = contents
+
+        async def read(self) -> bytes:
+            calls.append(f"read:{self.name}")
+            return self._contents
+
+    class _FakeArchive:
+        async def stream(self, section: str):
+            calls.append(f"stream:{section}")
+            for entry in (
+                _FakeEntry("info/index.json", b"index"),
+                _FakeEntry("info/paths.json", b"paths"),
+            ):
+                yield entry
+
+    hashes = asyncio.run(
+        CondaMetadataTui._info_file_sha256(
+            cast(PackageArchive, _FakeArchive()),
+            {"info/index.json", "info/paths.json"},
+        )
+    )
+
+    assert hashes == {
+        "info/index.json": bytes.fromhex(
+            "1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6"
+        ),
+        "info/paths.json": bytes.fromhex(
+            "504dbd7ea99e812ff1ef64c6a162e32890b928a3df1f9e3450aadb7037889be5"
+        ),
+    }
+    assert calls == [
+        "stream:info",
+        "read:info/index.json",
+        "read:info/paths.json",
+    ]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:

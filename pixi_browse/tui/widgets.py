@@ -989,15 +989,24 @@ class CompareDetailsView(Vertical):
     can_focus = True
     _vim_g_pending = False
 
-    def __init__(self, compare_data: VersionCompareData) -> None:
+    def __init__(
+        self,
+        compare_data: VersionCompareData,
+        *,
+        on_info_tab_open: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(
             id="compare-details-view", classes="detail-view -pane-selected"
         )
         self._compare_data = compare_data
+        self._on_info_tab_open = on_info_tab_open
         self._active_section = 0
         self._dependency_tab_index = 0
-        self._file_entries: tuple[CompareFileListEntry, ...] = ()
-        self._file_highlighted = 0
+        self._file_tab_index = 0
+        self._file_entries: dict[FileTab, tuple[CompareFileListEntry, ...]] = {
+            tab: () for tab in FILE_TABS
+        }
+        self._file_highlighted: dict[FileTab, int] = {tab: 0 for tab in FILE_TABS}
         self._pane_selected = True
 
     def compose(self) -> ComposeResult:
@@ -1015,9 +1024,10 @@ class CompareDetailsView(Vertical):
             id_prefix="compare",
         )
         yield DetailSection(
-            "Files",
+            "pkg/",
             2,
             on_activate=self.set_active_section,
+            on_select_file_tab=self._select_file_tab_from_click,
             use_option_list=True,
             id_prefix="compare",
         )
@@ -1027,7 +1037,7 @@ class CompareDetailsView(Vertical):
 
     def set_compare_data(self, compare_data: VersionCompareData) -> None:
         self._compare_data = compare_data
-        self._file_highlighted = 0
+        self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self._refresh_sections()
 
     def set_active_section(self, index: int) -> None:
@@ -1056,6 +1066,22 @@ class CompareDetailsView(Vertical):
         )
         self._refresh_dependency_section()
 
+    def _select_file_tab_from_click(self, tab: FileTab) -> None:
+        self.select_file_tab(tab, focus_view=True)
+
+    def select_file_tab(self, tab: FileTab, *, focus_view: bool = False) -> None:
+        self.set_active_section(2)
+        self._file_tab_index = FILE_TABS.index(tab)
+        self._refresh_file_section()
+        if tab == "info" and self._on_info_tab_open is not None:
+            self._on_info_tab_open()
+        if focus_view:
+            self.focus()
+
+    def cycle_file_tab(self, direction: int) -> None:
+        next_index = (self._file_tab_index + direction) % len(FILE_TABS)
+        self.select_file_tab(FILE_TABS[next_index])
+
     def scroll_active(self, delta: float) -> None:
         if self.file_section_is_active():
             self._move_file_highlight(int(delta))
@@ -1070,8 +1096,9 @@ class CompareDetailsView(Vertical):
 
     def scroll_end_active(self) -> None:
         if self.file_section_is_active():
-            if self._file_entries:
-                self._set_file_highlight(len(self._file_entries) - 1)
+            entries = self._current_file_entries()
+            if entries:
+                self._set_file_highlight(len(entries) - 1)
             return
         self._section(self._active_section).scroll_body_end()
 
@@ -1092,7 +1119,7 @@ class CompareDetailsView(Vertical):
         return self.file_row_at(highlighted)
 
     def file_row_at(self, index: int) -> CompareFileRow | None:
-        entries = self._file_entries
+        entries = self._current_file_entries()
         if index < 0 or index >= len(entries):
             return None
         return entries[index].row
@@ -1103,29 +1130,39 @@ class CompareDetailsView(Vertical):
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
 
+    def _active_file_tab(self) -> FileTab:
+        return FILE_TABS[self._file_tab_index]
+
     def _apply_section_state(self) -> None:
         for index, section in enumerate(self.query(DetailSection)):
             section.set_active(index == self._active_section)
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
         self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_section_header(2, "Files"))
+        self._section(2).update_header(self._render_file_header())
 
     def _refresh_sections(self) -> None:
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
         self._section(0).update_body(self._render_metadata_body())
         self._refresh_dependency_section()
-        self._section(2).update_header(self._render_section_header(2, "Files"))
-        self._file_entries = self._file_entries_for_compare_data()
-        self._section(2).update_options(
-            [Option(entry.option) for entry in self._file_entries],
-            highlighted=self._file_highlighted,
-        )
+        self._refresh_file_section()
         self._apply_section_state()
 
     def _refresh_dependency_section(self) -> None:
         section = self._section(1)
         section.update_header(self._render_dependency_header())
         section.update_body(self._render_dependency_body(self._active_dependency_tab()))
+
+    def _refresh_file_section(self) -> None:
+        active_tab = self._active_file_tab()
+        section = self._section(2)
+        section.update_header(self._render_file_header())
+        self._file_entries = {
+            tab: self._file_entries_for_compare_data(tab) for tab in FILE_TABS
+        }
+        section.update_options(
+            [Option(entry.option) for entry in self._file_entries[active_tab]],
+            highlighted=self._file_highlighted[active_tab],
+        )
 
     def _render_section_header(self, index: int, label: str) -> Text:
         return Text(
@@ -1158,6 +1195,30 @@ class CompareDetailsView(Vertical):
                     labels[tab],
                     active=tab == self._active_dependency_tab(),
                     pane_active=self._pane_selected and self._active_section == 1,
+                )
+            )
+        return text
+
+    def _render_file_header(self) -> Text:
+        header = self._render_section_header(2, "")
+        header.append_text(self._render_file_tabs())
+        return header
+
+    def _render_file_tabs(self) -> Text:
+        labels = {
+            "pkg": f"pkg/ ({len(self._compare_data.files)})",
+            "info": f"info/ ({len(self._compare_data.info_files)})",
+        }
+        text = Text()
+        for index, tab in enumerate(FILE_TABS):
+            if index:
+                text.append(" - ", style=INACTIVE_TAB_STYLE)
+            text.append_text(
+                VersionDetailsView._render_clickable_file_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_file_tab(),
+                    pane_active=self._pane_selected and self._active_section == 2,
                 )
             )
         return text
@@ -1209,6 +1270,8 @@ class CompareDetailsView(Vertical):
 
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
+        if not row.comparison_known:
+            return "#7a5c00"
         if not row.changed:
             return "#5c6370"
         if row.left and row.right:
@@ -1217,8 +1280,19 @@ class CompareDetailsView(Vertical):
             return "#8b1e1e"
         return "#1f5f2b"
 
-    def _file_entries_for_compare_data(self) -> tuple[CompareFileListEntry, ...]:
-        if not self._compare_data.files:
+    def _current_file_entries(self) -> tuple[CompareFileListEntry, ...]:
+        return self._file_entries[self._active_file_tab()]
+
+    def _file_rows(self, tab: FileTab) -> tuple[CompareFileRow, ...]:
+        return (
+            self._compare_data.files if tab == "pkg" else self._compare_data.info_files
+        )
+
+    def _file_entries_for_compare_data(
+        self, tab: FileTab = "pkg"
+    ) -> tuple[CompareFileListEntry, ...]:
+        rows = self._file_rows(tab)
+        if not rows:
             return (
                 CompareFileListEntry(
                     option=Text("No files listed.", style="dim"),
@@ -1236,7 +1310,7 @@ class CompareDetailsView(Vertical):
                 option=self._render_compare_file_option(row),
                 row=row,
             )
-            for row in self._compare_data.files
+            for row in rows
         )
 
     def _render_compare_file_option(self, row: CompareFileRow) -> Text:
@@ -1249,6 +1323,8 @@ class CompareDetailsView(Vertical):
 
     @staticmethod
     def _compare_file_prefix(row: CompareFileRow) -> str:
+        if not row.comparison_known:
+            return "? "
         if not row.changed:
             return "= "
         if row.left and row.right:
@@ -1263,6 +1339,8 @@ class CompareDetailsView(Vertical):
         right_size = (
             row.right_file.size_in_bytes if row.right_file is not None else None
         )
+        left_sha256 = row.left_file.sha256 if row.left_file is not None else None
+        right_sha256 = row.right_file.sha256 if row.right_file is not None else None
         if row.left_file is not None and row.right_file is not None:
             if not row.changed and left_size == right_size:
                 return (
@@ -1270,6 +1348,8 @@ class CompareDetailsView(Vertical):
                     if left_size is not None
                     else ""
                 )
+            if left_sha256 is not None and right_sha256 is not None:
+                return f" [L: {left_sha256.hex()[:8]} | R: {right_sha256.hex()[:8]}]"
             left_label = (
                 format_human_byte_size(left_size)
                 if left_size is not None
@@ -1301,10 +1381,11 @@ class CompareDetailsView(Vertical):
         self._set_file_highlight(highlighted + delta)
 
     def _set_file_highlight(self, index: int) -> None:
-        if not self._file_entries:
+        entries = self._current_file_entries()
+        if not entries:
             return
-        highlighted = max(0, min(index, len(self._file_entries) - 1))
-        self._file_highlighted = highlighted
+        highlighted = max(0, min(index, len(entries) - 1))
+        self._file_highlighted[self._active_file_tab()] = highlighted
         self.query_one(
             "#compare-option-list-2", DetailOptionList
         ).highlighted = highlighted
@@ -1364,6 +1445,14 @@ class CompareDetailsView(Vertical):
             return
         if character == "]" and self._active_section == 1:
             self.cycle_dependency_tab(1)
+            event.stop()
+            return
+        if character == "[" and self._active_section == 2:
+            self.cycle_file_tab(-1)
+            event.stop()
+            return
+        if character == "]" and self._active_section == 2:
+            self.cycle_file_tab(1)
             event.stop()
             return
         if character == "g":
@@ -1435,14 +1524,24 @@ class CompareScreen(Screen[None]):
         Binding("q", "quit", show=False),
     ]
 
-    def __init__(self, compare_data: VersionCompareData) -> None:
+    def __init__(
+        self,
+        compare_data: VersionCompareData,
+        *,
+        on_info_tab_open: Callable[[CompareScreen], None] | None = None,
+    ) -> None:
         super().__init__()
         self._compare_data = compare_data
+        self._on_info_tab_open = on_info_tab_open
+        self._info_comparison_pending = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="compare-root"):
             yield Static(self._title_text(), id="compare-title", markup=False)
-            yield CompareDetailsView(self._compare_data)
+            yield CompareDetailsView(
+                self._compare_data,
+                on_info_tab_open=self.request_info_comparison,
+            )
             yield Static(self._footer_text(), id="compare-footer", markup=False)
 
     def on_mount(self) -> None:
@@ -1487,6 +1586,33 @@ class CompareScreen(Screen[None]):
     def action_quit(self) -> None:
         self.app.exit()
 
+    def request_info_comparison(self) -> None:
+        if self._info_comparison_pending or self._on_info_tab_open is None:
+            return
+        if all(row.comparison_known for row in self._compare_data.info_files):
+            return
+        self._info_comparison_pending = True
+        self._on_info_tab_open(self)
+
+    def set_info_files(self, rows: tuple[CompareFileRow, ...]) -> None:
+        self._info_comparison_pending = False
+        self._compare_data = VersionCompareData(
+            left_selection=self._compare_data.left_selection,
+            right_selection=self._compare_data.right_selection,
+            metadata_rows=self._compare_data.metadata_rows,
+            dependencies=self._compare_data.dependencies,
+            constraints=self._compare_data.constraints,
+            run_exports=self._compare_data.run_exports,
+            files=self._compare_data.files,
+            info_files=rows,
+        )
+        self.query_one("#compare-details-view", CompareDetailsView).set_compare_data(
+            self._compare_data
+        )
+
+    def info_comparison_failed(self) -> None:
+        self._info_comparison_pending = False
+
     @staticmethod
     def _swap_rows(rows: tuple[CompareRow, ...]) -> tuple[CompareRow, ...]:
         return tuple(
@@ -1509,6 +1635,7 @@ class CompareScreen(Screen[None]):
                 changed=row.changed,
                 left_file=row.right_file,
                 right_file=row.left_file,
+                comparison_known=row.comparison_known,
             )
             for row in rows
         )
@@ -1525,6 +1652,7 @@ class CompareScreen(Screen[None]):
             constraints=cls._swap_rows(compare_data.constraints),
             run_exports=cls._swap_rows(compare_data.run_exports),
             files=cls._swap_file_rows(compare_data.files),
+            info_files=cls._swap_file_rows(compare_data.info_files),
         )
 
     def file_section_is_active(self) -> bool:
@@ -1536,6 +1664,9 @@ class CompareScreen(Screen[None]):
         return self.query_one(
             "#compare-details-view", CompareDetailsView
         ).selected_file_row()
+
+    def info_file_rows(self) -> tuple[CompareFileRow, ...]:
+        return self._compare_data.info_files
 
     def selection_for_source(self, source: FileActionSource) -> CompareSelection:
         if source == "left":

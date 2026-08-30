@@ -3,6 +3,7 @@ from __future__ import annotations
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
 
@@ -10,9 +11,12 @@ from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.package_streaming import (
+    PackageArchive,
+    fetch_raw_package_file_from_url,
+)
+from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
-from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
 from rattler.version import Version, VersionWithSource
@@ -42,6 +46,7 @@ from pixi_browse.rendering import (
     build_version_compare_data,
     format_human_byte_size,
     render_package_preview,
+    resolve_info_file_compare_rows,
 )
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
@@ -126,6 +131,7 @@ class CondaMetadataTui(App[None]):
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
         self._version_loader = VersionDataLoader(client=self._client)
+        self._version_archive_cache = self._version_loader.archive_cache
         self._version_about_urls_cache = self._version_loader.about_urls_cache
         self._version_paths_cache = self._version_loader.paths_cache
         self._version_artifact_data_cache = self._version_loader.artifact_data_cache
@@ -469,6 +475,7 @@ class CondaMetadataTui(App[None]):
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
+            version_archive_cache=dict(self._version_archive_cache),
             version_about_urls_cache=dict(self._version_about_urls_cache),
             version_paths_cache={
                 preview_key: list(paths)
@@ -506,6 +513,7 @@ class CondaMetadataTui(App[None]):
         self._matchspec_records_by_package = snapshot.matchspec_records_by_package
         self._package_records_cache = snapshot.package_records_cache
         self._version_loader.restore_caches(
+            archive_cache=snapshot.version_archive_cache,
             about_urls_cache=snapshot.version_about_urls_cache,
             paths_cache=snapshot.version_paths_cache,
             artifact_data_cache=snapshot.version_artifact_data_cache,
@@ -964,6 +972,94 @@ class CondaMetadataTui(App[None]):
             ) from exc
         return record, artifact
 
+    @staticmethod
+    async def _info_file_sha256(
+        archive: PackageArchive, paths: set[str]
+    ) -> dict[str, bytes]:
+        if not paths:
+            return {}
+        remaining = set(paths)
+        hashes: dict[str, bytes] = {}
+        async for archive_entry in archive.stream("info"):
+            if archive_entry.name not in remaining:
+                continue
+            if not archive_entry.is_file:
+                raise OSError(
+                    f"cannot hash non-file archive entry {archive_entry.name}"
+                )
+            hashes[archive_entry.name] = sha256(await archive_entry.read()).digest()
+            remaining.remove(archive_entry.name)
+            if not remaining:
+                break
+        if remaining:
+            missing = ", ".join(sorted(remaining))
+            raise FileNotFoundError(f"info entries missing from archive: {missing}")
+        return hashes
+
+    async def _load_compare_info_hashes(self, screen: CompareScreen) -> None:
+        original_left = screen.selection_for_source("left")
+        original_right = screen.selection_for_source("right")
+        common_paths = {
+            row.left_file.path
+            for row in screen.info_file_rows()
+            if not row.comparison_known
+            and row.left_file is not None
+            and row.right_file is not None
+        }
+        try:
+            left_url = await self._package_url_for_version_entry(
+                original_left.package_name, original_left.entry
+            )
+            right_url = await self._package_url_for_version_entry(
+                original_right.package_name, original_right.entry
+            )
+            left_archive = await self._version_loader.get_package_archive(
+                self._compare_selection_key(original_left), left_url
+            )
+            right_archive = await self._version_loader.get_package_archive(
+                self._compare_selection_key(original_right), right_url
+            )
+            left_hashes = await self._info_file_sha256(left_archive, common_paths)
+            right_hashes = await self._info_file_sha256(right_archive, common_paths)
+        except Exception as exc:
+            screen.info_comparison_failed()
+            self.notify(
+                f"Failed to compare info files: {exc!s}",
+                title="Compare",
+                severity="error",
+            )
+            return
+
+        if not self._compare_screen_open or self.screen is not screen:
+            return
+
+        current_left = screen.selection_for_source("left")
+        if current_left == original_left:
+            current_left_hashes = left_hashes
+            current_right_hashes = right_hashes
+        elif current_left == original_right:
+            current_left_hashes = right_hashes
+            current_right_hashes = left_hashes
+        else:
+            screen.info_comparison_failed()
+            return
+
+        screen.set_info_files(
+            resolve_info_file_compare_rows(
+                screen.info_file_rows(),
+                left_sha256=current_left_hashes,
+                right_sha256=current_right_hashes,
+            )
+        )
+
+    def _request_compare_info_hashes(self, screen: CompareScreen) -> None:
+        self.run_worker(
+            self._load_compare_info_hashes(screen),
+            group="compare-info-hashes",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
     def _handle_compare_screen_dismissed(self, _result: None) -> None:
         self._clear_compare_state()
 
@@ -1022,7 +1118,10 @@ class CondaMetadataTui(App[None]):
         self._compare_screen_open = True
         self.query_one("#footer", Static).update(self._footer_text())
         self.push_screen(
-            CompareScreen(compare_data),
+            CompareScreen(
+                compare_data,
+                on_info_tab_open=self._request_compare_info_hashes,
+            ),
             self._handle_compare_screen_dismissed,
         )
 
