@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import yaml
 from rattler.networking import Client
 from rattler.package import PathType, RunExportsJson
@@ -92,6 +94,20 @@ class VersionDataLoader:
             )
             for path in paths_json.paths
         ]
+        symlink_paths = {path.path for path in paths if path.is_symlink}
+        if symlink_paths:
+            link_targets: dict[str, str | None] = {}
+            async for entry in archive.stream("pkg"):
+                if entry.is_symlink and entry.name in symlink_paths:
+                    link_targets[entry.name] = entry.link_target
+                    if len(link_targets) == len(symlink_paths):
+                        break
+            paths = [
+                replace(path, link_target=link_targets.get(path.path))
+                if path.is_symlink
+                else path
+                for path in paths
+            ]
         self.paths_cache[preview_key] = paths
         return paths
 
