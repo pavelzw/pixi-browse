@@ -91,14 +91,14 @@ def _make_artifact_data(
     constraints: tuple[str, ...] = (),
     run_exports: RunExportsJson | None = None,
     file_paths: tuple[PackageFile, ...] = (),
-    info_paths: tuple[str, ...] = (),
+    info_files: tuple[PackageFile, ...] = (),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=metadata_rows,
         dependencies=dependencies,
         constraints=constraints,
         file_paths=file_paths,
-        info_paths=info_paths,
+        info_files=info_files,
         run_exports=run_exports,
     )
 
@@ -267,14 +267,17 @@ def test_build_version_artifact_data_includes_package_paths() -> None:
             PackageFile("bin/demo"),
             PackageFile("lib/python3.13/site-packages/demo.py"),
         ),
-        info_paths=("info/index.json", "info/paths.json"),
+        info_files=(PackageFile("info/index.json"), PackageFile("info/paths.json")),
     )
 
     assert details.file_paths == (
         PackageFile("bin/demo"),
         PackageFile("lib/python3.13/site-packages/demo.py"),
     )
-    assert details.info_paths == ("info/index.json", "info/paths.json")
+    assert details.info_files == (
+        PackageFile("info/index.json"),
+        PackageFile("info/paths.json"),
+    )
 
 
 def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
@@ -433,17 +436,17 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         calls.append("run_exports_json")
         return RunExportsJson()
 
-    async def _fake_get_info_paths(value: PackageArchive) -> list[str]:
+    async def _fake_get_info_files(value: PackageArchive) -> list[PackageFile]:
         assert value is archive
-        calls.append("list_files")
-        return ["info/index.json"]
+        calls.append("stream_info")
+        return [PackageFile("info/index.json", 42)]
 
     monkeypatch.setattr(
         "pixi_browse.tui.version_loader.PackageArchive.from_url",
         _fake_from_url,
     )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
-    monkeypatch.setattr(loader, "get_info_paths", _fake_get_info_paths)
+    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
 
@@ -458,12 +461,12 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         line.startswith("Repository")
         for line in format_version_details_metadata_lines(details)
     )
-    assert details.info_paths == ("info/index.json",)
+    assert details.info_files == (PackageFile("info/index.json", 42),)
     assert cached_archive is archive
     assert calls == [
         "from_url",
         "paths_json",
-        "list_files",
+        "stream_info",
         "about_json",
         "run_exports_json",
     ]
@@ -687,12 +690,18 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
     left_artifact = build_version_artifact_data(
         "demo",
         record,
-        info_paths=("info/index.json", "info/left-only.json"),
+        info_files=(
+            PackageFile("info/index.json", 100),
+            PackageFile("info/left-only.json", 200),
+        ),
     )
     right_artifact = build_version_artifact_data(
         "demo",
         record,
-        info_paths=("info/index.json", "info/right-only.json"),
+        info_files=(
+            PackageFile("info/index.json", 100),
+            PackageFile("info/right-only.json", 300),
+        ),
     )
 
     compare_data = build_version_compare_data(
@@ -708,8 +717,10 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
         "right-only.json",
     ]
     assert compare_data.info_files[0].comparison_known is False
-    assert compare_data.info_files[0].left_file == PackageFile("info/index.json")
-    assert compare_data.info_files[0].right_file == PackageFile("info/index.json")
+    assert compare_data.info_files[0].left_file == PackageFile("info/index.json", 100)
+    assert compare_data.info_files[0].right_file == PackageFile("info/index.json", 100)
+    assert compare_data.info_files[0].left == "info/index.json (100 B)"
+    assert compare_data.info_files[0].right == "info/index.json (100 B)"
     assert compare_data.info_files[1].comparison_known is True
     assert compare_data.info_files[2].comparison_known is True
 
@@ -721,8 +732,8 @@ def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
             left="info/same.json",
             right="info/same.json",
             changed=False,
-            left_file=PackageFile("info/same.json"),
-            right_file=PackageFile("info/same.json"),
+            left_file=PackageFile("info/same.json", 100),
+            right_file=PackageFile("info/same.json", 100),
             comparison_known=False,
         ),
         CompareFileRow(
@@ -730,8 +741,8 @@ def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
             left="info/changed.json",
             right="info/changed.json",
             changed=False,
-            left_file=PackageFile("info/changed.json"),
-            right_file=PackageFile("info/changed.json"),
+            left_file=PackageFile("info/changed.json", 200),
+            right_file=PackageFile("info/changed.json", 200),
             comparison_known=False,
         ),
     )
@@ -750,8 +761,12 @@ def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
 
     assert rows[0].comparison_known is True
     assert rows[0].changed is False
+    assert rows[0].left_file is not None
+    assert rows[0].left_file.size_in_bytes == 100
     assert rows[1].comparison_known is True
     assert rows[1].changed is True
+    assert rows[1].right_file is not None
+    assert rows[1].right_file.size_in_bytes == 200
 
 
 def test_format_version_details_metadata_lines_include_about_urls() -> None:
@@ -943,20 +958,34 @@ def test_get_package_paths_caches_archive_paths() -> None:
     assert calls == ["paths_json"]
 
 
-def test_get_info_paths_lists_only_archive_info_section() -> None:
+def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
     loader = VersionDataLoader(client=cast(Client, object()))
-    calls: list[tuple[str, str]] = []
+    calls: list[str] = []
+
+    class _FakeEntry:
+        def __init__(self, name: str, size: int, *, is_file: bool = True) -> None:
+            self.name = name
+            self.size = size
+            self.is_file = is_file
 
     class _FakeArchive:
-        async def list_files(self, section: str) -> list[str]:
-            calls.append(("list_files", section))
-            return ["info/index.json", "info/paths.json"]
+        async def stream(self, section: str):
+            calls.append(section)
+            for entry in (
+                _FakeEntry("info/index.json", 42),
+                _FakeEntry("info/recipe", 0, is_file=False),
+                _FakeEntry("info/paths.json", 1234),
+            ):
+                yield entry
 
     archive = cast(PackageArchive, _FakeArchive())
-    paths = asyncio.run(loader.get_info_paths(archive))
+    files = asyncio.run(loader.get_info_files(archive))
 
-    assert paths == ["info/index.json", "info/paths.json"]
-    assert calls == [("list_files", "info")]
+    assert files == [
+        PackageFile("info/index.json", 42),
+        PackageFile("info/paths.json", 1234),
+    ]
+    assert calls == ["info"]
 
 
 def test_get_about_urls_caches_archive_about_json() -> None:
@@ -2285,8 +2314,8 @@ def test_compare_info_tab_keeps_common_rows_unknown() -> None:
                     left="info/index.json",
                     right="info/index.json",
                     changed=False,
-                    left_file=PackageFile("info/index.json"),
-                    right_file=PackageFile("info/index.json"),
+                    left_file=PackageFile("info/index.json", 1234),
+                    right_file=PackageFile("info/index.json", 1234),
                     comparison_known=False,
                 ),
             ),
@@ -2302,34 +2331,20 @@ def test_compare_info_tab_keeps_common_rows_unknown() -> None:
 
             option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
             prompt = cast(Text, option_list.get_option_at_index(0).prompt)
-            assert prompt.plain == "? index.json"
+            assert prompt.plain == "? index.json (1.2 KiB)"
             assert prompt.style == "#7a5c00"
             assert view._render_file_header().plain == "[3] pkg/ (0) - info/ (1)"
 
     asyncio.run(_run())
 
 
-def test_info_file_sha256_streams_requested_archive_entry() -> None:
+def test_info_file_sha256_reads_requested_archive_entry() -> None:
     calls: list[str] = []
 
-    class _FakeEntry:
-        def __init__(self, name: str, contents: bytes) -> None:
-            self.name = name
-            self.is_file = True
-            self._contents = contents
-
-        async def read(self) -> bytes:
-            calls.append(f"read:{self.name}")
-            return self._contents
-
     class _FakeArchive:
-        async def stream(self, section: str):
-            calls.append(f"stream:{section}")
-            for entry in (
-                _FakeEntry("info/index.json", b"index"),
-                _FakeEntry("info/paths.json", b"paths"),
-            ):
-                yield entry
+        async def read_file(self, path: str) -> bytes | None:
+            calls.append(path)
+            return b"paths"
 
     digest = asyncio.run(
         CondaMetadataTui._info_file_sha256(
@@ -2341,10 +2356,7 @@ def test_info_file_sha256_streams_requested_archive_entry() -> None:
     assert digest == bytes.fromhex(
         "504dbd7ea99e812ff1ef64c6a162e32890b928a3df1f9e3450aadb7037889be5"
     )
-    assert calls == [
-        "stream:info",
-        "read:info/paths.json",
-    ]
+    assert calls == ["info/paths.json"]
 
 
 def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
@@ -2560,7 +2572,7 @@ def test_file_header_shows_pkg_and_info_as_clickable_tabs() -> None:
     view = VersionDetailsView()
     view._details = _make_artifact_data(
         file_paths=(PackageFile("bin/demo"),),
-        info_paths=("info/index.json", "info/paths.json"),
+        info_files=(PackageFile("info/index.json"), PackageFile("info/paths.json")),
     )
     view._file_tab_index = 1
 
@@ -2638,23 +2650,26 @@ def test_file_list_entry_uses_plain_file_path() -> None:
     assert entries[0].path == "site-packages/demo.py"
 
 
-def test_info_file_list_entries_use_archive_paths_without_pkg_metadata() -> None:
+def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
     view = VersionDetailsView()
     view._details = _make_artifact_data(
-        info_paths=("info/index.json", "info/recipe/meta.yaml"),
+        info_files=(
+            PackageFile("info/index.json", 1024),
+            PackageFile("info/recipe/meta.yaml", 1536),
+        ),
     )
 
     entries = view._file_entries_for_details("info")
 
     assert [entry.label for entry in entries] == [
-        "index.json",
-        "recipe/meta.yaml",
+        "index.json (1.0 KiB)",
+        "recipe/meta.yaml (1.5 KiB)",
     ]
     assert [entry.path for entry in entries] == [
         "info/index.json",
         "info/recipe/meta.yaml",
     ]
-    assert all(entry.size_in_bytes is None for entry in entries)
+    assert [entry.size_in_bytes for entry in entries] == [1024, 1536]
 
 
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(

@@ -974,15 +974,9 @@ class CondaMetadataTui(App[None]):
 
     @staticmethod
     async def _info_file_sha256(archive: PackageArchive, path: str) -> bytes:
-        async for archive_entry in archive.stream("info"):
-            if archive_entry.name != path:
-                continue
-            if not archive_entry.is_file:
-                raise OSError(
-                    f"cannot hash non-file archive entry {archive_entry.name}"
-                )
-            return sha256(await archive_entry.read()).digest()
-        raise FileNotFoundError(f"info entry missing from archive: {path}")
+        contents = await archive.read_file(path)
+        assert contents is not None
+        return sha256(contents).digest()
 
     async def _resolve_compare_info_file_and_open(
         self, screen: CompareScreen, row: CompareFileRow

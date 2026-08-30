@@ -47,7 +47,7 @@ class VersionArtifactData:
     constraints: tuple[str, ...]
     package_url: str = ""
     file_paths: tuple[PackageFile, ...] = ()
-    info_paths: tuple[str, ...] = ()
+    info_files: tuple[PackageFile, ...] = ()
     run_exports: RunExportsJson | None = None
     repository_urls: tuple[str, ...] = ()
     documentation_urls: tuple[str, ...] = ()

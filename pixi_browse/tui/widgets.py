@@ -26,7 +26,6 @@ from pixi_browse.models import (
     CompareSelection,
     DependencyTab,
     FileTab,
-    PackageFile,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -526,9 +525,7 @@ class VersionDetailsView(Vertical):
     ) -> tuple[FileListEntry, ...]:
         assert self._details is not None
         package_files = (
-            self._details.file_paths
-            if tab == "pkg"
-            else tuple(PackageFile(path) for path in self._details.info_paths)
+            self._details.file_paths if tab == "pkg" else self._details.info_files
         )
         if package_files:
             return tuple(
@@ -603,7 +600,7 @@ class VersionDetailsView(Vertical):
         else:
             labels = {
                 "pkg": f"pkg/ ({len(self._details.file_paths)})",
-                "info": f"info/ ({len(self._details.info_paths)})",
+                "info": f"info/ ({len(self._details.info_files)})",
             }
         tab_text = Text()
         for index, tab in enumerate(FILE_TABS):

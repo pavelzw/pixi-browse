@@ -340,7 +340,7 @@ def build_version_artifact_data(
     record: RepoDataRecord,
     *,
     package_paths: Sequence[PackageFile] = (),
-    info_paths: Sequence[str] = (),
+    info_files: Sequence[PackageFile] = (),
     repository_urls: Sequence[str] = (),
     documentation_urls: Sequence[str] = (),
     homepage_urls: Sequence[str] = (),
@@ -366,7 +366,7 @@ def build_version_artifact_data(
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
         package_url=str(record.url),
         file_paths=tuple(package_paths),
-        info_paths=tuple(info_paths),
+        info_files=tuple(info_files),
         run_exports=run_exports,
         repository_urls=tuple(repository_urls),
         documentation_urls=tuple(documentation_urls),
@@ -579,10 +579,7 @@ def _display_info_compare_rows(
 def _build_info_file_compare_rows(
     left_artifact: VersionArtifactData, right_artifact: VersionArtifactData
 ) -> tuple[CompareFileRow, ...]:
-    rows = _diff_file_paths(
-        tuple(PackageFile(path) for path in left_artifact.info_paths),
-        tuple(PackageFile(path) for path in right_artifact.info_paths),
-    )
+    rows = _diff_file_paths(left_artifact.info_files, right_artifact.info_files)
     return _display_info_compare_rows(rows, common_comparison_known=False)
 
 
@@ -595,7 +592,10 @@ def resolve_info_file_compare_rows(
     left_files = tuple(
         PackageFile(
             path=row.left_file.path,
+            size_in_bytes=row.left_file.size_in_bytes,
             sha256=left_sha256.get(row.left_file.path),
+            no_link=row.left_file.no_link,
+            path_type=row.left_file.path_type,
         )
         for row in rows
         if row.left_file is not None
@@ -603,7 +603,10 @@ def resolve_info_file_compare_rows(
     right_files = tuple(
         PackageFile(
             path=row.right_file.path,
+            size_in_bytes=row.right_file.size_in_bytes,
             sha256=right_sha256.get(row.right_file.path),
+            no_link=row.right_file.no_link,
+            path_type=row.right_file.path_type,
         )
         for row in rows
         if row.right_file is not None

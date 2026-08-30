@@ -165,8 +165,12 @@ class VersionDataLoader:
         self.about_urls_cache[preview_key] = about_urls
         return about_urls
 
-    async def get_info_paths(self, archive: PackageArchive) -> list[str]:
-        return await archive.list_files("info")
+    async def get_info_files(self, archive: PackageArchive) -> list[PackageFile]:
+        files: list[PackageFile] = []
+        async for entry in archive.stream("info"):
+            if entry.is_file:
+                files.append(PackageFile(path=entry.name, size_in_bytes=entry.size))
+        return files
 
     async def get_run_exports(self, archive: PackageArchive) -> RunExportsJson | None:
         return await archive.run_exports_json()
@@ -197,7 +201,7 @@ class VersionDataLoader:
 
         archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
-        info_paths = await self.get_info_paths(archive)
+        info_files = await self.get_info_files(archive)
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
 
@@ -216,7 +220,7 @@ class VersionDataLoader:
             package_name,
             record,
             package_paths=package_paths,
-            info_paths=info_paths,
+            info_files=info_files,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,
