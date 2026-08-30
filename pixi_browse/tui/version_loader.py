@@ -170,6 +170,15 @@ class VersionDataLoader:
         async for entry in archive.stream("info"):
             if entry.is_file:
                 files.append(PackageFile(path=entry.name, size_in_bytes=entry.size))
+            elif entry.is_symlink:
+                files.append(
+                    PackageFile(
+                        path=entry.name,
+                        size_in_bytes=entry.size,
+                        path_type="softlink",
+                        link_target=entry.link_target,
+                    )
+                )
         return files
 
     async def get_run_exports(self, archive: PackageArchive) -> RunExportsJson | None:

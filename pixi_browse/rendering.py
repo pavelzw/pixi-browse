@@ -466,6 +466,8 @@ def _package_file_summary(package_file: PackageFile) -> str:
         details.append(format_human_byte_size(package_file.size_in_bytes))
     if package_file.path_type is not None:
         details.append(package_file.path_type)
+    if package_file.link_target is not None:
+        details.append(f"target={package_file.link_target}")
     if package_file.no_link is not None:
         details.append(f"no_link={package_file.no_link}")
     if package_file.sha256 is not None:
@@ -480,6 +482,16 @@ def _files_differ(left: PackageFile, right: PackageFile) -> bool:
         left.sha256 is not None
         and right.sha256 is not None
         and left.sha256 != right.sha256
+    ):
+        return True
+    if left.is_symlink != right.is_symlink:
+        return True
+    if (
+        left.is_symlink
+        and right.is_symlink
+        and left.link_target is not None
+        and right.link_target is not None
+        and left.link_target != right.link_target
     ):
         return True
     return (
@@ -567,7 +579,16 @@ def _display_info_compare_rows(
             left_file=row.left_file,
             right_file=row.right_file,
             comparison_known=(
-                common_comparison_known or row.changed
+                common_comparison_known
+                or row.changed
+                or (
+                    row.left_file is not None
+                    and row.right_file is not None
+                    and row.left_file.is_symlink
+                    and row.right_file.is_symlink
+                    and row.left_file.link_target is not None
+                    and row.right_file.link_target is not None
+                )
                 if row.left_file is not None and row.right_file is not None
                 else True
             ),
@@ -596,6 +617,7 @@ def resolve_info_file_compare_rows(
             sha256=left_sha256.get(row.left_file.path),
             no_link=row.left_file.no_link,
             path_type=row.left_file.path_type,
+            link_target=row.left_file.link_target,
         )
         for row in rows
         if row.left_file is not None
@@ -607,6 +629,7 @@ def resolve_info_file_compare_rows(
             sha256=right_sha256.get(row.right_file.path),
             no_link=row.right_file.no_link,
             path_type=row.right_file.path_type,
+            link_target=row.right_file.link_target,
         )
         for row in rows
         if row.right_file is not None

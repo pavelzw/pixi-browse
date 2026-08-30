@@ -38,6 +38,11 @@ class PackageFile:
     sha256: bytes | None = None
     no_link: bool | None = None
     path_type: PackageFilePathType | None = None
+    link_target: str | None = None
+
+    @property
+    def is_symlink(self) -> bool:
+        return self.path_type == "softlink"
 
 
 @dataclass(frozen=True)
