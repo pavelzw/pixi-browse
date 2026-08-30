@@ -893,6 +893,32 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
     assert "Dependencies" not in rendered
 
 
+def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> None:
+    records = [
+        _make_repo_data_record(version="1.33.1", subdir="osx-arm64"),
+        _make_repo_data_record(version="1.33.1", subdir="linux-64"),
+        _make_repo_data_record(version="1.34.0", subdir="noarch"),
+    ]
+
+    rendered = render_package_preview(
+        "demo",
+        records,
+        record_sort_key=lambda record: (
+            record.version,
+            record.build,
+            record.subdir,
+            record.build_number,
+        ),
+    )
+
+    headings = [
+        rendered.index("▾ noarch"),
+        rendered.index("▾ linux-64"),
+        rendered.index("▾ osx-arm64"),
+    ]
+    assert headings == sorted(headings)
+
+
 def test_get_package_paths_caches_archive_paths() -> None:
     loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
@@ -1230,6 +1256,32 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
 
     assert focused == []
     assert app._sidebar_title_text(selected=False).plain == "[0] Versions: demo"
+
+
+def test_open_versions_orders_subdirs_by_latest_version_then_name(monkeypatch) -> None:
+    app = CondaMetadataTui()
+
+    class _FakeOptionList:
+        highlighted = 0
+        scroll_y = 0.0
+
+    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+        assert package_name == "demo"
+        return [
+            _Record(Version("1.33.1"), "build", 0, "osx-arm64", "osx.conda"),
+            _Record(Version("1.33.1"), "build", 0, "linux-64", "linux.conda"),
+            _Record(Version("1.34.0"), "build", 0, "noarch", "noarch.conda"),
+        ]
+
+    monkeypatch.setattr(app, "query_one", lambda *_args: _FakeOptionList())
+    monkeypatch.setattr(app, "_get_package_records", _fake_get_package_records)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_update_versions_status", lambda: None)
+    monkeypatch.setattr(app, "_render_version_options", lambda: None)
+
+    asyncio.run(app._open_versions("demo"))
+
+    assert app._version_subdirs == ["noarch", "linux-64", "osx-arm64"]
 
 
 def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
