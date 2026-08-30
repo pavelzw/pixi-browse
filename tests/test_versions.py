@@ -2308,7 +2308,7 @@ def test_compare_file_rows_show_sizes_instead_of_sha256_values() -> None:
     assert "22222222" not in option
 
 
-def test_compare_symlinks_show_target_and_have_no_actions() -> None:
+def test_compare_symlinks_have_consistent_labels_and_no_actions() -> None:
     symlink = PackageFile(
         path="info/current",
         size_in_bytes=13,
@@ -2324,9 +2324,7 @@ def test_compare_symlinks_show_target_and_have_no_actions() -> None:
         right_file=symlink,
     )
 
-    assert CompareDetailsView._compare_file_suffix(row) == (
-        " (symlink -> recipe/meta.yaml)"
-    )
+    assert CompareDetailsView._compare_file_suffix(row) == " (symlink)"
     assert CondaMetadataTui._compare_file_action_options(row) == ()
 
     mixed_row = CompareFileRow(
@@ -2526,7 +2524,7 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
     assert [entry.label for entry in entries] == [
         "index.json (1.0 KiB)",
         "recipe/meta.yaml (1.5 KiB)",
-        "current -> recipe/meta.yaml (symlink)",
+        "current (symlink)",
     ]
     assert [entry.path for entry in entries] == [
         "info/index.json",
