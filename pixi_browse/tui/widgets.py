@@ -992,14 +992,11 @@ class CompareDetailsView(Vertical):
     def __init__(
         self,
         compare_data: VersionCompareData,
-        *,
-        on_info_tab_open: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(
             id="compare-details-view", classes="detail-view -pane-selected"
         )
         self._compare_data = compare_data
-        self._on_info_tab_open = on_info_tab_open
         self._active_section = 0
         self._dependency_tab_index = 0
         self._file_tab_index = 0
@@ -1073,8 +1070,6 @@ class CompareDetailsView(Vertical):
         self.set_active_section(2)
         self._file_tab_index = FILE_TABS.index(tab)
         self._refresh_file_section()
-        if tab == "info" and self._on_info_tab_open is not None:
-            self._on_info_tab_open()
         if focus_view:
             self.focus()
 
@@ -1524,24 +1519,14 @@ class CompareScreen(Screen[None]):
         Binding("q", "quit", show=False),
     ]
 
-    def __init__(
-        self,
-        compare_data: VersionCompareData,
-        *,
-        on_info_tab_open: Callable[[CompareScreen], None] | None = None,
-    ) -> None:
+    def __init__(self, compare_data: VersionCompareData) -> None:
         super().__init__()
         self._compare_data = compare_data
-        self._on_info_tab_open = on_info_tab_open
-        self._info_comparison_pending = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="compare-root"):
             yield Static(self._title_text(), id="compare-title", markup=False)
-            yield CompareDetailsView(
-                self._compare_data,
-                on_info_tab_open=self.request_info_comparison,
-            )
+            yield CompareDetailsView(self._compare_data)
             yield Static(self._footer_text(), id="compare-footer", markup=False)
 
     def on_mount(self) -> None:
@@ -1586,16 +1571,11 @@ class CompareScreen(Screen[None]):
     def action_quit(self) -> None:
         self.app.exit()
 
-    def request_info_comparison(self) -> None:
-        if self._info_comparison_pending or self._on_info_tab_open is None:
-            return
-        if all(row.comparison_known for row in self._compare_data.info_files):
-            return
-        self._info_comparison_pending = True
-        self._on_info_tab_open(self)
-
-    def set_info_files(self, rows: tuple[CompareFileRow, ...]) -> None:
-        self._info_comparison_pending = False
+    def set_info_file_row(self, updated_row: CompareFileRow) -> None:
+        rows = tuple(
+            updated_row if row.label == updated_row.label else row
+            for row in self._compare_data.info_files
+        )
         self._compare_data = VersionCompareData(
             left_selection=self._compare_data.left_selection,
             right_selection=self._compare_data.right_selection,
@@ -1609,9 +1589,6 @@ class CompareScreen(Screen[None]):
         self.query_one("#compare-details-view", CompareDetailsView).set_compare_data(
             self._compare_data
         )
-
-    def info_comparison_failed(self) -> None:
-        self._info_comparison_pending = False
 
     @staticmethod
     def _swap_rows(rows: tuple[CompareRow, ...]) -> tuple[CompareRow, ...]:

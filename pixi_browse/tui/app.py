@@ -996,16 +996,15 @@ class CondaMetadataTui(App[None]):
             raise FileNotFoundError(f"info entries missing from archive: {missing}")
         return hashes
 
-    async def _load_compare_info_hashes(self, screen: CompareScreen) -> None:
+    async def _resolve_compare_info_file_and_open(
+        self, screen: CompareScreen, row: CompareFileRow
+    ) -> None:
         original_left = screen.selection_for_source("left")
         original_right = screen.selection_for_source("right")
-        common_paths = {
-            row.left_file.path
-            for row in screen.info_file_rows()
-            if not row.comparison_known
-            and row.left_file is not None
-            and row.right_file is not None
-        }
+        assert row.left_file is not None
+        assert row.right_file is not None
+        original_left_path = row.left_file.path
+        original_right_path = row.right_file.path
         try:
             left_url = await self._package_url_for_version_entry(
                 original_left.package_name, original_left.entry
@@ -1019,45 +1018,63 @@ class CondaMetadataTui(App[None]):
             right_archive = await self._version_loader.get_package_archive(
                 self._compare_selection_key(original_right), right_url
             )
-            left_hashes = await self._info_file_sha256(left_archive, common_paths)
-            right_hashes = await self._info_file_sha256(right_archive, common_paths)
+            left_hashes = await self._info_file_sha256(
+                left_archive, {original_left_path}
+            )
+            right_hashes = await self._info_file_sha256(
+                right_archive, {original_right_path}
+            )
         except Exception as exc:
-            screen.info_comparison_failed()
+            self._file_action_in_progress = False
             self.notify(
-                f"Failed to compare info files: {exc!s}",
+                f"Failed to compare info file: {exc!s}",
                 title="Compare",
                 severity="error",
             )
             return
 
         if not self._compare_screen_open or self.screen is not screen:
+            self._file_action_in_progress = False
             return
 
         current_left = screen.selection_for_source("left")
         if current_left == original_left:
             current_left_hashes = left_hashes
             current_right_hashes = right_hashes
+            current_left_path = original_left_path
+            current_right_path = original_right_path
         elif current_left == original_right:
             current_left_hashes = right_hashes
             current_right_hashes = left_hashes
+            current_left_path = original_right_path
+            current_right_path = original_left_path
         else:
-            screen.info_comparison_failed()
+            self._file_action_in_progress = False
             return
 
-        screen.set_info_files(
-            resolve_info_file_compare_rows(
-                screen.info_file_rows(),
-                left_sha256=current_left_hashes,
-                right_sha256=current_right_hashes,
-            )
+        current_row = next(
+            (
+                candidate
+                for candidate in screen.info_file_rows()
+                if candidate.left_file is not None
+                and candidate.right_file is not None
+                and candidate.left_file.path == current_left_path
+                and candidate.right_file.path == current_right_path
+            ),
+            None,
         )
-
-    def _request_compare_info_hashes(self, screen: CompareScreen) -> None:
-        self.run_worker(
-            self._load_compare_info_hashes(screen),
-            group="compare-info-hashes",
-            exclusive=True,
-            exit_on_error=False,
+        if current_row is None:
+            self._file_action_in_progress = False
+            return
+        resolved_row = resolve_info_file_compare_rows(
+            (current_row,),
+            left_sha256=current_left_hashes,
+            right_sha256=current_right_hashes,
+        )[0]
+        screen.set_info_file_row(resolved_row)
+        self._file_action_in_progress = False
+        self.call_after_refresh(
+            lambda: self._open_compare_file_action_screen(resolved_row)
         )
 
     def _handle_compare_screen_dismissed(self, _result: None) -> None:
@@ -1118,10 +1135,7 @@ class CondaMetadataTui(App[None]):
         self._compare_screen_open = True
         self.query_one("#footer", Static).update(self._footer_text())
         self.push_screen(
-            CompareScreen(
-                compare_data,
-                on_info_tab_open=self._request_compare_info_hashes,
-            ),
+            CompareScreen(compare_data),
             self._handle_compare_screen_dismissed,
         )
 
@@ -1357,6 +1371,24 @@ class CondaMetadataTui(App[None]):
             return
         row = self._selected_compare_file_row()
         if row is None:
+            return
+        if (
+            not row.comparison_known
+            and row.left_file is not None
+            and row.right_file is not None
+        ):
+            compare_screen = cast(CompareScreen, self.screen)
+            self._file_action_in_progress = True
+            try:
+                self.run_worker(
+                    self._resolve_compare_info_file_and_open(compare_screen, row),
+                    group="compare-info-file-hash",
+                    exclusive=True,
+                    exit_on_error=False,
+                )
+            except Exception:
+                self._file_action_in_progress = False
+                raise
             return
         self.call_after_refresh(lambda: self._open_compare_file_action_screen(row))
 

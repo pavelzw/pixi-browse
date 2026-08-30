@@ -2247,13 +2247,12 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
     asyncio.run(_run())
 
 
-def test_compare_info_tab_shows_unknown_rows_and_requests_lazy_hashes() -> None:
+def test_compare_info_tab_keeps_common_rows_unknown() -> None:
     class _HostApp(App[None]):
         pass
 
     async def _run() -> None:
         app = _HostApp()
-        requested: list[CompareScreen] = []
         compare_data = VersionCompareData(
             left_selection=CompareSelection(
                 "demo",
@@ -2292,10 +2291,7 @@ def test_compare_info_tab_shows_unknown_rows_and_requests_lazy_hashes() -> None:
                 ),
             ),
         )
-        screen = CompareScreen(
-            compare_data,
-            on_info_tab_open=lambda value: requested.append(value),
-        )
+        screen = CompareScreen(compare_data)
         async with app.run_test() as pilot:
             app.push_screen(screen)
             await pilot.pause()
@@ -2308,21 +2304,7 @@ def test_compare_info_tab_shows_unknown_rows_and_requests_lazy_hashes() -> None:
             prompt = cast(Text, option_list.get_option_at_index(0).prompt)
             assert prompt.plain == "? index.json"
             assert prompt.style == "#7a5c00"
-            assert requested == [screen]
             assert view._render_file_header().plain == "[3] pkg/ (0) - info/ (1)"
-
-            screen.set_info_files(
-                resolve_info_file_compare_rows(
-                    compare_data.info_files,
-                    left_sha256={"info/index.json": bytes.fromhex("11" * 32)},
-                    right_sha256={"info/index.json": bytes.fromhex("11" * 32)},
-                )
-            )
-            await pilot.pause()
-
-            prompt = cast(Text, option_list.get_option_at_index(0).prompt)
-            assert prompt.plain == "= index.json"
-            assert prompt.style == "#5c6370"
 
     asyncio.run(_run())
 
@@ -2368,6 +2350,165 @@ def test_info_file_sha256_streams_requested_archive_entries_once() -> None:
         "stream:info",
         "read:info/index.json",
         "read:info/paths.json",
+    ]
+
+
+def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
+    monkeypatch,
+) -> None:
+    left_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.0.0"),
+            build="left_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.0.0-left_0.conda",
+        ),
+    )
+    right_selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.0.1"),
+            build="right_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.0.1-right_0.conda",
+        ),
+    )
+    selected_row = CompareFileRow(
+        label="index.json",
+        left="info/index.json",
+        right="info/index.json",
+        changed=False,
+        left_file=PackageFile("info/index.json"),
+        right_file=PackageFile("info/index.json"),
+        comparison_known=False,
+    )
+    untouched_row = CompareFileRow(
+        label="paths.json",
+        left="info/paths.json",
+        right="info/paths.json",
+        changed=False,
+        left_file=PackageFile("info/paths.json"),
+        right_file=PackageFile("info/paths.json"),
+        comparison_known=False,
+    )
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=left_selection,
+            right_selection=right_selection,
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+            info_files=(selected_row, untouched_row),
+        )
+    )
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    app._file_action_in_progress = True
+    left_archive = cast(PackageArchive, object())
+    right_archive = cast(PackageArchive, object())
+    hash_calls: list[tuple[PackageArchive, set[str]]] = []
+    updated_rows: list[CompareFileRow] = []
+    opened_rows: list[CompareFileRow] = []
+
+    async def _fake_package_url(_package_name: str, entry: VersionEntry) -> str:
+        return entry.file_name
+
+    async def _fake_get_archive(_preview_key: object, url: str) -> PackageArchive:
+        if url == left_selection.entry.file_name:
+            return left_archive
+        assert url == right_selection.entry.file_name
+        return right_archive
+
+    async def _fake_info_file_sha256(
+        archive: PackageArchive, paths: set[str]
+    ) -> dict[str, bytes]:
+        hash_calls.append((archive, paths))
+        digest = bytes.fromhex("11" * 32 if archive is left_archive else "22" * 32)
+        return {path: digest for path in paths}
+
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
+    monkeypatch.setattr(app, "_package_url_for_version_entry", _fake_package_url)
+    monkeypatch.setattr(app._version_loader, "get_package_archive", _fake_get_archive)
+    monkeypatch.setattr(app, "_info_file_sha256", _fake_info_file_sha256)
+    monkeypatch.setattr(screen, "set_info_file_row", updated_rows.append)
+    monkeypatch.setattr(app, "call_after_refresh", lambda callback: callback())
+    monkeypatch.setattr(app, "_open_compare_file_action_screen", opened_rows.append)
+
+    asyncio.run(app._resolve_compare_info_file_and_open(screen, selected_row))
+
+    assert hash_calls == [
+        (left_archive, {"info/index.json"}),
+        (right_archive, {"info/index.json"}),
+    ]
+    assert updated_rows == opened_rows
+    assert len(opened_rows) == 1
+    assert opened_rows[0].comparison_known is True
+    assert opened_rows[0].changed is True
+    assert opened_rows[0].left_file is not None
+    assert opened_rows[0].left_file.sha256 == bytes.fromhex("11" * 32)
+    assert opened_rows[0].right_file is not None
+    assert opened_rows[0].right_file.sha256 == bytes.fromhex("22" * 32)
+    assert app._file_action_in_progress is False
+
+
+def test_request_unknown_compare_info_file_starts_hash_worker(monkeypatch) -> None:
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.0.0"),
+            build="build_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.0.0-build_0.conda",
+        ),
+    )
+    row = CompareFileRow(
+        label="index.json",
+        left="info/index.json",
+        right="info/index.json",
+        changed=False,
+        left_file=PackageFile("info/index.json"),
+        right_file=PackageFile("info/index.json"),
+        comparison_known=False,
+    )
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=selection,
+            right_selection=selection,
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(),
+            info_files=(row,),
+        )
+    )
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    worker_calls: list[dict[str, object]] = []
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
+    monkeypatch.setattr(screen, "selected_file_row", lambda: row)
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._request_file_action_for_selected_compare_file()
+
+    assert app._file_action_in_progress is True
+    assert worker_calls == [
+        {
+            "group": "compare-info-file-hash",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
     ]
 
 
