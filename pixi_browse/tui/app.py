@@ -974,6 +974,7 @@ class CondaMetadataTui(App[None]):
 
     @staticmethod
     async def _info_file_sha256(archive: PackageArchive, path: str) -> bytes:
+        # TODO: don't read in all bytes into memory but stream
         contents = await archive.read_file(path)
         assert contents is not None
         return sha256(contents).digest()
