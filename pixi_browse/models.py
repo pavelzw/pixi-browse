@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlparse
 
 from rattler.package import RunExportsJson
+from rattler.repo_data import PackageRecord
 from rattler.version import Version
 
 ViewMode = Literal["packages", "versions", "platforms"]
@@ -57,31 +57,12 @@ ArtifactSource = LocalArtifactSource | RemoteArtifactSource
 
 
 @dataclass(frozen=True)
-class ArtifactMetadata:
-    name: str
-    version: Version
-    build: str
-    build_number: int
-    subdir: str
-    file_name: str
+class ArtifactDescriptor:
+    record: PackageRecord
     source: ArtifactSource
-    dependencies: tuple[str, ...] = ()
-    constraints: tuple[str, ...] = ()
+    file_name: str
     channel: str | None = None
-    size: int | None = None
-    timestamp: datetime | None = None
-    license: str | None = None
-    license_family: str | None = None
-    arch: str | None = None
-    platform: str | None = None
-    noarch: str | None = None
-    features: str | None = None
-    track_features: tuple[str, ...] = ()
-    python_site_packages_path: str | None = None
-    md5: bytes | None = None
-    sha256: bytes | None = None
-    legacy_bz2_md5: bytes | None = None
-    legacy_bz2_size: int | None = None
+    package_name: str | None = None
 
 
 @dataclass(frozen=True)

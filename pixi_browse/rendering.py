@@ -13,8 +13,9 @@ from rattler.repo_data import RepoDataRecord
 from rattler.version import VersionWithSource
 from rich.markup import escape
 
+from pixi_browse.artifacts import into_package_record
 from pixi_browse.models import (
-    ArtifactMetadata,
+    ArtifactDescriptor,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -326,7 +327,7 @@ def _format_plain_run_exports_lines(run_exports: RunExportsJson | None) -> list[
 
 
 def _metadata_rows_for_artifact(
-    metadata: ArtifactMetadata,
+    artifact: ArtifactDescriptor,
     *,
     clickable: bool = False,
     repository_urls: Sequence[str] = (),
@@ -337,35 +338,36 @@ def _metadata_rows_for_artifact(
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
 ) -> tuple[MetadataRow, ...]:
+    record = artifact.record
     metadata_rows: list[MetadataRow] = [
-        ("Package", metadata.name),
-        ("Name", metadata.name),
-        ("Version", format_record_value(metadata.version)),
-        ("Build", format_record_value(metadata.build)),
-        ("Build Number", format_record_value(metadata.build_number)),
-        ("Subdir", format_record_value(metadata.subdir)),
-        ("File Name", format_record_value(metadata.file_name)),
-        ("Channel", format_record_value(metadata.channel)),
-        ("Size", format_byte_size(metadata.size)),
-        ("Timestamp", format_record_value(metadata.timestamp)),
-        ("License", format_record_value(metadata.license)),
-        ("License Family", format_record_value(metadata.license_family)),
-        ("Arch", format_record_value(metadata.arch)),
-        ("Platform", format_record_value(metadata.platform)),
-        ("NoArch", format_record_value(metadata.noarch)),
-        ("Features", format_record_value(metadata.features)),
-        ("Track Features", format_record_value(metadata.track_features)),
+        ("Package", artifact.package_name or record.name.normalized),
+        ("Name", record.name.source),
+        ("Version", format_record_value(record.version)),
+        ("Build", format_record_value(record.build)),
+        ("Build Number", format_record_value(record.build_number)),
+        ("Subdir", format_record_value(record.subdir)),
+        ("File Name", format_record_value(artifact.file_name)),
+        ("Channel", format_record_value(artifact.channel)),
+        ("Size", format_byte_size(record.size)),
+        ("Timestamp", format_record_value(record.timestamp)),
+        ("License", format_record_value(record.license)),
+        ("License Family", format_record_value(record.license_family)),
+        ("Arch", format_record_value(record.arch)),
+        ("Platform", format_record_value(record.platform)),
+        ("NoArch", format_record_value(record.noarch)),
+        ("Features", format_record_value(record.features)),
+        ("Track Features", format_record_value(record.track_features)),
         (
             "Python Site-Packages",
-            format_record_value(metadata.python_site_packages_path),
+            format_record_value(record.python_site_packages_path),
         ),
-        ("MD5", format_record_value(metadata.md5)),
-        ("SHA256", format_record_value(metadata.sha256)),
-        ("Legacy .tar.bz2 MD5", format_record_value(metadata.legacy_bz2_md5)),
-        ("Legacy .tar.bz2 Size", format_byte_size(metadata.legacy_bz2_size)),
+        ("MD5", format_record_value(record.md5)),
+        ("SHA256", format_record_value(record.sha256)),
+        ("Legacy .tar.bz2 MD5", format_record_value(record.legacy_bz2_md5)),
+        ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
         (
             "Package URL",
-            _format_url_value(metadata.source.location, clickable=clickable),
+            _format_url_value(artifact.source.location, clickable=clickable),
         ),
     ]
     if repository_urls:
@@ -409,34 +411,15 @@ def _metadata_rows_for_artifact(
     return tuple(metadata_rows)
 
 
-def _artifact_metadata_from_record(
+def _artifact_descriptor_from_record(
     package_name: str, record: RepoDataRecord
-) -> ArtifactMetadata:
-    return ArtifactMetadata(
-        name=package_name,
-        version=record.version,
-        build=record.build,
-        build_number=record.build_number,
-        subdir=record.subdir,
+) -> ArtifactDescriptor:
+    return ArtifactDescriptor(
+        record=into_package_record(record),
         file_name=record.file_name,
         source=RemoteArtifactSource(str(record.url)),
-        dependencies=tuple(str(dependency) for dependency in record.depends or ()),
-        constraints=tuple(str(constraint) for constraint in record.constrains or ()),
         channel=None if record.channel is None else str(record.channel),
-        size=record.size,
-        timestamp=record.timestamp,
-        license=record.license,
-        license_family=record.license_family,
-        arch=record.arch,
-        platform=record.platform,
-        noarch=None if record.noarch is None else str(record.noarch),
-        features=record.features,
-        track_features=tuple(record.track_features or ()),
-        python_site_packages_path=record.python_site_packages_path,
-        md5=record.md5,
-        sha256=record.sha256,
-        legacy_bz2_md5=record.legacy_bz2_md5,
-        legacy_bz2_size=record.legacy_bz2_size,
+        package_name=package_name,
     )
 
 
@@ -456,7 +439,7 @@ def build_version_artifact_data(
     run_exports: RunExportsJson | None = None,
 ) -> VersionArtifactData:
     return build_artifact_data(
-        _artifact_metadata_from_record(package_name, record),
+        _artifact_descriptor_from_record(package_name, record),
         package_paths=package_paths,
         info_files=info_files,
         repository_urls=repository_urls,
@@ -471,7 +454,7 @@ def build_version_artifact_data(
 
 
 def build_artifact_data(
-    metadata: ArtifactMetadata,
+    artifact: ArtifactDescriptor,
     *,
     package_paths: Sequence[PackageFile] = (),
     info_files: Sequence[PackageFile] = (),
@@ -486,7 +469,7 @@ def build_artifact_data(
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=_metadata_rows_for_artifact(
-            metadata,
+            artifact,
             repository_urls=repository_urls,
             documentation_urls=documentation_urls,
             homepage_urls=homepage_urls,
@@ -495,9 +478,9 @@ def build_artifact_data(
             provenance_sha=provenance_sha,
             rattler_build_version=rattler_build_version,
         ),
-        dependencies=metadata.dependencies,
-        constraints=metadata.constraints,
-        package_url=metadata.source.location,
+        dependencies=tuple(str(dependency) for dependency in artifact.record.depends),
+        constraints=tuple(str(constraint) for constraint in artifact.record.constrains),
+        package_url=artifact.source.location,
         file_paths=tuple(package_paths),
         info_files=tuple(info_files),
         run_exports=run_exports,

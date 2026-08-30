@@ -8,9 +8,10 @@ from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
+from pixi_browse.artifacts import into_package_record
 from pixi_browse.models import (
     ArtifactCacheKey,
-    ArtifactMetadata,
+    ArtifactDescriptor,
     ArtifactSource,
     LocalArtifactSource,
     PackageFile,
@@ -27,7 +28,7 @@ from .state import AboutUrls
 @dataclass(frozen=True)
 class LoadedArtifact:
     source: ArtifactSource
-    metadata: ArtifactMetadata
+    descriptor: ArtifactDescriptor
     entry: VersionEntry
     archive: PackageArchive
     data: VersionArtifactData
@@ -296,36 +297,25 @@ class VersionDataLoader:
         if not file_name:
             file_name = f"{index.name.source}-{index.version}-{index.build}.conda"
 
-        metadata = ArtifactMetadata(
-            name=index.name.normalized,
-            version=index.version,
-            build=index.build,
-            build_number=index.build_number,
-            subdir=index.subdir or "unknown",
+        record = into_package_record(index)
+        if size is not None:
+            record.size = size
+        descriptor = ArtifactDescriptor(
+            record=record,
             file_name=file_name,
             source=source,
-            dependencies=tuple(index.depends),
-            constraints=tuple(index.constrains),
-            size=size,
-            timestamp=index.timestamp,
-            license=index.license,
-            license_family=index.license_family,
-            arch=index.arch,
-            platform=index.platform,
-            features=index.features,
-            track_features=tuple(index.track_features),
         )
         entry = VersionEntry(
-            version=metadata.version,
-            build=metadata.build,
-            build_number=metadata.build_number,
-            subdir=metadata.subdir,
-            file_name=metadata.file_name,
+            version=record.version,
+            build=record.build,
+            build_number=record.build_number,
+            subdir=record.subdir,
+            file_name=descriptor.file_name,
         )
 
         cached = self.artifact_data_cache.get(source.cache_key)
         if cached is not None:
-            return LoadedArtifact(source, metadata, entry, archive, cached)
+            return LoadedArtifact(source, descriptor, entry, archive, cached)
 
         package_paths = await self.get_package_paths(source.cache_key, archive)
         info_files = await self.get_info_files(archive)
@@ -341,7 +331,7 @@ class VersionDataLoader:
             pass
 
         artifact_data = build_artifact_data(
-            metadata,
+            descriptor,
             package_paths=package_paths,
             info_files=info_files,
             repository_urls=about_urls.repository,
@@ -354,4 +344,4 @@ class VersionDataLoader:
             run_exports=run_exports,
         )
         self.artifact_data_cache[source.cache_key] = artifact_data
-        return LoadedArtifact(source, metadata, entry, archive, artifact_data)
+        return LoadedArtifact(source, descriptor, entry, archive, artifact_data)

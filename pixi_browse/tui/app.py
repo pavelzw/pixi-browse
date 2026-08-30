@@ -218,7 +218,7 @@ class CondaMetadataTui(App[None]):
         self._show_direct_artifact(artifacts[0])
 
     def _show_direct_artifact(self, artifact: LoadedArtifact) -> None:
-        package_name = artifact.metadata.name
+        package_name = artifact.descriptor.record.name.normalized
         preview_key = self._version_preview_key(package_name, artifact.entry)
         self._direct_artifacts[preview_key] = artifact
         self._version_archive_cache[preview_key] = artifact.archive
@@ -244,12 +244,12 @@ class CondaMetadataTui(App[None]):
         self, left: LoadedArtifact, right: LoadedArtifact
     ) -> None:
         left_selection = CompareSelection(
-            package_name=left.metadata.name,
+            package_name=left.descriptor.record.name.normalized,
             entry=left.entry,
             source=left.source,
         )
         right_selection = CompareSelection(
-            package_name=right.metadata.name,
+            package_name=right.descriptor.record.name.normalized,
             entry=right.entry,
             source=right.source,
         )

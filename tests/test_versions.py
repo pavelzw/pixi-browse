@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
-from rattler.package import NoArchLiteral, RunExportsJson
+from rattler.package import IndexJson, NoArchLiteral, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
@@ -23,6 +23,7 @@ from textual.widgets import Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
+from pixi_browse.artifacts import into_package_record
 from pixi_browse.models import (
     ArtifactCacheKey,
     ArtifactSource,
@@ -513,31 +514,23 @@ def test_load_local_artifact_source_builds_normalized_artifact(
     source = LocalArtifactSource(artifact_path.resolve())
     loader = VersionDataLoader(client=cast(Client, object()))
 
-    @dataclass(frozen=True)
-    class _Name:
-        source: str = "demo"
-        normalized: str = "demo"
-
-    @dataclass(frozen=True)
-    class _Index:
-        name: _Name = _Name()
-        version: Version = Version("1.2.3")
-        build: str = "py313_0"
-        build_number: int = 0
-        subdir: str = "noarch"
-        depends: tuple[str, ...] = ("python >=3.13",)
-        constrains: tuple[str, ...] = ("demo-core >=1",)
-        timestamp: None = None
-        license: str = "BSD-3-Clause"
-        license_family: str = "BSD"
-        arch: None = None
-        platform: None = None
-        features: None = None
-        track_features: tuple[str, ...] = ()
+    index = IndexJson.from_str(
+        """{
+            "name": "demo",
+            "version": "1.2.3",
+            "build": "py313_0",
+            "build_number": 0,
+            "subdir": "noarch",
+            "depends": ["python >=3.13"],
+            "constrains": ["demo-core >=1"],
+            "license": "BSD-3-Clause",
+            "license_family": "BSD"
+        }"""
+    )
 
     class _Archive:
-        async def index_json(self) -> _Index:
-            return _Index()
+        async def index_json(self) -> IndexJson:
+            return index
 
     archive = cast(PackageArchive, _Archive())
 
@@ -578,13 +571,19 @@ def test_load_local_artifact_source_builds_normalized_artifact(
     loaded = asyncio.run(loader.load_artifact_source(source))
 
     assert loaded.source == source
-    assert loaded.metadata.name == "demo"
-    assert loaded.metadata.version == Version("1.2.3")
-    assert loaded.metadata.dependencies == ("python >=3.13",)
+    assert loaded.descriptor.record.name.normalized == "demo"
+    assert loaded.descriptor.record.version == Version("1.2.3")
+    assert loaded.descriptor.record.depends == ["python >=3.13"]
     assert loaded.entry.file_name == artifact_path.name
     assert loaded.data.file_paths == (PackageFile("bin/demo", 42),)
     assert loaded.data.info_files == (PackageFile("info/index.json", 100),)
     assert loaded.data.homepage_urls == ("https://example.com/demo",)
+
+
+def test_into_package_record_keeps_repo_data_record() -> None:
+    record = _make_repo_data_record()
+
+    assert into_package_record(record) is record
 
 
 def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (
