@@ -9,6 +9,7 @@ import pytest
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
+from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
@@ -76,6 +77,10 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageArchive:
+    return cast(PackageArchive, object())
 
 
 def _make_artifact_data(
@@ -383,6 +388,10 @@ def test_load_version_details_raises_when_package_paths_are_unavailable(
     ) -> list[PackageFile]:
         raise RuntimeError("paths.json missing")
 
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_package_archive_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
     with pytest.raises(RuntimeError, match=r"paths\.json missing"):
@@ -397,23 +406,41 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     loader = VersionDataLoader(client=cast(Client, object()))
     record = _make_repo_data_record(name="demo")
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+    archive = cast(PackageArchive, object())
+    calls: list[str] = []
+
+    async def _fake_from_url(_client: Client, _url: str) -> PackageArchive:
+        calls.append("from_url")
+        return archive
 
     async def _fake_get_package_paths(
-        _preview_key: tuple[str, str, str, int, str, str], _url: str
+        _preview_key: tuple[str, str, str, int, str, str], value: PackageArchive
     ) -> list[PackageFile]:
+        assert value is archive
+        calls.append("paths_json")
         return []
 
     async def _fake_get_about_urls(
-        _preview_key: tuple[str, str, str, int, str, str], _url: str
+        _preview_key: tuple[str, str, str, int, str, str], value: PackageArchive
     ) -> AboutUrls:
+        assert value is archive
+        calls.append("about_json")
         raise RuntimeError("about.json missing")
 
-    async def _fake_get_run_exports(_url: str) -> RunExportsJson:
+    async def _fake_get_run_exports(value: PackageArchive) -> RunExportsJson:
+        assert value is archive
+        calls.append("run_exports_json")
         return RunExportsJson()
 
-    async def _fake_get_info_paths(_url: str) -> list[str]:
+    async def _fake_get_info_paths(value: PackageArchive) -> list[str]:
+        assert value is archive
+        calls.append("list_files")
         return ["info/index.json"]
 
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
     monkeypatch.setattr(loader, "get_info_paths", _fake_get_info_paths)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
@@ -428,6 +455,13 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         for line in format_version_details_metadata_lines(details)
     )
     assert details.info_paths == ("info/index.json",)
+    assert calls == [
+        "from_url",
+        "paths_json",
+        "list_files",
+        "about_json",
+        "run_exports_json",
+    ]
 
 
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
@@ -442,6 +476,10 @@ def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
     ) -> list[PackageFile]:
         raise RuntimeError("paths.json missing")
 
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_package_archive_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
     with pytest.raises(RuntimeError, match=r"paths\.json missing"):
@@ -745,8 +783,8 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
     assert "Dependencies" not in rendered
 
 
-def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
-    app = CondaMetadataTui()
+def test_get_package_paths_caches_archive_paths() -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
@@ -789,19 +827,14 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
             ),
         ]
 
-    async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
-        del client
-        calls.append(url)
-        return _FakePathsJson()
+    class _FakeArchive:
+        async def paths_json(self) -> _FakePathsJson:
+            calls.append("paths_json")
+            return _FakePathsJson()
 
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.PathsJson.from_remote_url",
-        _fake_from_remote_url,
-    )
-
-    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    paths = asyncio.run(app._get_package_paths(preview_key, url))
-    cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
+    archive = cast(PackageArchive, _FakeArchive())
+    paths = asyncio.run(loader.get_package_paths(preview_key, archive))
+    cached_paths = asyncio.run(loader.get_package_paths(preview_key, archive))
 
     assert paths == [
         PackageFile(
@@ -820,10 +853,10 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
         ),
     ]
     assert cached_paths == paths
-    assert calls == [url]
+    assert calls == ["paths_json"]
 
 
-def test_get_info_paths_lists_only_archive_info_section(monkeypatch) -> None:
+def test_get_info_paths_lists_only_archive_info_section() -> None:
     loader = VersionDataLoader(client=cast(Client, object()))
     calls: list[tuple[str, str]] = []
 
@@ -832,24 +865,15 @@ def test_get_info_paths_lists_only_archive_info_section(monkeypatch) -> None:
             calls.append(("list_files", section))
             return ["info/index.json", "info/paths.json"]
 
-    async def _fake_from_url(_client: Client, url: str) -> _FakeArchive:
-        calls.append(("from_url", url))
-        return _FakeArchive()
-
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.PackageArchive.from_url",
-        _fake_from_url,
-    )
-
-    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    paths = asyncio.run(loader.get_info_paths(url))
+    archive = cast(PackageArchive, _FakeArchive())
+    paths = asyncio.run(loader.get_info_paths(archive))
 
     assert paths == ["info/index.json", "info/paths.json"]
-    assert calls == [("from_url", url), ("list_files", "info")]
+    assert calls == [("list_files", "info")]
 
 
-def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
-    app = CondaMetadataTui()
+def test_get_about_urls_caches_archive_about_json() -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
@@ -863,31 +887,18 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
             "sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
         }
 
-    async def _fake_from_remote_url(client: object, url: str) -> _FakeAboutJson:
-        del client
-        calls.append(url)
-        return _FakeAboutJson()
+    class _FakeArchive:
+        async def about_json(self) -> _FakeAboutJson:
+            calls.append("about_json")
+            return _FakeAboutJson()
 
-    async def _fake_fetch_raw_package_file_from_url(
-        client: object, url: str, path: str
-    ) -> bytes:
-        del client
-        assert url == "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-        assert path == "info/recipe/rendered_recipe.yaml"
-        return b"system_tools:\n  rattler-build: 0.38.0\n"
+        async def read_file(self, path: str) -> bytes:
+            calls.append(path)
+            return b"system_tools:\n  rattler-build: 0.38.0\n"
 
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.AboutJson.from_remote_url",
-        _fake_from_remote_url,
-    )
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.fetch_raw_package_file_from_url",
-        _fake_fetch_raw_package_file_from_url,
-    )
-
-    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    about_urls = asyncio.run(app._get_about_urls(preview_key, url))
-    cached_about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+    archive = cast(PackageArchive, _FakeArchive())
+    about_urls = asyncio.run(loader.get_about_urls(preview_key, archive))
+    cached_about_urls = asyncio.run(loader.get_about_urls(preview_key, archive))
 
     assert about_urls == AboutUrls(
         repository=("https://github.com/example/demo",),
@@ -899,7 +910,7 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         rattler_build_version="0.38.0",
     )
     assert cached_about_urls == about_urls
-    assert calls == [url]
+    assert calls == ["about_json", "info/recipe/rendered_recipe.yaml"]
 
 
 def test_extract_rattler_build_version_from_rendered_recipe() -> None:

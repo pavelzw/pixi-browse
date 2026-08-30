@@ -53,7 +53,7 @@ from pixi_browse.repodata import (
 )
 from pixi_browse.search import fuzzy_score
 
-from .state import AboutUrls, ChannelStateSnapshot
+from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
@@ -940,16 +940,6 @@ class CondaMetadataTui(App[None]):
         if package_name is None:
             return None
         return CompareSelection(package_name=package_name, entry=row.entry)
-
-    async def _get_package_paths(
-        self, preview_key: VersionPreviewKey, url: str
-    ) -> list[PackageFile]:
-        return await self._version_loader.get_package_paths(preview_key, url)
-
-    async def _get_about_urls(
-        self, preview_key: VersionPreviewKey, url: str
-    ) -> AboutUrls:
-        return await self._version_loader.get_about_urls(preview_key, url)
 
     async def _load_compare_artifact(
         self, selection: CompareSelection
