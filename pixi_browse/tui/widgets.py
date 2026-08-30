@@ -1308,18 +1308,19 @@ class CompareDetailsView(Vertical):
             for row in rows
         )
 
-    def _render_compare_file_option(self, row: CompareFileRow) -> Text:
-        row_style = self._file_row_style(row)
+    @classmethod
+    def _render_compare_file_option(cls, row: CompareFileRow) -> Text:
+        row_style = cls._file_row_style(row)
         if row.comparison_known:
             label_style = row_style
-            text = Text(self._compare_file_prefix(row), style=row_style)
+            text = Text(cls._compare_file_prefix(row), style=row_style)
             text.append(row.label, style=row_style)
         else:
             label_style = "#5c6370"
             text = Text()
-            text.append(self._compare_file_prefix(row), style=row_style)
+            text.append(cls._compare_file_prefix(row), style=row_style)
             text.append(row.label, style=label_style)
-        suffix = self._compare_file_suffix(row)
+        suffix = cls._compare_file_suffix(row)
         if suffix:
             text.append(
                 suffix,

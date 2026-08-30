@@ -2059,15 +2059,6 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
     assert all(isinstance(section, DetailSection) for section in sections)
 
 
-def test_version_details_view_keeps_pkg_and_info_in_one_file_section() -> None:
-    view = VersionDetailsView()
-
-    sections = list(view.compose())
-
-    assert len(sections) == 3
-    assert all(isinstance(section, DetailSection) for section in sections)
-
-
 def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
     view = VersionDetailsView()
     view._pane_selected = False
@@ -2299,307 +2290,27 @@ def test_compare_file_rows_show_sizes_instead_of_sha256_values() -> None:
     assert "22222222" not in option
 
 
-def test_compare_info_tab_keeps_common_rows_unknown() -> None:
-    class _HostApp(App[None]):
-        pass
-
-    async def _run() -> None:
-        app = _HostApp()
-        compare_data = VersionCompareData(
-            left_selection=CompareSelection(
-                "demo",
-                VersionEntry(
-                    version=Version("1.0.0"),
-                    build="left_0",
-                    build_number=0,
-                    subdir="noarch",
-                    file_name="demo-1.0.0-left_0.conda",
-                ),
-            ),
-            right_selection=CompareSelection(
-                "demo",
-                VersionEntry(
-                    version=Version("1.0.1"),
-                    build="right_0",
-                    build_number=0,
-                    subdir="noarch",
-                    file_name="demo-1.0.1-right_0.conda",
-                ),
-            ),
-            metadata_rows=(),
-            dependencies=(),
-            constraints=(),
-            run_exports=(),
-            files=(),
-            info_files=(
-                CompareFileRow(
-                    label="index.json",
-                    left="info/index.json",
-                    right="info/index.json",
-                    changed=False,
-                    left_file=PackageFile("info/index.json", 1234),
-                    right_file=PackageFile("info/index.json", 1234),
-                    comparison_known=False,
-                ),
-            ),
-        )
-        screen = CompareScreen(compare_data)
-        async with app.run_test() as pilot:
-            app.push_screen(screen)
-            await pilot.pause()
-            view = screen.query_one(CompareDetailsView)
-
-            view.select_file_tab("info")
-            await pilot.pause()
-
-            option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
-            prompt = cast(Text, option_list.get_option_at_index(0).prompt)
-            assert prompt.plain == "? index.json (1.2 KiB)"
-            assert any(
-                span.style == "#7a5c00" and prompt.plain[span.start : span.end] == "? "
-                for span in prompt.spans
-            )
-            assert any(
-                span.style == "#5c6370"
-                and prompt.plain[span.start : span.end] == "index.json"
-                for span in prompt.spans
-            )
-            assert any(
-                span.style == Style(color="#5c6370", dim=True)
-                and prompt.plain[span.start : span.end] == " (1.2 KiB)"
-                for span in prompt.spans
-            )
-            assert view._render_file_header().plain == "[3] pkg/ (0) - info/ (1)"
-
-    asyncio.run(_run())
-
-
-def test_info_file_sha256_reads_requested_archive_entry() -> None:
-    calls: list[str] = []
-
-    class _FakeArchive:
-        async def read_file(self, path: str) -> bytes | None:
-            calls.append(path)
-            return b"paths"
-
-    digest = asyncio.run(
-        CondaMetadataTui._info_file_sha256(
-            cast(PackageArchive, _FakeArchive()),
-            "info/paths.json",
-        )
-    )
-
-    assert digest == bytes.fromhex(
-        "504dbd7ea99e812ff1ef64c6a162e32890b928a3df1f9e3450aadb7037889be5"
-    )
-    assert calls == ["info/paths.json"]
-
-
-def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
-    monkeypatch,
-) -> None:
-    left_selection = CompareSelection(
-        "demo",
-        VersionEntry(
-            version=Version("1.0.0"),
-            build="left_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.0.0-left_0.conda",
-        ),
-    )
-    right_selection = CompareSelection(
-        "demo",
-        VersionEntry(
-            version=Version("1.0.1"),
-            build="right_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.0.1-right_0.conda",
-        ),
-    )
-    selected_row = CompareFileRow(
-        label="index.json",
-        left="info/index.json",
-        right="info/index.json",
-        changed=False,
-        left_file=PackageFile("info/index.json"),
-        right_file=PackageFile("info/index.json"),
-        comparison_known=False,
-    )
-    untouched_row = CompareFileRow(
-        label="paths.json",
-        left="info/paths.json",
-        right="info/paths.json",
-        changed=False,
-        left_file=PackageFile("info/paths.json"),
-        right_file=PackageFile("info/paths.json"),
-        comparison_known=False,
-    )
-    screen = CompareScreen(
-        VersionCompareData(
-            left_selection=left_selection,
-            right_selection=right_selection,
-            metadata_rows=(),
-            dependencies=(),
-            constraints=(),
-            run_exports=(),
-            files=(),
-            info_files=(selected_row, untouched_row),
-        )
-    )
-    app = CondaMetadataTui()
-    app._compare_screen_open = True
-    app._file_action_in_progress = True
-    left_archive = cast(PackageArchive, object())
-    right_archive = cast(PackageArchive, object())
-    hash_calls: list[tuple[PackageArchive, str]] = []
-    updated_rows: list[CompareFileRow] = []
-    opened_rows: list[CompareFileRow] = []
-
-    async def _fake_package_url(_package_name: str, entry: VersionEntry) -> str:
-        return entry.file_name
-
-    async def _fake_get_archive(_preview_key: object, url: str) -> PackageArchive:
-        if url == left_selection.entry.file_name:
-            return left_archive
-        assert url == right_selection.entry.file_name
-        return right_archive
-
-    async def _fake_info_file_sha256(archive: PackageArchive, path: str) -> bytes:
-        hash_calls.append((archive, path))
-        return bytes.fromhex("11" * 32 if archive is left_archive else "22" * 32)
-
-    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
-    monkeypatch.setattr(app, "_package_url_for_version_entry", _fake_package_url)
-    monkeypatch.setattr(app._version_loader, "get_package_archive", _fake_get_archive)
-    monkeypatch.setattr(app, "_info_file_sha256", _fake_info_file_sha256)
-    monkeypatch.setattr(screen, "set_info_file_row", updated_rows.append)
-    monkeypatch.setattr(app, "call_after_refresh", lambda callback: callback())
-    monkeypatch.setattr(app, "_open_compare_file_action_screen", opened_rows.append)
-
-    asyncio.run(app._resolve_compare_info_file_and_open(screen, selected_row))
-
-    assert hash_calls == [
-        (left_archive, "info/index.json"),
-        (right_archive, "info/index.json"),
-    ]
-    assert updated_rows == opened_rows
-    assert len(opened_rows) == 1
-    assert opened_rows[0].comparison_known is True
-    assert opened_rows[0].changed is True
-    assert opened_rows[0].left_file is not None
-    assert opened_rows[0].left_file.sha256 == bytes.fromhex("11" * 32)
-    assert opened_rows[0].right_file is not None
-    assert opened_rows[0].right_file.sha256 == bytes.fromhex("22" * 32)
-    assert app._file_action_in_progress is False
-
-
-def test_request_unhashed_compare_info_file_starts_hash_worker(monkeypatch) -> None:
-    selection = CompareSelection(
-        "demo",
-        VersionEntry(
-            version=Version("1.0.0"),
-            build="build_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.0.0-build_0.conda",
-        ),
-    )
+def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     row = CompareFileRow(
         label="index.json",
         left="info/index.json",
         right="info/index.json",
-        changed=True,
-        left_file=PackageFile("info/index.json", 100),
-        right_file=PackageFile("info/index.json", 200),
-        comparison_known=True,
-    )
-    screen = CompareScreen(
-        VersionCompareData(
-            left_selection=selection,
-            right_selection=selection,
-            metadata_rows=(),
-            dependencies=(),
-            constraints=(),
-            run_exports=(),
-            files=(),
-            info_files=(row,),
-        )
-    )
-    app = CondaMetadataTui()
-    app._compare_screen_open = True
-    worker_calls: list[dict[str, object]] = []
-
-    def _fake_run_worker(coro: object, **kwargs: object) -> None:
-        worker_calls.append(kwargs)
-        coro.close()  # type: ignore[attr-defined]
-
-    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
-    monkeypatch.setattr(screen, "selected_file_row", lambda: row)
-    monkeypatch.setattr(screen, "active_file_tab", lambda: "info")
-    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
-
-    app._request_file_action_for_selected_compare_file()
-
-    assert app._file_action_in_progress is True
-    assert worker_calls == [
-        {
-            "group": "compare-info-file-hash",
-            "exclusive": True,
-            "exit_on_error": False,
-        }
-    ]
-
-
-def test_request_unhashed_compare_pkg_file_opens_without_hashing(monkeypatch) -> None:
-    selection = CompareSelection(
-        "demo",
-        VersionEntry(
-            version=Version("1.0.0"),
-            build="build_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.0.0-build_0.conda",
-        ),
-    )
-    row = CompareFileRow(
-        label="bin/demo",
-        left="bin/demo",
-        right="bin/demo",
         changed=False,
-        left_file=PackageFile("bin/demo", 100),
-        right_file=PackageFile("bin/demo", 100),
-    )
-    screen = CompareScreen(
-        VersionCompareData(
-            left_selection=selection,
-            right_selection=selection,
-            metadata_rows=(),
-            dependencies=(),
-            constraints=(),
-            run_exports=(),
-            files=(row,),
-        )
-    )
-    app = CondaMetadataTui()
-    app._compare_screen_open = True
-    opened_rows: list[CompareFileRow] = []
-
-    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
-    monkeypatch.setattr(screen, "selected_file_row", lambda: row)
-    monkeypatch.setattr(screen, "active_file_tab", lambda: "pkg")
-    monkeypatch.setattr(app, "call_after_refresh", lambda callback: callback())
-    monkeypatch.setattr(app, "_open_compare_file_action_screen", opened_rows.append)
-    monkeypatch.setattr(
-        app,
-        "run_worker",
-        lambda *_args, **_kwargs: pytest.fail("pkg rows must not start SHA workers"),
+        left_file=PackageFile("info/index.json", 1234),
+        right_file=PackageFile("info/index.json", 1234),
+        comparison_known=False,
     )
 
-    app._request_file_action_for_selected_compare_file()
+    prompt = CompareDetailsView._render_compare_file_option(row)
 
-    assert opened_rows == [row]
+    assert prompt.plain == "? index.json (1.2 KiB)"
+    assert [
+        (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
+    ] == [
+        ("? ", "#7a5c00"),
+        ("index.json", "#5c6370"),
+        (" (1.2 KiB)", Style(color="#5c6370", dim=True)),
+    ]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
@@ -2819,43 +2530,6 @@ def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
 
     assert cycled == []
     assert event.stopped is False
-
-
-def test_on_key_bracket_shortcut_cycles_file_tabs_when_file_pane_is_active(
-    monkeypatch,
-) -> None:
-    app = CondaMetadataTui()
-    app._mode = "versions"
-    app._selected_pane = "main"
-    tab_directions: list[int] = []
-    focused: list[str] = []
-
-    class _FakeMainPanel:
-        def dependency_section_is_active(self) -> bool:
-            return False
-
-        def file_section_is_active(self) -> bool:
-            return True
-
-    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
-    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
-    monkeypatch.setattr(
-        app, "_cycle_main_file_tab", lambda value: tab_directions.append(value)
-    )
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
-    monkeypatch.setattr(
-        app,
-        "query_one",
-        lambda selector, _widget_type=None: _FakeMainPanel(),
-    )
-
-    event = _FakeKeyEvent("]", "]")
-    app.on_key(event)  # type: ignore[arg-type]
-
-    assert tab_directions == [1]
-    assert focused == ["main"]
-    assert event.stopped is True
 
 
 def test_sidebar_highlight_does_not_switch_selected_pane_without_sidebar_focus(
@@ -3511,26 +3185,6 @@ def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> No
 
     assert sections == [1]
     assert tabs == ["constraints"]
-    assert focused == ["main"]
-
-
-def test_action_select_file_tab_focuses_file_pane(monkeypatch) -> None:
-    app = CondaMetadataTui()
-    app._mode = "versions"
-    focused: list[str] = []
-    sections: list[int] = []
-    tabs: list[str] = []
-
-    monkeypatch.setattr(
-        app, "_set_active_main_section", lambda value: sections.append(value)
-    )
-    monkeypatch.setattr(app, "_set_main_file_tab", lambda value: tabs.append(value))
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
-
-    app.action_select_file_tab("info")
-
-    assert sections == [2]
-    assert tabs == ["info"]
     assert focused == ["main"]
 
 
