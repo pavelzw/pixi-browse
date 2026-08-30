@@ -548,12 +548,11 @@ class VersionDetailsView(Vertical):
     def _file_label(cls, package_file: PackageFile, tab: FileTab) -> str:
         path = cls._displayed_file_path(package_file.path, tab)
         if package_file.is_symlink:
-            target = (
-                f" -> {package_file.link_target}"
+            return (
+                f"{path} -> {package_file.link_target}"
                 if package_file.link_target is not None
-                else ""
+                else path
             )
-            return f"{path}{target} (symlink)"
         if package_file.size_in_bytes is not None:
             return f"{path} ({format_human_byte_size(package_file.size_in_bytes)})"
         return path
@@ -1366,12 +1365,11 @@ class CompareDetailsView(Vertical):
                 and row.left_file.is_symlink
                 and row.right_file.is_symlink
             ):
-                target = (
+                return (
                     f" -> {row.left_file.link_target}"
                     if row.left_file.link_target is not None
                     else ""
                 )
-                return f" (symlink{target})"
             if not row.changed and left_size == right_size:
                 return (
                     f" ({format_human_byte_size(left_size)})"
@@ -1408,12 +1406,11 @@ class CompareDetailsView(Vertical):
     @staticmethod
     def _compare_file_side_label(package_file: PackageFile) -> str:
         if package_file.is_symlink:
-            target = (
-                f" -> {package_file.link_target}"
+            return (
+                f"-> {package_file.link_target}"
                 if package_file.link_target is not None
-                else ""
+                else "unknown"
             )
-            return f"symlink{target}"
         if package_file.size_in_bytes is not None:
             return format_human_byte_size(package_file.size_in_bytes)
         return "unknown"

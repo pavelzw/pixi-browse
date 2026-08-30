@@ -2334,9 +2334,7 @@ def test_compare_symlinks_show_target_and_have_no_actions() -> None:
         right_file=symlink,
     )
 
-    assert CompareDetailsView._compare_file_suffix(row) == (
-        " (symlink -> recipe/meta.yaml)"
-    )
+    assert CompareDetailsView._compare_file_suffix(row) == " -> recipe/meta.yaml"
     assert CondaMetadataTui._compare_file_action_options(row) == ()
 
     mixed_row = CompareFileRow(
@@ -2512,7 +2510,7 @@ def test_file_list_entry_uses_plain_file_path() -> None:
 
     assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
-    assert entries[1].label == "bin/demo (symlink)"
+    assert entries[1].label == "bin/demo"
     assert entries[1].path is None
 
 
@@ -2536,7 +2534,7 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
     assert [entry.label for entry in entries] == [
         "index.json (1.0 KiB)",
         "recipe/meta.yaml (1.5 KiB)",
-        "current -> recipe/meta.yaml (symlink)",
+        "current -> recipe/meta.yaml",
     ]
     assert [entry.path for entry in entries] == [
         "info/index.json",
