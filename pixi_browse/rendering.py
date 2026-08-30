@@ -22,6 +22,7 @@ from pixi_browse.models import (
     VersionArtifactData,
     VersionCompareData,
 )
+from pixi_browse.platform_utils import sort_subdirs_by_latest_version
 
 _SYNTAX_LEXERS_BY_SUFFIX: dict[str, str] = {
     ".bash": "bash",
@@ -258,9 +259,9 @@ def render_package_preview(
             reverse=True,
         )
 
-    sorted_subdirs = sorted(
+    sorted_subdirs = sort_subdirs_by_latest_version(
         grouped_by_subdir,
-        key=lambda subdir: (subdir == "noarch", subdir),
+        lambda record: record.version,
     )
 
     version_width = max(len(str(record.version)) for record in records)

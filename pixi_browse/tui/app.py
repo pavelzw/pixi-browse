@@ -41,7 +41,10 @@ from pixi_browse.models import (
     VersionRow,
     ViewMode,
 )
-from pixi_browse.platform_utils import platform_sort_key
+from pixi_browse.platform_utils import (
+    platform_sort_key,
+    sort_subdirs_by_latest_version,
+)
 from pixi_browse.rendering import (
     build_version_compare_data,
     format_human_byte_size,
@@ -1968,9 +1971,9 @@ class CondaMetadataTui(App[None]):
         grouped_versions: dict[str, list[VersionEntry]] = defaultdict(list)
         for entry in self._current_versions:
             grouped_versions[entry.subdir].append(entry)
-        self._version_subdirs = sorted(
+        self._version_subdirs = sort_subdirs_by_latest_version(
             grouped_versions,
-            key=lambda subdir: (subdir == "noarch", subdir),
+            lambda entry: entry.version,
         )
         self._versions_by_subdir = {
             subdir: grouped_versions[subdir] for subdir in self._version_subdirs
