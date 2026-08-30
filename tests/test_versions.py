@@ -2276,6 +2276,23 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
     asyncio.run(_run())
 
 
+def test_compare_file_rows_show_sizes_instead_of_sha256_values() -> None:
+    row = CompareFileRow(
+        label="info/index.json",
+        left="info/index.json",
+        right="info/index.json",
+        changed=True,
+        left_file=PackageFile("info/index.json", 1024, bytes.fromhex("11" * 32)),
+        right_file=PackageFile("info/index.json", 2048, bytes.fromhex("22" * 32)),
+    )
+
+    option = CompareDetailsView._compare_file_suffix(row)
+
+    assert option == " [L: 1.0 KiB | R: 2.0 KiB]"
+    assert "11111111" not in option
+    assert "22222222" not in option
+
+
 def test_compare_info_tab_keeps_common_rows_unknown() -> None:
     class _HostApp(App[None]):
         pass

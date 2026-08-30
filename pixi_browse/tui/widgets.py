@@ -1331,8 +1331,6 @@ class CompareDetailsView(Vertical):
         right_size = (
             row.right_file.size_in_bytes if row.right_file is not None else None
         )
-        left_sha256 = row.left_file.sha256 if row.left_file is not None else None
-        right_sha256 = row.right_file.sha256 if row.right_file is not None else None
         if row.left_file is not None and row.right_file is not None:
             if not row.changed and left_size == right_size:
                 return (
@@ -1340,8 +1338,6 @@ class CompareDetailsView(Vertical):
                     if left_size is not None
                     else ""
                 )
-            if left_sha256 is not None and right_sha256 is not None:
-                return f" [L: {left_sha256.hex()[:8]} | R: {right_sha256.hex()[:8]}]"
             left_label = (
                 format_human_byte_size(left_size)
                 if left_size is not None
