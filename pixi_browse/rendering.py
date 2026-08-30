@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -21,6 +22,74 @@ from pixi_browse.models import (
     VersionArtifactData,
     VersionCompareData,
 )
+
+_SYNTAX_LEXERS_BY_SUFFIX: dict[str, str] = {
+    ".bash": "bash",
+    ".bat": "batch",
+    ".c": "c",
+    ".cc": "cpp",
+    ".cfg": "ini",
+    ".cmd": "batch",
+    ".conf": "ini",
+    ".cpp": "cpp",
+    ".css": "css",
+    ".cts": "typescript",
+    ".cxx": "cpp",
+    ".fish": "fish",
+    ".go": "go",
+    ".h": "c",
+    ".hh": "cpp",
+    ".hpp": "cpp",
+    ".htm": "html",
+    ".html": "html",
+    ".hxx": "cpp",
+    ".ini": "ini",
+    ".java": "java",
+    ".js": "javascript",
+    ".json": "json",
+    ".jsx": "jsx",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".markdown": "markdown",
+    ".md": "markdown",
+    ".mjs": "javascript",
+    ".mts": "typescript",
+    ".pl": "perl",
+    ".pm": "perl",
+    ".ps1": "powershell",
+    ".py": "python",
+    ".pyi": "python",
+    ".r": "r",
+    ".rb": "ruby",
+    ".rs": "rust",
+    ".rst": "rst",
+    ".scss": "scss",
+    ".sh": "bash",
+    ".sql": "sql",
+    ".toml": "toml",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".xml": "xml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".zsh": "zsh",
+}
+
+_SYNTAX_LEXERS_BY_FILENAME: dict[str, str] = {
+    "cmakelists.txt": "cmake",
+    "dockerfile": "docker",
+    "makefile": "make",
+}
+
+
+def syntax_lexer_for_path(file_path: str) -> str | None:
+    """Return a Rich/Pygments lexer alias for a supported package file."""
+    path = PurePosixPath(file_path)
+    filename = path.name.lower()
+    lexer = _SYNTAX_LEXERS_BY_FILENAME.get(filename)
+    if lexer is not None:
+        return lexer
+    return _SYNTAX_LEXERS_BY_SUFFIX.get(path.suffix.lower())
 
 
 def _provenance_link(remote_url: str | None, sha: str | None) -> tuple[str, str] | None:

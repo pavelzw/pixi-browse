@@ -47,6 +47,7 @@ from pixi_browse.rendering import (
     format_human_byte_size,
     render_package_preview,
     resolve_info_file_compare_rows,
+    syntax_lexer_for_path,
 )
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
@@ -70,6 +71,7 @@ from .widgets import (
     Empty,
     FileActionOption,
     FileActionScreen,
+    FilePreviewContent,
     FilePreviewScreen,
     HelpScreen,
     MainPanel,
@@ -1404,29 +1406,41 @@ class CondaMetadataTui(App[None]):
         package_bytes: bytes | None,
         *,
         size_in_bytes: int | None = None,
-    ) -> str:
+    ) -> FilePreviewContent:
         if size_in_bytes is None and package_bytes is not None:
             size_in_bytes = len(package_bytes)
 
         if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
-            return (
-                "File too large to preview in-app "
-                f"({size_in_bytes:,} bytes).\n\n"
-                "Use Download as file instead."
+            return FilePreviewContent(
+                text=(
+                    "File too large to preview in-app "
+                    f"({size_in_bytes:,} bytes).\n\n"
+                    "Use Download as file instead."
+                )
             )
 
         assert package_bytes is not None
         if b"\0" in package_bytes:
-            return (
-                "Binary file preview is not supported.\n\nUse Download as file instead."
+            return FilePreviewContent(
+                text=(
+                    "Binary file preview is not supported.\n\n"
+                    "Use Download as file instead."
+                )
             )
 
         try:
-            return package_bytes.decode("utf-8")
+            content = package_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            return (
-                "Binary file preview is not supported.\n\nUse Download as file instead."
+            return FilePreviewContent(
+                text=(
+                    "Binary file preview is not supported.\n\n"
+                    "Use Download as file instead."
+                )
             )
+        return FilePreviewContent(
+            text=content,
+            lexer=syntax_lexer_for_path(file_path),
+        )
 
     @staticmethod
     def _preview_title(
@@ -1519,14 +1533,16 @@ class CondaMetadataTui(App[None]):
             if title_prefix is not None:
                 preview_title = f"{title_prefix}: {preview_title}"
             if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
+                preview = self._preview_content(
+                    file_path,
+                    None,
+                    size_in_bytes=size_in_bytes,
+                )
                 self.push_screen(
                     FilePreviewScreen(
                         preview_title,
-                        self._preview_content(
-                            file_path,
-                            None,
-                            size_in_bytes=size_in_bytes,
-                        ),
+                        preview.text,
+                        syntax_lexer=preview.lexer,
                     )
                 )
                 return
@@ -1536,10 +1552,12 @@ class CondaMetadataTui(App[None]):
             preview_title = self._preview_title(file_path, package_bytes)
             if title_prefix is not None:
                 preview_title = f"{title_prefix}: {preview_title}"
+            preview = self._preview_content(file_path, package_bytes)
             self.push_screen(
                 FilePreviewScreen(
                     preview_title,
-                    self._preview_content(file_path, package_bytes),
+                    preview.text,
+                    syntax_lexer=preview.lexer,
                 )
             )
         except Exception as exc:
