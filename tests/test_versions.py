@@ -14,6 +14,7 @@ from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual.app import App
@@ -39,6 +40,7 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
     render_package_preview,
     resolve_info_file_compare_rows,
+    syntax_lexer_for_path,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
@@ -4667,6 +4669,7 @@ def test_preview_selected_package_file_opens_preview_modal(monkeypatch) -> None:
     assert isinstance(pushed[0], FilePreviewScreen)
     assert pushed[0]._title == "info/about.json (17 B)"
     assert pushed[0]._content == '{"name": "demo"}\n'
+    assert pushed[0]._syntax_lexer == "json"
 
 
 def test_preview_selected_package_file_skips_fetch_when_cached_size_is_too_large(
@@ -4719,7 +4722,8 @@ def test_file_action_metadata_lines_formats_sha256() -> None:
 def test_preview_content_rejects_binary_files() -> None:
     rendered = CondaMetadataTui._preview_content("lib/demo.so", b"\0binary")
 
-    assert "Binary file preview is not supported." in rendered
+    assert "Binary file preview is not supported." in rendered.text
+    assert rendered.lexer is None
 
 
 def test_preview_content_rejects_invalid_utf8_without_null_bytes() -> None:
@@ -4727,14 +4731,42 @@ def test_preview_content_rejects_invalid_utf8_without_null_bytes() -> None:
         "info/about.json", b"\xff\xfe\x80invalid"
     )
 
-    assert "Binary file preview is not supported." in rendered
+    assert "Binary file preview is not supported." in rendered.text
+    assert rendered.lexer is None
 
 
 def test_preview_content_rejects_large_files() -> None:
     rendered = CondaMetadataTui._preview_content("info/about.json", b"x" * 300_000)
 
-    assert "File too large to preview in-app" in rendered
-    assert "300,000 bytes" in rendered
+    assert "File too large to preview in-app" in rendered.text
+    assert "300,000 bytes" in rendered.text
+    assert rendered.lexer is None
+
+
+@pytest.mark.parametrize(
+    ("file_path", "expected"),
+    [
+        ("site-packages/demo.py", "python"),
+        ("info/about.JSON", "json"),
+        ("info/recipe/meta.yaml", "yaml"),
+        ("info/recipe/conda_build_config.yml", "yaml"),
+        ("src/demo.cpp", "cpp"),
+        ("src/lib.rs", "rust"),
+        ("share/docs/README.md", "markdown"),
+        ("recipe/run_test.bat", "batch"),
+        ("recipe/Dockerfile", "docker"),
+        ("src/CMakeLists.txt", "cmake"),
+        ("src/Makefile", "make"),
+    ],
+)
+def test_syntax_lexer_for_path_supports_common_package_files(
+    file_path: str, expected: str
+) -> None:
+    assert syntax_lexer_for_path(file_path) == expected
+
+
+def test_syntax_lexer_for_path_returns_none_for_unknown_file() -> None:
+    assert syntax_lexer_for_path("share/demo/LICENSE") is None
 
 
 def test_preview_title_uses_human_readable_size() -> None:
@@ -4756,6 +4788,26 @@ def test_file_preview_screen_uses_plain_static_text() -> None:
 
             assert screen.query_one("#file-preview-title")._render_markup is False
             assert screen.query_one("#file-preview-body")._render_markup is False
+
+    asyncio.run(_run())
+
+
+def test_file_preview_screen_uses_syntax_renderable() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = FilePreviewScreen(
+                "demo.py", "print('demo')\n", syntax_lexer="python"
+            )
+            app.push_screen(screen)
+            await pilot.pause()
+
+            body = screen.query_one("#file-preview-body", Static)
+            assert isinstance(body.content, Syntax)
+            assert body.content.code == "print('demo')\n"
 
     asyncio.run(_run())
 

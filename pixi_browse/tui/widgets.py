@@ -9,6 +9,7 @@ from rattler.match_spec import MatchSpec
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual import on
@@ -88,6 +89,12 @@ class FileActionOption:
     action: FileAction
     label: str
     source: FileActionSource = "default"
+
+
+@dataclass(frozen=True)
+class FilePreviewContent:
+    text: str
+    lexer: str | None = None
 
 
 class DetailOptionList(OptionList):
@@ -2080,16 +2087,34 @@ class FilePreviewScreen(ModalScreen[None]):
         Binding("G", "scroll_end", show=False),
     ]
 
-    def __init__(self, title: str, content: str) -> None:
+    def __init__(
+        self, title: str, content: str, *, syntax_lexer: str | None = None
+    ) -> None:
         super().__init__()
         self._title = title
         self._content = content
+        self._syntax_lexer = syntax_lexer
+
+    def _content_renderable(self) -> str | Syntax:
+        if self._syntax_lexer is None:
+            return self._content
+        return Syntax(
+            self._content,
+            self._syntax_lexer,
+            theme="ansi_dark",
+            background_color="default",
+            line_numbers=False,
+            tab_size=4,
+            word_wrap=True,
+        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-preview-dialog"):
             yield Static(self._title, id="file-preview-title", markup=False)
             with VerticalScroll(id="file-preview-scroll"):
-                yield Static(self._content, id="file-preview-body", markup=False)
+                yield Static(
+                    self._content_renderable(), id="file-preview-body", markup=False
+                )
 
     def on_mount(self) -> None:
         self.query_one("#file-preview-scroll", VerticalScroll).focus()
