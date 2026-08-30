@@ -822,6 +822,9 @@ class CondaMetadataTui(App[None]):
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
 
+    def _can_query_matchspec(self) -> bool:
+        return not self._artifact_sources
+
     def _dependency_matchspec_at(self, index: int) -> str | None:
         return self.query_one("#main-panel", MainPanel).dependency_matchspec_at(index)
 
@@ -950,19 +953,22 @@ class CondaMetadataTui(App[None]):
                 ("Esc", "Back or close current overlay"),
             ],
         )
-        app = self._format_help_section(
-            "App",
+        app_rows = [
+            ("?", "Show this help"),
+            ("/", "Start package filter"),
+            ("p", "Open platform selector"),
+            ("c", "Edit channel"),
+            ("C", "Compare selected artifact in versions view"),
+        ]
+        if self._can_query_matchspec():
+            app_rows.append(("m", "Query MatchSpec"))
+        app_rows.extend(
             [
-                ("?", "Show this help"),
-                ("/", "Start package filter"),
-                ("p", "Open platform selector"),
-                ("c", "Edit channel"),
-                ("C", "Compare selected artifact in versions view"),
-                ("m", "Query MatchSpec"),
                 ("d", "Download selected artifact in versions view"),
                 ("q", "Quit"),
-            ],
+            ]
         )
+        app = self._format_help_section("App", app_rows)
         return "\n".join([*navigation, "", *app])
 
     @staticmethod
@@ -2448,7 +2454,11 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_matchspec_key_m(self) -> None:
-        if self._channel_edit_mode or self._filter_mode:
+        if (
+            not self._can_query_matchspec()
+            or self._channel_edit_mode
+            or self._filter_mode
+        ):
             return
 
         self._open_matchspec_screen(self._matchspec_query)
@@ -2630,6 +2640,9 @@ class CondaMetadataTui(App[None]):
         ):
             main_panel = self.query_one("#main-panel", MainPanel)
             if main_panel.dependency_section_is_active():
+                if not self._can_query_matchspec():
+                    event.stop()
+                    return
                 matchspec = self._selected_dependency_matchspec()
                 if matchspec is not None:
                     self._defer_matchspec_screen(matchspec)
@@ -2928,6 +2941,8 @@ class CondaMetadataTui(App[None]):
         self._sidebar_selection_by_keyboard = False
 
         if event.option_list.id == "detail-option-list-1":
+            if not self._can_query_matchspec():
+                return
             matchspec = self._dependency_matchspec_at(event.option_index)
             if matchspec is None:
                 return

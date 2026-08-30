@@ -28,6 +28,7 @@ from pixi_browse.models import (
     CompareRow,
     CompareSelection,
     PackageFile,
+    RemoteArtifactSource,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -1730,6 +1731,20 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     assert callback == app._handle_matchspec_result
 
 
+def test_inspect_mode_disables_matchspec_shortcut(monkeypatch) -> None:
+    app = CondaMetadataTui(
+        artifact_sources=[RemoteArtifactSource("https://example.com/demo.conda")]
+    )
+    pushed: list[object] = []
+
+    monkeypatch.setattr(app, "push_screen", lambda *args: pushed.append(args))
+
+    app.action_matchspec_key_m()
+
+    assert pushed == []
+    assert "Query MatchSpec" not in app._help_text()
+
+
 def test_handle_matchspec_result_queues_matchspec_worker(monkeypatch) -> None:
     app = CondaMetadataTui()
     worker_calls: list[dict[str, object]] = []
@@ -1977,6 +1992,31 @@ def test_selecting_dependency_option_opens_matchspec_screen(monkeypatch) -> None
     assert sections == [1]
     assert focused == ["main"]
     assert opened == ["python >=3.12"]
+
+
+def test_inspect_mode_disables_dependency_matchspec_activation(monkeypatch) -> None:
+    app = CondaMetadataTui(
+        artifact_sources=[RemoteArtifactSource("https://example.com/demo.conda")]
+    )
+    app._mode = "versions"
+    opened: list[str] = []
+
+    monkeypatch.setattr(
+        app, "_defer_matchspec_screen", lambda value: opened.append(value)
+    )
+
+    class _FakeOptionList:
+        id = "detail-option-list-1"
+
+    class _FakeEvent:
+        option_list = _FakeOptionList()
+        option_index = 0
+
+    asyncio.run(
+        app.on_option_list_option_selected(_FakeEvent())  # type: ignore[arg-type]
+    )
+
+    assert opened == []
 
 
 def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
