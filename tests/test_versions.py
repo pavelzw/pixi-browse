@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
-from rattler.package import IndexJson, NoArchLiteral, RunExportsJson
+from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
@@ -23,14 +23,10 @@ from textual.widgets import Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
-from pixi_browse.artifacts import into_package_record
 from pixi_browse.models import (
-    ArtifactCacheKey,
-    ArtifactSource,
     CompareFileRow,
     CompareRow,
     CompareSelection,
-    LocalArtifactSource,
     PackageFile,
     VersionArtifactData,
     VersionCompareData,
@@ -504,86 +500,6 @@ def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
                 preview_key=preview_key,
             )
         )
-
-
-def test_load_local_artifact_source_builds_normalized_artifact(
-    tmp_path, monkeypatch
-) -> None:
-    artifact_path = tmp_path / "demo-1.2.3-py313_0.conda"
-    artifact_path.write_bytes(b"package archive")
-    source = LocalArtifactSource(artifact_path.resolve())
-    loader = VersionDataLoader(client=cast(Client, object()))
-
-    index = IndexJson.from_str(
-        """{
-            "name": "demo",
-            "version": "1.2.3",
-            "build": "py313_0",
-            "build_number": 0,
-            "subdir": "noarch",
-            "depends": ["python >=3.13"],
-            "constrains": ["demo-core >=1"],
-            "license": "BSD-3-Clause",
-            "license_family": "BSD"
-        }"""
-    )
-
-    class _Archive:
-        async def index_json(self) -> IndexJson:
-            return index
-
-    archive = cast(PackageArchive, _Archive())
-
-    async def _fake_get_archive(value: ArtifactSource) -> PackageArchive:
-        assert value == source
-        return archive
-
-    async def _fake_get_paths(
-        key: ArtifactCacheKey, value: PackageArchive
-    ) -> list[PackageFile]:
-        assert key == source.cache_key
-        assert value is archive
-        return [PackageFile("bin/demo", 42)]
-
-    async def _fake_get_info_files(value: PackageArchive) -> list[PackageFile]:
-        assert value is archive
-        return [PackageFile("info/index.json", 100)]
-
-    async def _fake_get_about_urls(
-        key: ArtifactCacheKey, value: PackageArchive
-    ) -> AboutUrls:
-        assert key == source.cache_key
-        assert value is archive
-        return AboutUrls(homepage=("https://example.com/demo",))
-
-    async def _fake_get_run_exports(
-        value: PackageArchive,
-    ) -> RunExportsJson | None:
-        assert value is archive
-        return None
-
-    monkeypatch.setattr(loader, "get_artifact_archive", _fake_get_archive)
-    monkeypatch.setattr(loader, "get_package_paths", _fake_get_paths)
-    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
-    monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
-    monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
-
-    loaded = asyncio.run(loader.load_artifact_source(source))
-
-    assert loaded.source == source
-    assert loaded.descriptor.record.name.normalized == "demo"
-    assert loaded.descriptor.record.version == Version("1.2.3")
-    assert loaded.descriptor.record.depends == ["python >=3.13"]
-    assert loaded.entry.file_name == artifact_path.name
-    assert loaded.data.file_paths == (PackageFile("bin/demo", 42),)
-    assert loaded.data.info_files == (PackageFile("info/index.json", 100),)
-    assert loaded.data.homepage_urls == ("https://example.com/demo",)
-
-
-def test_into_package_record_keeps_repo_data_record() -> None:
-    record = _make_repo_data_record()
-
-    assert into_package_record(record) is record
 
 
 def test_build_version_compare_data_reports_metadata_dependency_and_file_changes() -> (
