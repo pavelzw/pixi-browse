@@ -567,7 +567,7 @@ def _display_info_compare_rows(
             left_file=row.left_file,
             right_file=row.right_file,
             comparison_known=(
-                common_comparison_known
+                common_comparison_known or row.changed
                 if row.left_file is not None and row.right_file is not None
                 else True
             ),

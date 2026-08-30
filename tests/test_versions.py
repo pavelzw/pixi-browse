@@ -675,7 +675,7 @@ def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> 
     assert file_row.changed is False
 
 
-def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
+def test_build_version_compare_data_uses_sizes_for_initial_info_status() -> None:
     record = _make_repo_data_record()
     selection = CompareSelection(
         "demo",
@@ -692,6 +692,7 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
         record,
         info_files=(
             PackageFile("info/index.json", 100),
+            PackageFile("info/size-diff.json", 400),
             PackageFile("info/left-only.json", 200),
         ),
     )
@@ -700,6 +701,7 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
         record,
         info_files=(
             PackageFile("info/index.json", 100),
+            PackageFile("info/size-diff.json", 500),
             PackageFile("info/right-only.json", 300),
         ),
     )
@@ -713,6 +715,7 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
 
     assert [row.label for row in compare_data.info_files] == [
         "index.json",
+        "size-diff.json",
         "left-only.json",
         "right-only.json",
     ]
@@ -722,7 +725,10 @@ def test_build_version_compare_data_marks_common_info_files_unknown() -> None:
     assert compare_data.info_files[0].left == "info/index.json (100 B)"
     assert compare_data.info_files[0].right == "info/index.json (100 B)"
     assert compare_data.info_files[1].comparison_known is True
+    assert compare_data.info_files[1].changed is True
+    assert CompareDetailsView._compare_file_prefix(compare_data.info_files[1]) == "~ "
     assert compare_data.info_files[2].comparison_known is True
+    assert compare_data.info_files[3].comparison_known is True
 
 
 def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
@@ -2349,7 +2355,20 @@ def test_compare_info_tab_keeps_common_rows_unknown() -> None:
             option_list = screen.query_one("#compare-option-list-2", DetailOptionList)
             prompt = cast(Text, option_list.get_option_at_index(0).prompt)
             assert prompt.plain == "? index.json (1.2 KiB)"
-            assert prompt.style == "#7a5c00"
+            assert any(
+                span.style == "#7a5c00" and prompt.plain[span.start : span.end] == "? "
+                for span in prompt.spans
+            )
+            assert any(
+                span.style == "#5c6370"
+                and prompt.plain[span.start : span.end] == "index.json"
+                for span in prompt.spans
+            )
+            assert any(
+                span.style == Style(color="#5c6370", dim=True)
+                and prompt.plain[span.start : span.end] == " (1.2 KiB)"
+                for span in prompt.spans
+            )
             assert view._render_file_header().plain == "[3] pkg/ (0) - info/ (1)"
 
     asyncio.run(_run())
@@ -2476,7 +2495,7 @@ def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
     assert app._file_action_in_progress is False
 
 
-def test_request_unknown_compare_info_file_starts_hash_worker(monkeypatch) -> None:
+def test_request_unhashed_compare_info_file_starts_hash_worker(monkeypatch) -> None:
     selection = CompareSelection(
         "demo",
         VersionEntry(
@@ -2491,10 +2510,10 @@ def test_request_unknown_compare_info_file_starts_hash_worker(monkeypatch) -> No
         label="index.json",
         left="info/index.json",
         right="info/index.json",
-        changed=False,
-        left_file=PackageFile("info/index.json"),
-        right_file=PackageFile("info/index.json"),
-        comparison_known=False,
+        changed=True,
+        left_file=PackageFile("info/index.json", 100),
+        right_file=PackageFile("info/index.json", 200),
+        comparison_known=True,
     )
     screen = CompareScreen(
         VersionCompareData(
@@ -2518,6 +2537,7 @@ def test_request_unknown_compare_info_file_starts_hash_worker(monkeypatch) -> No
 
     monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
     monkeypatch.setattr(screen, "selected_file_row", lambda: row)
+    monkeypatch.setattr(screen, "active_file_tab", lambda: "info")
     monkeypatch.setattr(app, "run_worker", _fake_run_worker)
 
     app._request_file_action_for_selected_compare_file()
@@ -2530,6 +2550,56 @@ def test_request_unknown_compare_info_file_starts_hash_worker(monkeypatch) -> No
             "exit_on_error": False,
         }
     ]
+
+
+def test_request_unhashed_compare_pkg_file_opens_without_hashing(monkeypatch) -> None:
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.0.0"),
+            build="build_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.0.0-build_0.conda",
+        ),
+    )
+    row = CompareFileRow(
+        label="bin/demo",
+        left="bin/demo",
+        right="bin/demo",
+        changed=False,
+        left_file=PackageFile("bin/demo", 100),
+        right_file=PackageFile("bin/demo", 100),
+    )
+    screen = CompareScreen(
+        VersionCompareData(
+            left_selection=selection,
+            right_selection=selection,
+            metadata_rows=(),
+            dependencies=(),
+            constraints=(),
+            run_exports=(),
+            files=(row,),
+        )
+    )
+    app = CondaMetadataTui()
+    app._compare_screen_open = True
+    opened_rows: list[CompareFileRow] = []
+
+    monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
+    monkeypatch.setattr(screen, "selected_file_row", lambda: row)
+    monkeypatch.setattr(screen, "active_file_tab", lambda: "pkg")
+    monkeypatch.setattr(app, "call_after_refresh", lambda callback: callback())
+    monkeypatch.setattr(app, "_open_compare_file_action_screen", opened_rows.append)
+    monkeypatch.setattr(
+        app,
+        "run_worker",
+        lambda *_args, **_kwargs: pytest.fail("pkg rows must not start SHA workers"),
+    )
+
+    app._request_file_action_for_selected_compare_file()
+
+    assert opened_rows == [row]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:

@@ -1352,12 +1352,13 @@ class CondaMetadataTui(App[None]):
         row = self._selected_compare_file_row()
         if row is None:
             return
+        compare_screen = cast(CompareScreen, self.screen)
         if (
-            not row.comparison_known
+            compare_screen.active_file_tab() == "info"
             and row.left_file is not None
             and row.right_file is not None
+            and (row.left_file.sha256 is None or row.right_file.sha256 is None)
         ):
-            compare_screen = cast(CompareScreen, self.screen)
             self._file_action_in_progress = True
             try:
                 self.run_worker(

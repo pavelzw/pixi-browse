@@ -1110,6 +1110,9 @@ class CompareDetailsView(Vertical):
             return None
         return self.file_row_at(highlighted)
 
+    def active_file_tab(self) -> FileTab:
+        return self._active_file_tab()
+
     def file_row_at(self, index: int) -> CompareFileRow | None:
         entries = self._current_file_entries()
         if index < 0 or index >= len(entries):
@@ -1306,11 +1309,26 @@ class CompareDetailsView(Vertical):
         )
 
     def _render_compare_file_option(self, row: CompareFileRow) -> Text:
-        text = Text(self._compare_file_prefix(row), style=self._file_row_style(row))
-        text.append(row.label, style=self._file_row_style(row))
+        row_style = self._file_row_style(row)
+        if row.comparison_known:
+            label_style = row_style
+            text = Text(self._compare_file_prefix(row), style=row_style)
+            text.append(row.label, style=row_style)
+        else:
+            label_style = "#5c6370"
+            text = Text()
+            text.append(self._compare_file_prefix(row), style=row_style)
+            text.append(row.label, style=label_style)
         suffix = self._compare_file_suffix(row)
         if suffix:
-            text.append(suffix, style="dim")
+            text.append(
+                suffix,
+                style=(
+                    "dim"
+                    if row.comparison_known
+                    else Style(color=label_style, dim=True)
+                ),
+            )
         return text
 
     @staticmethod
@@ -1634,6 +1652,11 @@ class CompareScreen(Screen[None]):
         return self.query_one(
             "#compare-details-view", CompareDetailsView
         ).selected_file_row()
+
+    def active_file_tab(self) -> FileTab:
+        return self.query_one(
+            "#compare-details-view", CompareDetailsView
+        ).active_file_tab()
 
     def info_file_rows(self) -> tuple[CompareFileRow, ...]:
         return self._compare_data.info_files
