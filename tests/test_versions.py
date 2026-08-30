@@ -2309,7 +2309,7 @@ def test_compare_info_tab_keeps_common_rows_unknown() -> None:
     asyncio.run(_run())
 
 
-def test_info_file_sha256_streams_requested_archive_entries_once() -> None:
+def test_info_file_sha256_streams_requested_archive_entry() -> None:
     calls: list[str] = []
 
     class _FakeEntry:
@@ -2331,24 +2331,18 @@ def test_info_file_sha256_streams_requested_archive_entries_once() -> None:
             ):
                 yield entry
 
-    hashes = asyncio.run(
+    digest = asyncio.run(
         CondaMetadataTui._info_file_sha256(
             cast(PackageArchive, _FakeArchive()),
-            {"info/index.json", "info/paths.json"},
+            "info/paths.json",
         )
     )
 
-    assert hashes == {
-        "info/index.json": bytes.fromhex(
-            "1bc04b5291c26a46d918139138b992d2de976d6851d0893b0476b85bfbdfc6e6"
-        ),
-        "info/paths.json": bytes.fromhex(
-            "504dbd7ea99e812ff1ef64c6a162e32890b928a3df1f9e3450aadb7037889be5"
-        ),
-    }
+    assert digest == bytes.fromhex(
+        "504dbd7ea99e812ff1ef64c6a162e32890b928a3df1f9e3450aadb7037889be5"
+    )
     assert calls == [
         "stream:info",
-        "read:info/index.json",
         "read:info/paths.json",
     ]
 
@@ -2411,7 +2405,7 @@ def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
     app._file_action_in_progress = True
     left_archive = cast(PackageArchive, object())
     right_archive = cast(PackageArchive, object())
-    hash_calls: list[tuple[PackageArchive, set[str]]] = []
+    hash_calls: list[tuple[PackageArchive, str]] = []
     updated_rows: list[CompareFileRow] = []
     opened_rows: list[CompareFileRow] = []
 
@@ -2424,12 +2418,9 @@ def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
         assert url == right_selection.entry.file_name
         return right_archive
 
-    async def _fake_info_file_sha256(
-        archive: PackageArchive, paths: set[str]
-    ) -> dict[str, bytes]:
-        hash_calls.append((archive, paths))
-        digest = bytes.fromhex("11" * 32 if archive is left_archive else "22" * 32)
-        return {path: digest for path in paths}
+    async def _fake_info_file_sha256(archive: PackageArchive, path: str) -> bytes:
+        hash_calls.append((archive, path))
+        return bytes.fromhex("11" * 32 if archive is left_archive else "22" * 32)
 
     monkeypatch.setattr(CondaMetadataTui, "screen", property(lambda _self: screen))
     monkeypatch.setattr(app, "_package_url_for_version_entry", _fake_package_url)
@@ -2442,8 +2433,8 @@ def test_resolve_compare_info_file_hashes_only_selected_row_before_opening(
     asyncio.run(app._resolve_compare_info_file_and_open(screen, selected_row))
 
     assert hash_calls == [
-        (left_archive, {"info/index.json"}),
-        (right_archive, {"info/index.json"}),
+        (left_archive, "info/index.json"),
+        (right_archive, "info/index.json"),
     ]
     assert updated_rows == opened_rows
     assert len(opened_rows) == 1

@@ -973,28 +973,16 @@ class CondaMetadataTui(App[None]):
         return record, artifact
 
     @staticmethod
-    async def _info_file_sha256(
-        archive: PackageArchive, paths: set[str]
-    ) -> dict[str, bytes]:
-        if not paths:
-            return {}
-        remaining = set(paths)
-        hashes: dict[str, bytes] = {}
+    async def _info_file_sha256(archive: PackageArchive, path: str) -> bytes:
         async for archive_entry in archive.stream("info"):
-            if archive_entry.name not in remaining:
+            if archive_entry.name != path:
                 continue
             if not archive_entry.is_file:
                 raise OSError(
                     f"cannot hash non-file archive entry {archive_entry.name}"
                 )
-            hashes[archive_entry.name] = sha256(await archive_entry.read()).digest()
-            remaining.remove(archive_entry.name)
-            if not remaining:
-                break
-        if remaining:
-            missing = ", ".join(sorted(remaining))
-            raise FileNotFoundError(f"info entries missing from archive: {missing}")
-        return hashes
+            return sha256(await archive_entry.read()).digest()
+        raise FileNotFoundError(f"info entry missing from archive: {path}")
 
     async def _resolve_compare_info_file_and_open(
         self, screen: CompareScreen, row: CompareFileRow
@@ -1018,11 +1006,9 @@ class CondaMetadataTui(App[None]):
             right_archive = await self._version_loader.get_package_archive(
                 self._compare_selection_key(original_right), right_url
             )
-            left_hashes = await self._info_file_sha256(
-                left_archive, {original_left_path}
-            )
-            right_hashes = await self._info_file_sha256(
-                right_archive, {original_right_path}
+            left_sha256 = await self._info_file_sha256(left_archive, original_left_path)
+            right_sha256 = await self._info_file_sha256(
+                right_archive, original_right_path
             )
         except Exception as exc:
             self._file_action_in_progress = False
@@ -1039,13 +1025,13 @@ class CondaMetadataTui(App[None]):
 
         current_left = screen.selection_for_source("left")
         if current_left == original_left:
-            current_left_hashes = left_hashes
-            current_right_hashes = right_hashes
+            current_left_sha256 = left_sha256
+            current_right_sha256 = right_sha256
             current_left_path = original_left_path
             current_right_path = original_right_path
         elif current_left == original_right:
-            current_left_hashes = right_hashes
-            current_right_hashes = left_hashes
+            current_left_sha256 = right_sha256
+            current_right_sha256 = left_sha256
             current_left_path = original_right_path
             current_right_path = original_left_path
         else:
@@ -1068,8 +1054,8 @@ class CondaMetadataTui(App[None]):
             return
         resolved_row = resolve_info_file_compare_rows(
             (current_row,),
-            left_sha256=current_left_hashes,
-            right_sha256=current_right_hashes,
+            left_sha256={current_left_path: current_left_sha256},
+            right_sha256={current_right_path: current_right_sha256},
         )[0]
         screen.set_info_file_row(resolved_row)
         self._file_action_in_progress = False
