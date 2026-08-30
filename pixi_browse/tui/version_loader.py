@@ -3,7 +3,7 @@ from __future__ import annotations
 import yaml
 from rattler.networking import Client
 from rattler.package import AboutJson, PathsJson, PathType, RunExportsJson
-from rattler.package_streaming import fetch_raw_package_file_from_url
+from rattler.package_streaming import PackageArchive, fetch_raw_package_file_from_url
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
@@ -77,6 +77,8 @@ class VersionDataLoader:
             return cached
 
         paths_json = await PathsJson.from_remote_url(self._client, url)
+        if paths_json is None:
+            raise FileNotFoundError("package does not contain info/paths.json")
         paths = [
             PackageFile(
                 path=str(path.relative_path),
@@ -98,6 +100,8 @@ class VersionDataLoader:
             return cached
 
         about_json = await AboutJson.from_remote_url(self._client, url)
+        if about_json is None:
+            raise FileNotFoundError("package does not contain info/about.json")
         recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
         if isinstance(recipe_maintainers, str):
             recipe_maintainers = [recipe_maintainers]
@@ -147,7 +151,11 @@ class VersionDataLoader:
         self.about_urls_cache[preview_key] = about_urls
         return about_urls
 
-    async def get_run_exports(self, url: str) -> RunExportsJson:
+    async def get_info_paths(self, url: str) -> list[str]:
+        archive = await PackageArchive.from_url(self._client, url)
+        return await archive.list_files("info")
+
+    async def get_run_exports(self, url: str) -> RunExportsJson | None:
         return await RunExportsJson.from_remote_url(self._client, url)
 
     async def load_version_details(
@@ -175,6 +183,7 @@ class VersionDataLoader:
             return cached
 
         package_paths = await self.get_package_paths(preview_key, str(record.url))
+        info_paths = await self.get_info_paths(str(record.url))
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
 
@@ -193,6 +202,7 @@ class VersionDataLoader:
             package_name,
             record,
             package_paths=package_paths,
+            info_paths=info_paths,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,

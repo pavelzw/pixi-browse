@@ -29,6 +29,7 @@ from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
     DependencyTab,
+    FileTab,
     PackageFile,
     VersionArtifactData,
     VersionEntry,
@@ -57,6 +58,7 @@ from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
+    FILE_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     CompareScreen,
     DownloadPathScreen,
@@ -696,6 +698,12 @@ class CondaMetadataTui(App[None]):
 
     def _cycle_main_dependency_tab(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
+
+    def _set_main_file_tab(self, tab: FileTab) -> None:
+        self.query_one("#main-panel", MainPanel).set_file_tab(tab)
+
+    def _cycle_main_file_tab(self, direction: int) -> None:
+        self.query_one("#main-panel", MainPanel).cycle_file_tab(direction)
 
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
@@ -2135,6 +2143,15 @@ class CondaMetadataTui(App[None]):
         self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
 
+    def action_select_file_tab(self, tab: str) -> None:
+        if self._mode != "versions":
+            return
+        if tab not in FILE_TABS:
+            return
+        self._set_active_main_section(2)
+        self._set_main_file_tab(cast(FileTab, tab))
+        self._focus_main_panel()
+
     def action_tab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
@@ -2364,11 +2381,33 @@ class CondaMetadataTui(App[None]):
 
         if (
             self._mode == "versions"
+            and event.character == "["
+            and self._selected_pane == "main"
+            and self.query_one("#main-panel", MainPanel).file_section_is_active()
+        ):
+            self._cycle_main_file_tab(-1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
             and event.character == "]"
             and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and event.character == "]"
+            and self._selected_pane == "main"
+            and self.query_one("#main-panel", MainPanel).file_section_is_active()
+        ):
+            self._cycle_main_file_tab(1)
             self._focus_main_panel()
             event.stop()
             return

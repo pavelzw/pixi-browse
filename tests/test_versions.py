@@ -85,12 +85,14 @@ def _make_artifact_data(
     constraints: tuple[str, ...] = (),
     run_exports: RunExportsJson | None = None,
     file_paths: tuple[PackageFile, ...] = (),
+    info_paths: tuple[str, ...] = (),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=metadata_rows,
         dependencies=dependencies,
         constraints=constraints,
         file_paths=file_paths,
+        info_paths=info_paths,
         run_exports=run_exports,
     )
 
@@ -259,12 +261,14 @@ def test_build_version_artifact_data_includes_package_paths() -> None:
             PackageFile("bin/demo"),
             PackageFile("lib/python3.13/site-packages/demo.py"),
         ),
+        info_paths=("info/index.json", "info/paths.json"),
     )
 
     assert details.file_paths == (
         PackageFile("bin/demo"),
         PackageFile("lib/python3.13/site-packages/demo.py"),
     )
+    assert details.info_paths == ("info/index.json", "info/paths.json")
 
 
 def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
@@ -407,7 +411,11 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     async def _fake_get_run_exports(_url: str) -> RunExportsJson:
         return RunExportsJson()
 
+    async def _fake_get_info_paths(_url: str) -> list[str]:
+        return ["info/index.json"]
+
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_info_paths", _fake_get_info_paths)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
 
@@ -419,6 +427,7 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         line.startswith("Repository")
         for line in format_version_details_metadata_lines(details)
     )
+    assert details.info_paths == ("info/index.json",)
 
 
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
@@ -812,6 +821,31 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
     ]
     assert cached_paths == paths
     assert calls == [url]
+
+
+def test_get_info_paths_lists_only_archive_info_section(monkeypatch) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    calls: list[tuple[str, str]] = []
+
+    class _FakeArchive:
+        async def list_files(self, section: str) -> list[str]:
+            calls.append(("list_files", section))
+            return ["info/index.json", "info/paths.json"]
+
+    async def _fake_from_url(_client: Client, url: str) -> _FakeArchive:
+        calls.append(("from_url", url))
+        return _FakeArchive()
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_from_url,
+    )
+
+    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+    paths = asyncio.run(loader.get_info_paths(url))
+
+    assert paths == ["info/index.json", "info/paths.json"]
+    assert calls == [("from_url", url), ("list_files", "info")]
 
 
 def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
@@ -1744,10 +1778,10 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
 
-    event = _FakeKeyEvent("2", "2")
+    event = _FakeKeyEvent("3", "3")
     app.on_key(event)  # type: ignore[arg-type]
 
-    assert selected_sections == [1]
+    assert selected_sections == [2]
     assert focused == ["main"]
     assert event.stopped is True
 
@@ -1888,6 +1922,15 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
     sections = list(view.compose())
 
     assert "-pane-selected" in view.classes
+    assert len(sections) == 3
+    assert all(isinstance(section, DetailSection) for section in sections)
+
+
+def test_version_details_view_keeps_pkg_and_info_in_one_file_section() -> None:
+    view = VersionDetailsView()
+
+    sections = list(view.compose())
+
     assert len(sections) == 3
     assert all(isinstance(section, DetailSection) for section in sections)
 
@@ -2159,6 +2202,30 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
     assert header.style == ACTIVE_SECTION_TITLE_STYLE
 
 
+def test_file_header_shows_pkg_and_info_as_clickable_tabs() -> None:
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        file_paths=(PackageFile("bin/demo"),),
+        info_paths=("info/index.json", "info/paths.json"),
+    )
+    view._file_tab_index = 1
+
+    header = view._render_file_header()
+
+    assert header.plain == "[3] pkg/ (1) - info/ (2)"
+    assert any(
+        span.style.meta == {"@click": ("select_file_tab", ("info",))}
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+    assert any(
+        span.style == INACTIVE_SELECTED_TAB_STYLE
+        and header.plain[span.start : span.end] == "info/ (2)"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+
+
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
     view = VersionDetailsView()
     view._details = _make_artifact_data()
@@ -2217,6 +2284,25 @@ def test_file_list_entry_uses_plain_file_path() -> None:
     assert entries[0].path == "site-packages/demo.py"
 
 
+def test_info_file_list_entries_use_archive_paths_without_pkg_metadata() -> None:
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        info_paths=("info/index.json", "info/recipe/meta.yaml"),
+    )
+
+    entries = view._file_entries_for_details("info")
+
+    assert [entry.label for entry in entries] == [
+        "index.json",
+        "recipe/meta.yaml",
+    ]
+    assert [entry.path for entry in entries] == [
+        "info/index.json",
+        "info/recipe/meta.yaml",
+    ]
+    assert all(entry.size_in_bytes is None for entry in entries)
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -2226,6 +2312,9 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
@@ -2274,6 +2363,43 @@ def test_on_key_bracket_shortcut_is_ignored_when_sidebar_is_selected(
 
     assert cycled == []
     assert event.stopped is False
+
+
+def test_on_key_bracket_shortcut_cycles_file_tabs_when_file_pane_is_active(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_pane = "main"
+    tab_directions: list[int] = []
+    focused: list[str] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(
+        app, "_cycle_main_file_tab", lambda value: tab_directions.append(value)
+    )
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    event = _FakeKeyEvent("]", "]")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert tab_directions == [1]
+    assert focused == ["main"]
+    assert event.stopped is True
 
 
 def test_sidebar_highlight_does_not_switch_selected_pane_without_sidebar_focus(
@@ -2929,6 +3055,26 @@ def test_action_select_dependency_tab_focuses_dependency_pane(monkeypatch) -> No
 
     assert sections == [1]
     assert tabs == ["constraints"]
+    assert focused == ["main"]
+
+
+def test_action_select_file_tab_focuses_file_pane(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    sections: list[int] = []
+    tabs: list[str] = []
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: sections.append(value)
+    )
+    monkeypatch.setattr(app, "_set_main_file_tab", lambda value: tabs.append(value))
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    app.action_select_file_tab("info")
+
+    assert sections == [2]
+    assert tabs == ["info"]
     assert focused == ["main"]
 
 

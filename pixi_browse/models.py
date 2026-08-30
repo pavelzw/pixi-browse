@@ -10,6 +10,7 @@ ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
+FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 MetadataRow = tuple[str, str]
 
@@ -46,6 +47,7 @@ class VersionArtifactData:
     constraints: tuple[str, ...]
     package_url: str = ""
     file_paths: tuple[PackageFile, ...] = ()
+    info_paths: tuple[str, ...] = ()
     run_exports: RunExportsJson | None = None
     repository_urls: tuple[str, ...] = ()
     documentation_urls: tuple[str, ...] = ()

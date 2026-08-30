@@ -25,6 +25,8 @@ from pixi_browse.models import (
     CompareRow,
     CompareSelection,
     DependencyTab,
+    FileTab,
+    PackageFile,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -39,12 +41,14 @@ DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "constraints",
     "run_exports",
 )
+FILE_TABS: tuple[FileTab, ...] = ("pkg", "info")
 ACTIVE_SECTION_TITLE_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
+DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,7 @@ class DetailSection(Vertical):
         *,
         on_activate: Callable[[int], None],
         on_select_dependency_tab: Callable[[DependencyTab], None] | None = None,
+        on_select_file_tab: Callable[[FileTab], None] | None = None,
         show_tabs: bool = False,
         use_option_list: bool = False,
         id_prefix: str = "detail",
@@ -108,6 +113,7 @@ class DetailSection(Vertical):
         self._id_prefix = id_prefix
         self._on_activate = on_activate
         self._on_select_dependency_tab = on_select_dependency_tab
+        self._on_select_file_tab = on_select_file_tab
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
@@ -143,6 +149,11 @@ class DetailSection(Vertical):
         if self._on_select_dependency_tab is None:
             return
         self._on_select_dependency_tab(tab)
+
+    def action_select_file_tab(self, tab: FileTab) -> None:
+        if self._on_select_file_tab is None:
+            return
+        self._on_select_file_tab(tab)
 
     def update_header(self, title: str | Text) -> None:
         self.border_title = title
@@ -197,11 +208,14 @@ class VersionDetailsView(Vertical):
         self._dependency_entries: dict[
             DependencyTab, tuple[DependencyListEntry, ...]
         ] = {tab: () for tab in DEPENDENCY_TABS}
-        self._file_entries: tuple[FileListEntry, ...] = ()
+        self._file_tab_index = 0
+        self._file_entries: dict[FileTab, tuple[FileListEntry, ...]] = {
+            tab: () for tab in FILE_TABS
+        }
         self._dependency_highlighted: dict[DependencyTab, int] = {
             tab: 0 for tab in DEPENDENCY_TABS
         }
-        self._file_highlighted = 0
+        self._file_highlighted: dict[FileTab, int] = {tab: 0 for tab in FILE_TABS}
         # Duplicate this state so we can avoid updating on every Textual
         # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
@@ -221,16 +235,17 @@ class VersionDetailsView(Vertical):
             use_option_list=True,
         )
         yield DetailSection(
-            "Files",
+            "pkg/",
             2,
             on_activate=self._activate_section_from_click,
+            on_select_file_tab=self._select_file_tab_from_click,
             use_option_list=True,
         )
 
     def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
-        self._file_highlighted = 0
+        self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self.display = True
         self._refresh_sections()
 
@@ -254,6 +269,9 @@ class VersionDetailsView(Vertical):
     def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
         self.select_dependency_tab(tab, focus_main_panel=True)
 
+    def _select_file_tab_from_click(self, tab: FileTab) -> None:
+        self.select_file_tab(tab, focus_main_panel=True)
+
     def cycle_active_section(self, direction: int) -> None:
         self._active_section = (self._active_section + direction) % 3
         self._apply_section_state()
@@ -268,11 +286,25 @@ class VersionDetailsView(Vertical):
         self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
         self._refresh_dependency_section()
 
+    def cycle_file_tab(self, direction: int) -> None:
+        self._file_tab_index = (self._file_tab_index + direction) % len(FILE_TABS)
+        self._refresh_file_section()
+
+    def set_file_tab(self, tab: FileTab) -> None:
+        self._file_tab_index = FILE_TABS.index(tab)
+        self._refresh_file_section()
+
     def select_dependency_tab(
         self, tab: DependencyTab, *, focus_main_panel: bool = False
     ) -> None:
         self.set_active_section(1)
         self.set_dependency_tab(tab)
+        if focus_main_panel:
+            self.app.query_one("#main-panel", MainPanel).focus()
+
+    def select_file_tab(self, tab: FileTab, *, focus_main_panel: bool = False) -> None:
+        self.set_active_section(2)
+        self.set_file_tab(tab)
         if focus_main_panel:
             self.app.query_one("#main-panel", MainPanel).focus()
 
@@ -380,6 +412,9 @@ class VersionDetailsView(Vertical):
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
 
+    def _active_file_tab(self) -> FileTab:
+        return FILE_TABS[self._file_tab_index]
+
     def _apply_section_state(self) -> None:
         for index, section in enumerate(self.query(DetailSection)):
             section.set_active(index == self._active_section)
@@ -387,7 +422,7 @@ class VersionDetailsView(Vertical):
             return
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
         self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_section_header(2, "Files"))
+        self._section(2).update_header(self._render_file_header())
 
     def _refresh_sections(self) -> None:
         if self._details is None:
@@ -400,12 +435,7 @@ class VersionDetailsView(Vertical):
 
         self._refresh_dependency_section()
 
-        self._section(2).update_header(self._render_section_header(2, "Files"))
-        self._file_entries = self._file_entries_for_details()
-        self._section(2).update_options(
-            [entry.label for entry in self._file_entries],
-            highlighted=self._file_highlighted,
-        )
+        self._refresh_file_section()
 
         self._apply_section_state()
 
@@ -422,6 +452,21 @@ class VersionDetailsView(Vertical):
         dependency_section.update_options(
             [entry.label for entry in self._dependency_entries[active_tab]],
             highlighted=self._dependency_highlighted[active_tab],
+        )
+
+    def _refresh_file_section(self) -> None:
+        if self._details is None:
+            return
+
+        active_tab = self._active_file_tab()
+        file_section = self._section(2)
+        file_section.update_header(self._render_file_header())
+        self._file_entries = {
+            tab: self._file_entries_for_details(tab) for tab in FILE_TABS
+        }
+        file_section.update_options(
+            [entry.label for entry in self._file_entries[active_tab]],
+            highlighted=self._file_highlighted[active_tab],
         )
 
     def _dependency_lines(self, tab: DependencyTab) -> tuple[str, ...]:
@@ -474,26 +519,37 @@ class VersionDetailsView(Vertical):
         ).highlighted = highlighted
 
     def _current_file_entries(self) -> tuple[FileListEntry, ...]:
-        return self._file_entries
+        return self._file_entries[self._active_file_tab()]
 
-    def _file_entries_for_details(self) -> tuple[FileListEntry, ...]:
+    def _file_entries_for_details(
+        self, tab: FileTab = "pkg"
+    ) -> tuple[FileListEntry, ...]:
         assert self._details is not None
-        if self._details.file_paths:
+        package_files = (
+            self._details.file_paths
+            if tab == "pkg"
+            else tuple(PackageFile(path) for path in self._details.info_paths)
+        )
+        if package_files:
             return tuple(
                 FileListEntry(
                     label=(
-                        f"{package_file.path}"
+                        f"{self._displayed_file_path(package_file.path, tab)}"
                         f" ({format_human_byte_size(package_file.size_in_bytes)})"
                         if package_file.size_in_bytes is not None
-                        else package_file.path
+                        else self._displayed_file_path(package_file.path, tab)
                     ),
                     path=package_file.path,
                     size_in_bytes=package_file.size_in_bytes,
                     sha256=package_file.sha256,
                 )
-                for package_file in self._details.file_paths
+                for package_file in package_files
             )
         return (FileListEntry(label="No files listed.", path=None),)
+
+    @staticmethod
+    def _displayed_file_path(path: str, tab: FileTab) -> str:
+        return path.removeprefix("info/") if tab == "info" else path
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-2", DetailOptionList)
@@ -505,7 +561,8 @@ class VersionDetailsView(Vertical):
         if not entries:
             return
         highlighted = max(0, min(index, len(entries) - 1))
-        self._file_highlighted = highlighted
+        active_tab = self._active_file_tab()
+        self._file_highlighted[active_tab] = highlighted
         self.query_one(
             "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
@@ -540,6 +597,28 @@ class VersionDetailsView(Vertical):
             )
         return tab_text
 
+    def _render_file_tabs(self) -> Text:
+        if self._details is None:
+            labels = {"pkg": "pkg/", "info": "info/"}
+        else:
+            labels = {
+                "pkg": f"pkg/ ({len(self._details.file_paths)})",
+                "info": f"info/ ({len(self._details.info_paths)})",
+            }
+        tab_text = Text()
+        for index, tab in enumerate(FILE_TABS):
+            if index:
+                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
+            tab_text.append_text(
+                self._render_clickable_file_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_file_tab(),
+                    pane_active=self._pane_selected and self._active_section == 2,
+                )
+            )
+        return tab_text
+
     def _render_section_header(self, index: int, label: str) -> Text:
         style = (
             ACTIVE_SECTION_TITLE_STYLE
@@ -551,6 +630,11 @@ class VersionDetailsView(Vertical):
     def _render_dependency_header(self) -> Text:
         header = self._render_section_header(1, "")
         header.append_text(self._render_dependency_tabs())
+        return header
+
+    def _render_file_header(self) -> Text:
+        header = self._render_section_header(2, "")
+        header.append_text(self._render_file_tabs())
         return header
 
     @staticmethod
@@ -568,6 +652,21 @@ class VersionDetailsView(Vertical):
         text.stylize(
             Style(meta={"@click": (DETAIL_SELECT_DEPENDENCY_TAB_ACTION, (tab,))})
         )
+        return text
+
+    @staticmethod
+    def _render_clickable_file_tab(
+        tab: FileTab, label: str, *, active: bool, pane_active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(Style(meta={"@click": (DETAIL_SELECT_FILE_TAB_ACTION, (tab,))}))
         return text
 
     @staticmethod
@@ -670,6 +769,11 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).cycle_dependency_tab(direction)
 
+    def cycle_file_tab(self, direction: int) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).cycle_file_tab(
+            direction
+        )
+
     def dependency_section_is_active(self) -> bool:
         return self.query_one(
             "#version-details-view", VersionDetailsView
@@ -724,6 +828,9 @@ class MainPanel(Vertical):
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
             tab
         )
+
+    def set_file_tab(self, tab: FileTab) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).set_file_tab(tab)
 
     def cycle_active_section(self, direction: int) -> None:
         self.query_one(
@@ -811,6 +918,14 @@ class MainPanel(Vertical):
                 return
             if character == "]" and dependency_section_is_active:
                 self.cycle_dependency_tab(1)
+                event.stop()
+                return
+            if character == "[" and self.file_section_is_active():
+                self.cycle_file_tab(-1)
+                event.stop()
+                return
+            if character == "]" and self.file_section_is_active():
+                self.cycle_file_tab(1)
                 event.stop()
                 return
 
