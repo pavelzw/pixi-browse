@@ -3,6 +3,7 @@ from __future__ import annotations
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal, cast
 
@@ -10,9 +11,12 @@ from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.package_streaming import (
+    PackageArchive,
+    fetch_raw_package_file_from_url,
+)
+from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
-from rattler.package_streaming import fetch_raw_package_file_from_url
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
 from rattler.version import Version, VersionWithSource
@@ -29,6 +33,7 @@ from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
     DependencyTab,
+    FileTab,
     PackageFile,
     VersionArtifactData,
     VersionEntry,
@@ -41,6 +46,7 @@ from pixi_browse.rendering import (
     build_version_compare_data,
     format_human_byte_size,
     render_package_preview,
+    resolve_info_file_compare_rows,
 )
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
@@ -52,11 +58,12 @@ from pixi_browse.repodata import (
 )
 from pixi_browse.search import fuzzy_score
 
-from .state import AboutUrls, ChannelStateSnapshot
+from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
+    FILE_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     CompareScreen,
     DownloadPathScreen,
@@ -124,6 +131,7 @@ class CondaMetadataTui(App[None]):
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
         self._version_loader = VersionDataLoader(client=self._client)
+        self._version_archive_cache = self._version_loader.archive_cache
         self._version_about_urls_cache = self._version_loader.about_urls_cache
         self._version_paths_cache = self._version_loader.paths_cache
         self._version_artifact_data_cache = self._version_loader.artifact_data_cache
@@ -467,6 +475,7 @@ class CondaMetadataTui(App[None]):
                 package_name: list(records)
                 for package_name, records in self._package_records_cache.items()
             },
+            version_archive_cache=dict(self._version_archive_cache),
             version_about_urls_cache=dict(self._version_about_urls_cache),
             version_paths_cache={
                 preview_key: list(paths)
@@ -504,6 +513,7 @@ class CondaMetadataTui(App[None]):
         self._matchspec_records_by_package = snapshot.matchspec_records_by_package
         self._package_records_cache = snapshot.package_records_cache
         self._version_loader.restore_caches(
+            archive_cache=snapshot.version_archive_cache,
             about_urls_cache=snapshot.version_about_urls_cache,
             paths_cache=snapshot.version_paths_cache,
             artifact_data_cache=snapshot.version_artifact_data_cache,
@@ -696,6 +706,12 @@ class CondaMetadataTui(App[None]):
 
     def _cycle_main_dependency_tab(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
+
+    def _set_main_file_tab(self, tab: FileTab) -> None:
+        self.query_one("#main-panel", MainPanel).set_file_tab(tab)
+
+    def _cycle_main_file_tab(self, direction: int) -> None:
+        self.query_one("#main-panel", MainPanel).cycle_file_tab(direction)
 
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
@@ -933,16 +949,6 @@ class CondaMetadataTui(App[None]):
             return None
         return CompareSelection(package_name=package_name, entry=row.entry)
 
-    async def _get_package_paths(
-        self, preview_key: VersionPreviewKey, url: str
-    ) -> list[PackageFile]:
-        return await self._version_loader.get_package_paths(preview_key, url)
-
-    async def _get_about_urls(
-        self, preview_key: VersionPreviewKey, url: str
-    ) -> AboutUrls:
-        return await self._version_loader.get_about_urls(preview_key, url)
-
     async def _load_compare_artifact(
         self, selection: CompareSelection
     ) -> tuple[RepoDataRecord, VersionArtifactData] | None:
@@ -965,6 +971,91 @@ class CondaMetadataTui(App[None]):
                 f"{self._compare_selection_label(selection)}: {exc!s}"
             ) from exc
         return record, artifact
+
+    @staticmethod
+    async def _info_file_sha256(archive: PackageArchive, path: str) -> bytes:
+        contents = await archive.read_file(path)
+        assert contents is not None
+        return sha256(contents).digest()
+
+    async def _resolve_compare_info_file_and_open(
+        self, screen: CompareScreen, row: CompareFileRow
+    ) -> None:
+        original_left = screen.selection_for_source("left")
+        original_right = screen.selection_for_source("right")
+        assert row.left_file is not None
+        assert row.right_file is not None
+        original_left_path = row.left_file.path
+        original_right_path = row.right_file.path
+        try:
+            left_url = await self._package_url_for_version_entry(
+                original_left.package_name, original_left.entry
+            )
+            right_url = await self._package_url_for_version_entry(
+                original_right.package_name, original_right.entry
+            )
+            left_archive = await self._version_loader.get_package_archive(
+                self._compare_selection_key(original_left), left_url
+            )
+            right_archive = await self._version_loader.get_package_archive(
+                self._compare_selection_key(original_right), right_url
+            )
+            left_sha256 = await self._info_file_sha256(left_archive, original_left_path)
+            right_sha256 = await self._info_file_sha256(
+                right_archive, original_right_path
+            )
+        except Exception as exc:
+            self._file_action_in_progress = False
+            self.notify(
+                f"Failed to compare info file: {exc!s}",
+                title="Compare",
+                severity="error",
+            )
+            return
+
+        if not self._compare_screen_open or self.screen is not screen:
+            self._file_action_in_progress = False
+            return
+
+        current_left = screen.selection_for_source("left")
+        if current_left == original_left:
+            current_left_sha256 = left_sha256
+            current_right_sha256 = right_sha256
+            current_left_path = original_left_path
+            current_right_path = original_right_path
+        elif current_left == original_right:
+            current_left_sha256 = right_sha256
+            current_right_sha256 = left_sha256
+            current_left_path = original_right_path
+            current_right_path = original_left_path
+        else:
+            self._file_action_in_progress = False
+            return
+
+        current_row = next(
+            (
+                candidate
+                for candidate in screen.info_file_rows()
+                if candidate.left_file is not None
+                and candidate.right_file is not None
+                and candidate.left_file.path == current_left_path
+                and candidate.right_file.path == current_right_path
+            ),
+            None,
+        )
+        if current_row is None:
+            self._file_action_in_progress = False
+            return
+        resolved_row = resolve_info_file_compare_rows(
+            (current_row,),
+            left_sha256={current_left_path: current_left_sha256},
+            right_sha256={current_right_path: current_right_sha256},
+        )[0]
+        screen.set_info_file_row(resolved_row)
+        self._file_action_in_progress = False
+        self.call_after_refresh(
+            lambda: self._open_compare_file_action_screen(resolved_row)
+        )
 
     def _handle_compare_screen_dismissed(self, _result: None) -> None:
         self._clear_compare_state()
@@ -1260,6 +1351,25 @@ class CondaMetadataTui(App[None]):
             return
         row = self._selected_compare_file_row()
         if row is None:
+            return
+        compare_screen = cast(CompareScreen, self.screen)
+        if (
+            compare_screen.active_file_tab() == "info"
+            and row.left_file is not None
+            and row.right_file is not None
+            and (row.left_file.sha256 is None or row.right_file.sha256 is None)
+        ):
+            self._file_action_in_progress = True
+            try:
+                self.run_worker(
+                    self._resolve_compare_info_file_and_open(compare_screen, row),
+                    group="compare-info-file-hash",
+                    exclusive=True,
+                    exit_on_error=False,
+                )
+            except Exception:
+                self._file_action_in_progress = False
+                raise
             return
         self.call_after_refresh(lambda: self._open_compare_file_action_screen(row))
 
@@ -2135,6 +2245,15 @@ class CondaMetadataTui(App[None]):
         self._set_main_dependency_tab(cast(DependencyTab, tab))
         self._focus_main_panel()
 
+    def action_select_file_tab(self, tab: str) -> None:
+        if self._mode != "versions":
+            return
+        if tab not in FILE_TABS:
+            return
+        self._set_active_main_section(2)
+        self._set_main_file_tab(cast(FileTab, tab))
+        self._focus_main_panel()
+
     def action_tab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
@@ -2364,11 +2483,33 @@ class CondaMetadataTui(App[None]):
 
         if (
             self._mode == "versions"
+            and event.character == "["
+            and self._selected_pane == "main"
+            and self.query_one("#main-panel", MainPanel).file_section_is_active()
+        ):
+            self._cycle_main_file_tab(-1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
             and event.character == "]"
             and self._selected_pane == "main"
             and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
         ):
             self._cycle_main_dependency_tab(1)
+            self._focus_main_panel()
+            event.stop()
+            return
+
+        if (
+            self._mode == "versions"
+            and event.character == "]"
+            and self._selected_pane == "main"
+            and self.query_one("#main-panel", MainPanel).file_section_is_active()
+        ):
+            self._cycle_main_file_tab(1)
             self._focus_main_panel()
             event.stop()
             return

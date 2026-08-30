@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import yaml
 from rattler.networking import Client
-from rattler.package import AboutJson, PathsJson, PathType, RunExportsJson
-from rattler.package_streaming import fetch_raw_package_file_from_url
+from rattler.package import PathType, RunExportsJson
+from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
@@ -20,11 +20,13 @@ from .state import AboutUrls
 class VersionDataLoader:
     def __init__(self, *, client: Client) -> None:
         self._client = client
+        self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
 
     def clear_caches(self) -> None:
+        self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
         self.artifact_data_cache.clear()
@@ -32,10 +34,13 @@ class VersionDataLoader:
     def restore_caches(
         self,
         *,
+        archive_cache: dict[VersionPreviewKey, PackageArchive],
         about_urls_cache: dict[VersionPreviewKey, AboutUrls],
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
+        self.archive_cache.clear()
+        self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
         self.about_urls_cache.update(about_urls_cache)
         self.paths_cache.clear()
@@ -70,13 +75,13 @@ class VersionDataLoader:
         return str(rattler_build_version)
 
     async def get_package_paths(
-        self, preview_key: VersionPreviewKey, url: str
+        self, preview_key: VersionPreviewKey, archive: PackageArchive
     ) -> list[PackageFile]:
         cached = self.paths_cache.get(preview_key)
         if cached is not None:
             return cached
 
-        paths_json = await PathsJson.from_remote_url(self._client, url)
+        paths_json = await archive.paths_json()
         paths = [
             PackageFile(
                 path=str(path.relative_path),
@@ -90,14 +95,25 @@ class VersionDataLoader:
         self.paths_cache[preview_key] = paths
         return paths
 
-    async def get_about_urls(
+    async def get_package_archive(
         self, preview_key: VersionPreviewKey, url: str
+    ) -> PackageArchive:
+        cached = self.archive_cache.get(preview_key)
+        if cached is not None:
+            return cached
+
+        archive = await PackageArchive.from_url(self._client, url)
+        self.archive_cache[preview_key] = archive
+        return archive
+
+    async def get_about_urls(
+        self, preview_key: VersionPreviewKey, archive: PackageArchive
     ) -> AboutUrls:
         cached = self.about_urls_cache.get(preview_key)
         if cached is not None:
             return cached
 
-        about_json = await AboutJson.from_remote_url(self._client, url)
+        about_json = await archive.about_json()
         recipe_maintainers = about_json.extra.get("recipe-maintainers", [])
         if isinstance(recipe_maintainers, str):
             recipe_maintainers = [recipe_maintainers]
@@ -125,11 +141,13 @@ class VersionDataLoader:
             ),
         )
         try:
-            rendered_recipe_bytes = await fetch_raw_package_file_from_url(
-                self._client,
-                url,
-                "info/recipe/rendered_recipe.yaml",
+            rendered_recipe_bytes = await archive.read_file(
+                "info/recipe/rendered_recipe.yaml"
             )
+            if rendered_recipe_bytes is None:
+                raise FileNotFoundError(
+                    "package does not contain info/recipe/rendered_recipe.yaml"
+                )
             about_urls = AboutUrls(
                 repository=about_urls.repository,
                 documentation=about_urls.documentation,
@@ -147,8 +165,15 @@ class VersionDataLoader:
         self.about_urls_cache[preview_key] = about_urls
         return about_urls
 
-    async def get_run_exports(self, url: str) -> RunExportsJson:
-        return await RunExportsJson.from_remote_url(self._client, url)
+    async def get_info_files(self, archive: PackageArchive) -> list[PackageFile]:
+        files: list[PackageFile] = []
+        async for entry in archive.stream("info"):
+            if entry.is_file:
+                files.append(PackageFile(path=entry.name, size_in_bytes=entry.size))
+        return files
+
+    async def get_run_exports(self, archive: PackageArchive) -> RunExportsJson | None:
+        return await archive.run_exports_json()
 
     async def load_version_details(
         self,
@@ -174,18 +199,20 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        package_paths = await self.get_package_paths(preview_key, str(record.url))
+        archive = await self.get_package_archive(preview_key, str(record.url))
+        package_paths = await self.get_package_paths(preview_key, archive)
+        info_files = await self.get_info_files(archive)
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
 
         # TODO: clean up once https://github.com/conda/rattler/issues/2349 is fixed.
         try:
-            about_urls = await self.get_about_urls(preview_key, str(record.url))
+            about_urls = await self.get_about_urls(preview_key, archive)
         except Exception:
             pass
 
         try:
-            run_exports = await self.get_run_exports(str(record.url))
+            run_exports = await self.get_run_exports(archive)
         except Exception:
             pass
 
@@ -193,6 +220,7 @@ class VersionDataLoader:
             package_name,
             record,
             package_paths=package_paths,
+            info_files=info_files,
             repository_urls=about_urls.repository,
             documentation_urls=about_urls.documentation,
             homepage_urls=about_urls.homepage,

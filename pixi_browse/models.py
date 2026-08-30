@@ -10,6 +10,7 @@ ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
+FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 MetadataRow = tuple[str, str]
 
@@ -46,6 +47,7 @@ class VersionArtifactData:
     constraints: tuple[str, ...]
     package_url: str = ""
     file_paths: tuple[PackageFile, ...] = ()
+    info_files: tuple[PackageFile, ...] = ()
     run_exports: RunExportsJson | None = None
     repository_urls: tuple[str, ...] = ()
     documentation_urls: tuple[str, ...] = ()
@@ -78,6 +80,7 @@ class CompareFileRow:
     changed: bool
     left_file: PackageFile | None = None
     right_file: PackageFile | None = None
+    comparison_known: bool = True
 
 
 @dataclass(frozen=True)
@@ -89,3 +92,4 @@ class VersionCompareData:
     constraints: tuple[CompareRow, ...]
     run_exports: tuple[CompareRow, ...]
     files: tuple[CompareFileRow, ...]
+    info_files: tuple[CompareFileRow, ...] = ()

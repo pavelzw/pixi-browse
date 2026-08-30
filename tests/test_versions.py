@@ -9,6 +9,7 @@ import pytest
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
+from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.version import Version
@@ -37,6 +38,7 @@ from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
     render_package_preview,
+    resolve_info_file_compare_rows,
 )
 from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
@@ -78,6 +80,10 @@ class _RecordWithUrl:
     url: str
 
 
+async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageArchive:
+    return cast(PackageArchive, object())
+
+
 def _make_artifact_data(
     *,
     metadata_rows: tuple[tuple[str, str], ...] = (("Meta", "meta"),),
@@ -85,12 +91,14 @@ def _make_artifact_data(
     constraints: tuple[str, ...] = (),
     run_exports: RunExportsJson | None = None,
     file_paths: tuple[PackageFile, ...] = (),
+    info_files: tuple[PackageFile, ...] = (),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=metadata_rows,
         dependencies=dependencies,
         constraints=constraints,
         file_paths=file_paths,
+        info_files=info_files,
         run_exports=run_exports,
     )
 
@@ -259,11 +267,16 @@ def test_build_version_artifact_data_includes_package_paths() -> None:
             PackageFile("bin/demo"),
             PackageFile("lib/python3.13/site-packages/demo.py"),
         ),
+        info_files=(PackageFile("info/index.json"), PackageFile("info/paths.json")),
     )
 
     assert details.file_paths == (
         PackageFile("bin/demo"),
         PackageFile("lib/python3.13/site-packages/demo.py"),
+    )
+    assert details.info_files == (
+        PackageFile("info/index.json"),
+        PackageFile("info/paths.json"),
     )
 
 
@@ -379,6 +392,10 @@ def test_load_version_details_raises_when_package_paths_are_unavailable(
     ) -> list[PackageFile]:
         raise RuntimeError("paths.json missing")
 
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_package_archive_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
     with pytest.raises(RuntimeError, match=r"paths\.json missing"):
@@ -393,32 +410,66 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     loader = VersionDataLoader(client=cast(Client, object()))
     record = _make_repo_data_record(name="demo")
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+    archive = cast(PackageArchive, object())
+    calls: list[str] = []
+
+    async def _fake_from_url(_client: Client, _url: str) -> PackageArchive:
+        calls.append("from_url")
+        return archive
 
     async def _fake_get_package_paths(
-        _preview_key: tuple[str, str, str, int, str, str], _url: str
+        _preview_key: tuple[str, str, str, int, str, str], value: PackageArchive
     ) -> list[PackageFile]:
+        assert value is archive
+        calls.append("paths_json")
         return []
 
     async def _fake_get_about_urls(
-        _preview_key: tuple[str, str, str, int, str, str], _url: str
+        _preview_key: tuple[str, str, str, int, str, str], value: PackageArchive
     ) -> AboutUrls:
+        assert value is archive
+        calls.append("about_json")
         raise RuntimeError("about.json missing")
 
-    async def _fake_get_run_exports(_url: str) -> RunExportsJson:
+    async def _fake_get_run_exports(value: PackageArchive) -> RunExportsJson:
+        assert value is archive
+        calls.append("run_exports_json")
         return RunExportsJson()
 
+    async def _fake_get_info_files(value: PackageArchive) -> list[PackageFile]:
+        assert value is archive
+        calls.append("stream_info")
+        return [PackageFile("info/index.json", 42)]
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
 
     details = asyncio.run(
         loader.load_version_details("demo", record, preview_key=preview_key)
     )
+    cached_archive = asyncio.run(
+        loader.get_package_archive(preview_key, str(record.url))
+    )
 
     assert not any(
         line.startswith("Repository")
         for line in format_version_details_metadata_lines(details)
     )
+    assert details.info_files == (PackageFile("info/index.json", 42),)
+    assert cached_archive is archive
+    assert calls == [
+        "from_url",
+        "paths_json",
+        "stream_info",
+        "about_json",
+        "run_exports_json",
+    ]
 
 
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
@@ -433,6 +484,10 @@ def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
     ) -> list[PackageFile]:
         raise RuntimeError("paths.json missing")
 
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_package_archive_from_url,
+    )
     monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
 
     with pytest.raises(RuntimeError, match=r"paths\.json missing"):
@@ -620,6 +675,106 @@ def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> 
     assert file_row.changed is False
 
 
+def test_build_version_compare_data_uses_sizes_for_initial_info_status() -> None:
+    record = _make_repo_data_record()
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name=record.file_name,
+        ),
+    )
+    left_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        info_files=(
+            PackageFile("info/index.json", 100),
+            PackageFile("info/size-diff.json", 400),
+            PackageFile("info/left-only.json", 200),
+        ),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        info_files=(
+            PackageFile("info/index.json", 100),
+            PackageFile("info/size-diff.json", 500),
+            PackageFile("info/right-only.json", 300),
+        ),
+    )
+
+    compare_data = build_version_compare_data(
+        selection,
+        left_artifact,
+        selection,
+        right_artifact,
+    )
+
+    assert [row.label for row in compare_data.info_files] == [
+        "index.json",
+        "size-diff.json",
+        "left-only.json",
+        "right-only.json",
+    ]
+    assert compare_data.info_files[0].comparison_known is False
+    assert compare_data.info_files[0].left_file == PackageFile("info/index.json", 100)
+    assert compare_data.info_files[0].right_file == PackageFile("info/index.json", 100)
+    assert compare_data.info_files[0].left == "info/index.json (100 B)"
+    assert compare_data.info_files[0].right == "info/index.json (100 B)"
+    assert compare_data.info_files[1].comparison_known is True
+    assert compare_data.info_files[1].changed is True
+    assert CompareDetailsView._compare_file_prefix(compare_data.info_files[1]) == "~ "
+    assert compare_data.info_files[2].comparison_known is True
+    assert compare_data.info_files[3].comparison_known is True
+
+
+def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
+    unknown_rows = (
+        CompareFileRow(
+            label="same.json",
+            left="info/same.json",
+            right="info/same.json",
+            changed=False,
+            left_file=PackageFile("info/same.json", 100),
+            right_file=PackageFile("info/same.json", 100),
+            comparison_known=False,
+        ),
+        CompareFileRow(
+            label="changed.json",
+            left="info/changed.json",
+            right="info/changed.json",
+            changed=False,
+            left_file=PackageFile("info/changed.json", 200),
+            right_file=PackageFile("info/changed.json", 200),
+            comparison_known=False,
+        ),
+    )
+
+    rows = resolve_info_file_compare_rows(
+        unknown_rows,
+        left_sha256={
+            "info/same.json": bytes.fromhex("11" * 32),
+            "info/changed.json": bytes.fromhex("22" * 32),
+        },
+        right_sha256={
+            "info/same.json": bytes.fromhex("11" * 32),
+            "info/changed.json": bytes.fromhex("33" * 32),
+        },
+    )
+
+    assert rows[0].comparison_known is True
+    assert rows[0].changed is False
+    assert rows[0].left_file is not None
+    assert rows[0].left_file.size_in_bytes == 100
+    assert rows[1].comparison_known is True
+    assert rows[1].changed is True
+    assert rows[1].right_file is not None
+    assert rows[1].right_file.size_in_bytes == 200
+
+
 def test_format_version_details_metadata_lines_include_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
@@ -736,8 +891,8 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
     assert "Dependencies" not in rendered
 
 
-def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
-    app = CondaMetadataTui()
+def test_get_package_paths_caches_archive_paths() -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
@@ -780,19 +935,14 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
             ),
         ]
 
-    async def _fake_from_remote_url(client: object, url: str) -> _FakePathsJson:
-        del client
-        calls.append(url)
-        return _FakePathsJson()
+    class _FakeArchive:
+        async def paths_json(self) -> _FakePathsJson:
+            calls.append("paths_json")
+            return _FakePathsJson()
 
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.PathsJson.from_remote_url",
-        _fake_from_remote_url,
-    )
-
-    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    paths = asyncio.run(app._get_package_paths(preview_key, url))
-    cached_paths = asyncio.run(app._get_package_paths(preview_key, url))
+    archive = cast(PackageArchive, _FakeArchive())
+    paths = asyncio.run(loader.get_package_paths(preview_key, archive))
+    cached_paths = asyncio.run(loader.get_package_paths(preview_key, archive))
 
     assert paths == [
         PackageFile(
@@ -811,11 +961,41 @@ def test_get_package_paths_caches_remote_paths(monkeypatch) -> None:
         ),
     ]
     assert cached_paths == paths
-    assert calls == [url]
+    assert calls == ["paths_json"]
 
 
-def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
-    app = CondaMetadataTui()
+def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    calls: list[str] = []
+
+    class _FakeEntry:
+        def __init__(self, name: str, size: int, *, is_file: bool = True) -> None:
+            self.name = name
+            self.size = size
+            self.is_file = is_file
+
+    class _FakeArchive:
+        async def stream(self, section: str):
+            calls.append(section)
+            for entry in (
+                _FakeEntry("info/index.json", 42),
+                _FakeEntry("info/recipe", 0, is_file=False),
+                _FakeEntry("info/paths.json", 1234),
+            ):
+                yield entry
+
+    archive = cast(PackageArchive, _FakeArchive())
+    files = asyncio.run(loader.get_info_files(archive))
+
+    assert files == [
+        PackageFile("info/index.json", 42),
+        PackageFile("info/paths.json", 1234),
+    ]
+    assert calls == ["info"]
+
+
+def test_get_about_urls_caches_archive_about_json() -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
 
@@ -829,31 +1009,18 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
             "sha": "f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
         }
 
-    async def _fake_from_remote_url(client: object, url: str) -> _FakeAboutJson:
-        del client
-        calls.append(url)
-        return _FakeAboutJson()
+    class _FakeArchive:
+        async def about_json(self) -> _FakeAboutJson:
+            calls.append("about_json")
+            return _FakeAboutJson()
 
-    async def _fake_fetch_raw_package_file_from_url(
-        client: object, url: str, path: str
-    ) -> bytes:
-        del client
-        assert url == "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-        assert path == "info/recipe/rendered_recipe.yaml"
-        return b"system_tools:\n  rattler-build: 0.38.0\n"
+        async def read_file(self, path: str) -> bytes:
+            calls.append(path)
+            return b"system_tools:\n  rattler-build: 0.38.0\n"
 
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.AboutJson.from_remote_url",
-        _fake_from_remote_url,
-    )
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.fetch_raw_package_file_from_url",
-        _fake_fetch_raw_package_file_from_url,
-    )
-
-    url = "https://example.invalid/demo-1.2.3-py313h123_0.conda"
-    about_urls = asyncio.run(app._get_about_urls(preview_key, url))
-    cached_about_urls = asyncio.run(app._get_about_urls(preview_key, url))
+    archive = cast(PackageArchive, _FakeArchive())
+    about_urls = asyncio.run(loader.get_about_urls(preview_key, archive))
+    cached_about_urls = asyncio.run(loader.get_about_urls(preview_key, archive))
 
     assert about_urls == AboutUrls(
         repository=("https://github.com/example/demo",),
@@ -865,7 +1032,7 @@ def test_get_about_urls_caches_remote_about_json(monkeypatch) -> None:
         rattler_build_version="0.38.0",
     )
     assert cached_about_urls == about_urls
-    assert calls == [url]
+    assert calls == ["about_json", "info/recipe/rendered_recipe.yaml"]
 
 
 def test_extract_rattler_build_version_from_rendered_recipe() -> None:
@@ -1744,10 +1911,10 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
     monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
 
-    event = _FakeKeyEvent("2", "2")
+    event = _FakeKeyEvent("3", "3")
     app.on_key(event)  # type: ignore[arg-type]
 
-    assert selected_sections == [1]
+    assert selected_sections == [2]
     assert focused == ["main"]
     assert event.stopped is True
 
@@ -2106,6 +2273,46 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
     asyncio.run(_run())
 
 
+def test_compare_file_rows_show_sizes_instead_of_sha256_values() -> None:
+    row = CompareFileRow(
+        label="info/index.json",
+        left="info/index.json",
+        right="info/index.json",
+        changed=True,
+        left_file=PackageFile("info/index.json", 1024, bytes.fromhex("11" * 32)),
+        right_file=PackageFile("info/index.json", 2048, bytes.fromhex("22" * 32)),
+    )
+
+    option = CompareDetailsView._compare_file_suffix(row)
+
+    assert option == " [L: 1.0 KiB | R: 2.0 KiB]"
+    assert "11111111" not in option
+    assert "22222222" not in option
+
+
+def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
+    row = CompareFileRow(
+        label="index.json",
+        left="info/index.json",
+        right="info/index.json",
+        changed=False,
+        left_file=PackageFile("info/index.json", 1234),
+        right_file=PackageFile("info/index.json", 1234),
+        comparison_known=False,
+    )
+
+    prompt = CompareDetailsView._render_compare_file_option(row)
+
+    assert prompt.plain == "? index.json (1.2 KiB)"
+    assert [
+        (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
+    ] == [
+        ("? ", "#7a5c00"),
+        ("index.json", "#5c6370"),
+        (" (1.2 KiB)", Style(color="#5c6370", dim=True)),
+    ]
+
+
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
     view = VersionDetailsView()
     view._active_section = 0
@@ -2157,6 +2364,30 @@ def test_dependency_header_uses_active_title_style_when_pane_is_selected() -> No
     header = view._render_dependency_header()
 
     assert header.style == ACTIVE_SECTION_TITLE_STYLE
+
+
+def test_file_header_shows_pkg_and_info_as_clickable_tabs() -> None:
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        file_paths=(PackageFile("bin/demo"),),
+        info_files=(PackageFile("info/index.json"), PackageFile("info/paths.json")),
+    )
+    view._file_tab_index = 1
+
+    header = view._render_file_header()
+
+    assert header.plain == "[3] pkg/ (1) - info/ (2)"
+    assert any(
+        span.style.meta == {"@click": ("select_file_tab", ("info",))}
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+    assert any(
+        span.style == INACTIVE_SELECTED_TAB_STYLE
+        and header.plain[span.start : span.end] == "info/ (2)"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
 
 
 def test_dependency_header_shows_zero_counts_when_sections_are_empty() -> None:
@@ -2217,6 +2448,28 @@ def test_file_list_entry_uses_plain_file_path() -> None:
     assert entries[0].path == "site-packages/demo.py"
 
 
+def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        info_files=(
+            PackageFile("info/index.json", 1024),
+            PackageFile("info/recipe/meta.yaml", 1536),
+        ),
+    )
+
+    entries = view._file_entries_for_details("info")
+
+    assert [entry.label for entry in entries] == [
+        "index.json (1.0 KiB)",
+        "recipe/meta.yaml (1.5 KiB)",
+    ]
+    assert [entry.path for entry in entries] == [
+        "info/index.json",
+        "info/recipe/meta.yaml",
+    ]
+    assert [entry.size_in_bytes for entry in entries] == [1024, 1536]
+
+
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
     monkeypatch,
 ) -> None:
@@ -2226,6 +2479,9 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
 
     class _FakeMainPanel:
         def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
