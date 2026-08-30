@@ -1731,17 +1731,37 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     assert callback == app._handle_matchspec_result
 
 
-def test_inspect_mode_disables_matchspec_shortcut(monkeypatch) -> None:
+def test_inspect_mode_disables_channel_compare_and_matchspec_shortcuts(
+    monkeypatch,
+) -> None:
     app = CondaMetadataTui(
         artifact_sources=[RemoteArtifactSource("https://example.com/demo.conda")]
     )
     pushed: list[object] = []
+    channel_edits: list[bool] = []
+    compare_selections: list[bool] = []
 
     monkeypatch.setattr(app, "push_screen", lambda *args: pushed.append(args))
+    monkeypatch.setattr(
+        app,
+        "_set_channel_edit_mode",
+        lambda *args, **kwargs: channel_edits.append(True),
+    )
+    monkeypatch.setattr(
+        app,
+        "_current_compare_selection",
+        lambda: compare_selections.append(True),
+    )
 
+    app.action_channel_key_c()
+    app.action_compare_key_c()
     app.action_matchspec_key_m()
 
     assert pushed == []
+    assert channel_edits == []
+    assert compare_selections == []
+    assert "Edit channel" not in app._help_text()
+    assert "Compare selected artifact" not in app._help_text()
     assert "Query MatchSpec" not in app._help_text()
 
 

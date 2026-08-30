@@ -953,21 +953,26 @@ class CondaMetadataTui(App[None]):
                 ("Esc", "Back or close current overlay"),
             ],
         )
-        app_rows = [
-            ("?", "Show this help"),
-            ("/", "Start package filter"),
-            ("p", "Open platform selector"),
-            ("c", "Edit channel"),
-            ("C", "Compare selected artifact in versions view"),
-        ]
-        if self._can_query_matchspec():
-            app_rows.append(("m", "Query MatchSpec"))
-        app_rows.extend(
-            [
-                ("d", "Download selected artifact in versions view"),
-                ("q", "Quit"),
-            ]
-        )
+        app_rows = [("?", "Show this help")]
+        if self._artifact_sources:
+            app_rows.extend(
+                [
+                    ("d", "Download selected artifact in versions view"),
+                    ("q", "Quit"),
+                ]
+            )
+        else:
+            app_rows.extend(
+                [
+                    ("/", "Start package filter"),
+                    ("p", "Open platform selector"),
+                    ("c", "Edit channel"),
+                    ("C", "Compare selected artifact in versions view"),
+                    ("m", "Query MatchSpec"),
+                    ("d", "Download selected artifact in versions view"),
+                    ("q", "Quit"),
+                ]
+            )
         app = self._format_help_section("App", app_rows)
         return "\n".join([*navigation, "", *app])
 
@@ -2385,6 +2390,8 @@ class CondaMetadataTui(App[None]):
         self._open_platform_selector()
 
     def action_channel_key_c(self) -> None:
+        if self._artifact_sources:
+            return
         if self._channel_edit_mode:
             self._append_channel_char("c")
             return
@@ -2396,6 +2403,8 @@ class CondaMetadataTui(App[None]):
         self._update_filter_indicator()
 
     def action_compare_key_c(self) -> None:
+        if self._artifact_sources:
+            return
         if self._channel_edit_mode:
             self._append_channel_char("C")
             return
