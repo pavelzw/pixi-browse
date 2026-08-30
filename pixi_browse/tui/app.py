@@ -974,6 +974,7 @@ class CondaMetadataTui(App[None]):
 
     @staticmethod
     async def _info_file_sha256(archive: PackageArchive, path: str) -> bytes:
+        # TODO: don't read in all bytes into memory but stream
         contents = await archive.read_file(path)
         assert contents is not None
         return sha256(contents).digest()
@@ -1306,8 +1307,38 @@ class CondaMetadataTui(App[None]):
         return cast(CompareScreen, self.screen).selected_file_row()
 
     def _open_compare_file_action_screen(self, row: CompareFileRow) -> None:
+        actions = self._compare_file_action_options(row)
+        if not actions:
+            has_symlink = any(
+                package_file is not None and package_file.is_symlink
+                for package_file in (row.left_file, row.right_file)
+            )
+            self.notify(
+                (
+                    "Symlinks cannot be previewed or downloaded."
+                    if has_symlink
+                    else "This compare row does not map to a downloadable file."
+                ),
+                title="Files",
+                severity="warning",
+            )
+            return
+
+        self.push_screen(
+            FileActionScreen(
+                row.label,
+                actions=actions,
+                metadata_lines=self._compare_file_action_metadata_lines(row),
+            ),
+            lambda result: self._handle_compare_file_action_result(row, result),
+        )
+
+    @staticmethod
+    def _compare_file_action_options(
+        row: CompareFileRow,
+    ) -> tuple[FileActionOption, ...]:
         actions: list[FileActionOption] = []
-        if row.left_file is not None:
+        if row.left_file is not None and not row.left_file.is_symlink:
             actions.extend(
                 (
                     FileActionOption(
@@ -1318,7 +1349,7 @@ class CondaMetadataTui(App[None]):
                     ),
                 )
             )
-        if row.right_file is not None:
+        if row.right_file is not None and not row.right_file.is_symlink:
             actions.extend(
                 (
                     FileActionOption(
@@ -1329,22 +1360,7 @@ class CondaMetadataTui(App[None]):
                     ),
                 )
             )
-        if not actions:
-            self.notify(
-                "This compare row does not map to a downloadable file.",
-                title="Files",
-                severity="warning",
-            )
-            return
-
-        self.push_screen(
-            FileActionScreen(
-                row.label,
-                actions=tuple(actions),
-                metadata_lines=self._compare_file_action_metadata_lines(row),
-            ),
-            lambda result: self._handle_compare_file_action_result(row, result),
-        )
+        return tuple(actions)
 
     def _request_file_action_for_selected_compare_file(self) -> None:
         if self._file_action_in_progress:
@@ -1357,6 +1373,8 @@ class CondaMetadataTui(App[None]):
             compare_screen.active_file_tab() == "info"
             and row.left_file is not None
             and row.right_file is not None
+            and not row.left_file.is_symlink
+            and not row.right_file.is_symlink
             and (row.left_file.sha256 is None or row.right_file.sha256 is None)
         ):
             self._file_action_in_progress = True

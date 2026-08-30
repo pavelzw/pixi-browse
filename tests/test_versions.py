@@ -935,10 +935,19 @@ def test_get_package_paths_caches_archive_paths() -> None:
             ),
         ]
 
+    class _FakeEntry:
+        name = "lib/python3.13/site-packages/demo.py"
+        is_symlink = True
+        link_target = "demo.py"
+
     class _FakeArchive:
         async def paths_json(self) -> _FakePathsJson:
             calls.append("paths_json")
             return _FakePathsJson()
+
+        async def stream(self, section: str):
+            calls.append(section)
+            yield _FakeEntry()
 
     archive = cast(PackageArchive, _FakeArchive())
     paths = asyncio.run(loader.get_package_paths(preview_key, archive))
@@ -958,10 +967,11 @@ def test_get_package_paths_caches_archive_paths() -> None:
             None,
             True,
             "softlink",
+            "demo.py",
         ),
     ]
     assert cached_paths == paths
-    assert calls == ["paths_json"]
+    assert calls == ["paths_json", "pkg"]
 
 
 def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
@@ -969,10 +979,19 @@ def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
     calls: list[str] = []
 
     class _FakeEntry:
-        def __init__(self, name: str, size: int, *, is_file: bool = True) -> None:
+        def __init__(
+            self,
+            name: str,
+            size: int,
+            *,
+            is_file: bool = True,
+            link_target: str | None = None,
+        ) -> None:
             self.name = name
             self.size = size
             self.is_file = is_file
+            self.is_symlink = link_target is not None
+            self.link_target = link_target
 
     class _FakeArchive:
         async def stream(self, section: str):
@@ -980,6 +999,9 @@ def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
             for entry in (
                 _FakeEntry("info/index.json", 42),
                 _FakeEntry("info/recipe", 0, is_file=False),
+                _FakeEntry(
+                    "info/current", 13, is_file=False, link_target="recipe/meta.yaml"
+                ),
                 _FakeEntry("info/paths.json", 1234),
             ):
                 yield entry
@@ -989,6 +1011,12 @@ def test_get_info_files_streams_archive_info_section_with_sizes() -> None:
 
     assert files == [
         PackageFile("info/index.json", 42),
+        PackageFile(
+            path="info/current",
+            size_in_bytes=13,
+            path_type="softlink",
+            link_target="recipe/meta.yaml",
+        ),
         PackageFile("info/paths.json", 1234),
     ]
     assert calls == ["info"]
@@ -2290,6 +2318,39 @@ def test_compare_file_rows_show_sizes_instead_of_sha256_values() -> None:
     assert "22222222" not in option
 
 
+def test_compare_symlinks_show_target_and_have_no_actions() -> None:
+    symlink = PackageFile(
+        path="info/current",
+        size_in_bytes=13,
+        path_type="softlink",
+        link_target="recipe/meta.yaml",
+    )
+    row = CompareFileRow(
+        label="current",
+        left="info/current",
+        right="info/current",
+        changed=False,
+        left_file=symlink,
+        right_file=symlink,
+    )
+
+    assert CompareDetailsView._compare_file_suffix(row) == " -> recipe/meta.yaml"
+    assert CondaMetadataTui._compare_file_action_options(row) == ()
+
+    mixed_row = CompareFileRow(
+        label="current",
+        left="info/current",
+        right="info/current",
+        changed=True,
+        left_file=symlink,
+        right_file=PackageFile("info/current", 42),
+    )
+    assert CondaMetadataTui._compare_file_action_options(mixed_row) == (
+        FileActionOption(action="preview", label="Preview right", source="right"),
+        FileActionOption(action="download", label="Download right", source="right"),
+    )
+
+
 def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     row = CompareFileRow(
         label="index.json",
@@ -2439,13 +2500,18 @@ def test_dependency_list_entry_unescapes_matchspec_text() -> None:
 def test_file_list_entry_uses_plain_file_path() -> None:
     view = VersionDetailsView()
     view._details = _make_artifact_data(
-        file_paths=(PackageFile("site-packages/demo.py", 1536),),
+        file_paths=(
+            PackageFile("site-packages/demo.py", 1536),
+            PackageFile("bin/demo", path_type="softlink"),
+        ),
     )
 
     entries = view._file_entries_for_details()
 
     assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
+    assert entries[1].label == "bin/demo"
+    assert entries[1].path is None
 
 
 def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
@@ -2454,6 +2520,12 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
         info_files=(
             PackageFile("info/index.json", 1024),
             PackageFile("info/recipe/meta.yaml", 1536),
+            PackageFile(
+                path="info/current",
+                size_in_bytes=13,
+                path_type="softlink",
+                link_target="recipe/meta.yaml",
+            ),
         ),
     )
 
@@ -2462,12 +2534,14 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
     assert [entry.label for entry in entries] == [
         "index.json (1.0 KiB)",
         "recipe/meta.yaml (1.5 KiB)",
+        "current -> recipe/meta.yaml",
     ]
     assert [entry.path for entry in entries] == [
         "info/index.json",
         "info/recipe/meta.yaml",
+        None,
     ]
-    assert [entry.size_in_bytes for entry in entries] == [1024, 1536]
+    assert [entry.size_in_bytes for entry in entries] == [1024, 1536, 13]
 
 
 def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(

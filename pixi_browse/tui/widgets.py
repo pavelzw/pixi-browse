@@ -26,6 +26,7 @@ from pixi_browse.models import (
     CompareSelection,
     DependencyTab,
     FileTab,
+    PackageFile,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -530,13 +531,8 @@ class VersionDetailsView(Vertical):
         if package_files:
             return tuple(
                 FileListEntry(
-                    label=(
-                        f"{self._displayed_file_path(package_file.path, tab)}"
-                        f" ({format_human_byte_size(package_file.size_in_bytes)})"
-                        if package_file.size_in_bytes is not None
-                        else self._displayed_file_path(package_file.path, tab)
-                    ),
-                    path=package_file.path,
+                    label=self._file_label(package_file, tab),
+                    path=None if package_file.is_symlink else package_file.path,
                     size_in_bytes=package_file.size_in_bytes,
                     sha256=package_file.sha256,
                 )
@@ -547,6 +543,19 @@ class VersionDetailsView(Vertical):
     @staticmethod
     def _displayed_file_path(path: str, tab: FileTab) -> str:
         return path.removeprefix("info/") if tab == "info" else path
+
+    @classmethod
+    def _file_label(cls, package_file: PackageFile, tab: FileTab) -> str:
+        path = cls._displayed_file_path(package_file.path, tab)
+        if package_file.is_symlink:
+            return (
+                f"{path} -> {package_file.link_target}"
+                if package_file.link_target is not None
+                else path
+            )
+        if package_file.size_in_bytes is not None:
+            return f"{path} ({format_human_byte_size(package_file.size_in_bytes)})"
+        return path
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-2", DetailOptionList)
@@ -1351,36 +1360,60 @@ class CompareDetailsView(Vertical):
             row.right_file.size_in_bytes if row.right_file is not None else None
         )
         if row.left_file is not None and row.right_file is not None:
+            if (
+                not row.changed
+                and row.left_file.is_symlink
+                and row.right_file.is_symlink
+            ):
+                return (
+                    f" -> {row.left_file.link_target}"
+                    if row.left_file.link_target is not None
+                    else ""
+                )
             if not row.changed and left_size == right_size:
                 return (
                     f" ({format_human_byte_size(left_size)})"
                     if left_size is not None
                     else ""
                 )
-            left_label = (
-                format_human_byte_size(left_size)
-                if left_size is not None
-                else "unknown"
-            )
-            right_label = (
-                format_human_byte_size(right_size)
-                if right_size is not None
-                else "unknown"
-            )
+            left_label = CompareDetailsView._compare_file_side_label(row.left_file)
+            right_label = CompareDetailsView._compare_file_side_label(row.right_file)
             return f" [L: {left_label} | R: {right_label}]"
         if row.left_file is not None:
+            if row.left_file.is_symlink:
+                return (
+                    " [left: "
+                    f"{CompareDetailsView._compare_file_side_label(row.left_file)}]"
+                )
             return (
                 f" [left: {format_human_byte_size(left_size)}]"
                 if left_size is not None
                 else " [left]"
             )
         if row.right_file is not None:
+            if row.right_file.is_symlink:
+                return (
+                    " [right: "
+                    f"{CompareDetailsView._compare_file_side_label(row.right_file)}]"
+                )
             return (
                 f" [right: {format_human_byte_size(right_size)}]"
                 if right_size is not None
                 else " [right]"
             )
         return ""
+
+    @staticmethod
+    def _compare_file_side_label(package_file: PackageFile) -> str:
+        if package_file.is_symlink:
+            return (
+                f"-> {package_file.link_target}"
+                if package_file.link_target is not None
+                else "unknown"
+            )
+        if package_file.size_in_bytes is not None:
+            return format_human_byte_size(package_file.size_in_bytes)
+        return "unknown"
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#compare-option-list-2", DetailOptionList)
