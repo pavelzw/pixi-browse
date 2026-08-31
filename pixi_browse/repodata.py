@@ -9,7 +9,13 @@ from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord, SourceConfig
+from rattler.repo_data import (
+    Dependent,
+    Gateway,
+    PackageRecord,
+    RepoDataRecord,
+    SourceConfig,
+)
 from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
@@ -179,6 +185,7 @@ async def query_whoneeds_records(
         [RepoDataRecord], tuple[VersionWithSource, str, str, int]
     ],
     log: Callable[[str], None] | None = None,
+    max_parallel_platforms: int = 4,
 ) -> WhoNeedsQueryResult:
     """Return all channel records that depend on ``target``.
 
@@ -196,15 +203,38 @@ async def query_whoneeds_records(
         log(
             "who-needs: starting gateway reverse query "
             f"target={target_label!r} channel={channel_name!r} "
-            f"platforms={platforms_label!r}"
+            f"platforms={platforms_label!r} "
+            f"max_parallel_platforms={max_parallel_platforms}"
         )
 
     query_started = perf_counter()
-    dependents = await gateway.who_needs(
-        sources=[channel_name],
-        platforms=platforms,
-        target=target,
+    semaphore = asyncio.Semaphore(max_parallel_platforms)
+
+    async def query_platform(platform: Platform) -> list[Dependent]:
+        async with semaphore:
+            platform_started = perf_counter()
+            platform_dependents = await gateway.who_needs(
+                sources=[channel_name],
+                platforms=[platform],
+                target=target,
+            )
+            if log is not None:
+                log(
+                    "who-needs: platform reverse query finished "
+                    f"platform={str(platform)!r} "
+                    f"elapsed={perf_counter() - platform_started:.3f}s "
+                    f"matches={len(platform_dependents):,}"
+                )
+            return platform_dependents
+
+    dependents_by_platform = await asyncio.gather(
+        *(query_platform(platform) for platform in platforms)
     )
+    dependents = [
+        dependent
+        for platform_dependents in dependents_by_platform
+        for dependent in platform_dependents
+    ]
     query_duration = perf_counter() - query_started
     if log is not None:
         log(

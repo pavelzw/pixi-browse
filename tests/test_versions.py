@@ -239,6 +239,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         depends=["python >=3.10", "python"],
     )
     legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
+    gateway_calls: list[Platform] = []
 
     class _FakeGateway:
         async def who_needs(
@@ -249,7 +250,8 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
             target: str | PackageRecord,
         ) -> list[Dependent]:
             assert sources == ["conda-forge"]
-            assert platforms == [Platform("linux-64")]
+            assert len(platforms) == 1
+            gateway_calls.append(platforms[0])
             return who_needs([python, numpy, legacy], target)
 
     def _sort_key(
@@ -263,7 +265,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         query_whoneeds_records(
             gateway=gateway,
             channel_name="conda-forge",
-            platforms=[Platform("linux-64")],
+            platforms=[Platform("linux-64"), Platform("noarch")],
             target="python",
             record_sort_key=_sort_key,
             log=logs.append,
@@ -273,7 +275,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         query_whoneeds_records(
             gateway=gateway,
             channel_name="conda-forge",
-            platforms=[Platform("linux-64")],
+            platforms=[Platform("linux-64"), Platform("noarch")],
             target=python,
             record_sort_key=_sort_key,
         )
@@ -283,6 +285,12 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
     assert by_name.records_by_package == {"legacy": [legacy], "numpy": [numpy]}
     assert by_record.package_names == ["numpy"]
     assert by_record.records_by_package == {"numpy": [numpy]}
+    assert gateway_calls == [
+        Platform("linux-64"),
+        Platform("noarch"),
+        Platform("linux-64"),
+        Platform("noarch"),
+    ]
     assert any("starting gateway reverse query" in message for message in logs)
     assert any("gateway reverse query finished" in message for message in logs)
     assert any("result grouping finished" in message for message in logs)
