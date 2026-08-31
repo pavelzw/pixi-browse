@@ -31,6 +31,7 @@ from .widgets import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsScreen,
 )
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "RunExportsJson",
     "SidebarPanel",
     "VersionDetailsView",
+    "WhoNeedsScreen",
     "create_gateway",
     "fetch_raw_package_file_from_url",
     "package_download_to_path",

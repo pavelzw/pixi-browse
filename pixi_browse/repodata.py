@@ -4,11 +4,12 @@ import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+from rattler import who_needs
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, RepoDataRecord, SourceConfig
+from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord, SourceConfig
 from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
@@ -20,10 +21,18 @@ class MatchSpecQueryResult:
     records_by_package: dict[str, list[RepoDataRecord]]
 
 
-def create_gateway(*, client: Client | None = None) -> Gateway:
+@dataclass(frozen=True)
+class WhoNeedsQueryResult:
+    package_names: list[str]
+    records_by_package: dict[str, list[RepoDataRecord]]
+
+
+def create_gateway(
+    *, client: Client | None = None, sharded_enabled: bool = True
+) -> Gateway:
     return Gateway(
         default_config=SourceConfig(
-            sharded_enabled=True,
+            sharded_enabled=sharded_enabled,
             cache_action="cache-or-fetch",
         ),
         client=client,
@@ -79,8 +88,11 @@ async def fetch_package_names(
     return platforms, sorted({name.normalized for name in names})
 
 
-def record_identity_key(record: RepoDataRecord) -> tuple[str, str, int, str, str]:
+def record_identity_key(
+    record: RepoDataRecord,
+) -> tuple[str, str, str, int, str, str]:
     return (
+        record.name.normalized,
         str(record.version),
         record.build,
         record.build_number,
@@ -99,7 +111,7 @@ async def query_package_records(
         [RepoDataRecord], tuple[VersionWithSource, str, str, int]
     ],
 ) -> list[RepoDataRecord]:
-    unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
+    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
         sources=[channel_name],
         platforms=platforms,
@@ -127,7 +139,7 @@ async def query_matchspec_records(
         [RepoDataRecord], tuple[VersionWithSource, str, str, int]
     ],
 ) -> MatchSpecQueryResult:
-    unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
+    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
         sources=[channel_name],
         platforms=platforms,
@@ -149,6 +161,56 @@ async def query_matchspec_records(
         records_by_package={
             package_name: sorted(
                 grouped_records[package_name],
+                key=record_sort_key,
+                reverse=True,
+            )
+            for package_name in sorted_package_names
+        },
+    )
+
+
+async def query_whoneeds_records(
+    *,
+    gateway: Gateway,
+    channel_name: str,
+    platforms: list[Platform],
+    target: str | PackageRecord,
+    record_sort_key: Callable[
+        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+    ],
+) -> WhoNeedsQueryResult:
+    """Return all channel records that depend on ``target``.
+
+    Reverse dependency lookup needs complete repodata, so callers must pass a
+    gateway configured with sharded repodata disabled.
+    """
+    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
+    wildcard = MatchSpec("*", exact_names_only=False)
+    by_source = await gateway.query(
+        sources=[channel_name],
+        platforms=platforms,
+        specs=[wildcard],
+        recursive=False,
+    )
+    for source_records in by_source:
+        for record in source_records:
+            unique_records[record_identity_key(record)] = record
+
+    grouped_records: dict[
+        str, dict[tuple[str, str, str, int, str, str], RepoDataRecord]
+    ] = {}
+    for dependent in who_needs(list(unique_records.values()), target):
+        package_name = dependent.record.name.normalized
+        grouped_records.setdefault(package_name, {})[
+            record_identity_key(dependent.record)
+        ] = dependent.record
+
+    sorted_package_names = sorted(grouped_records)
+    return WhoNeedsQueryResult(
+        package_names=sorted_package_names,
+        records_by_package={
+            package_name: sorted(
+                grouped_records[package_name].values(),
                 key=record_sort_key,
                 reverse=True,
             )

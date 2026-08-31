@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
-from rattler.repo_data import RepoDataRecord
+from rattler.repo_data import PackageRecord, RepoDataRecord
 
 from pixi_browse.models import (
     CompareSelection,
@@ -50,7 +50,9 @@ class ChannelStateSnapshot:
     all_package_names: list[str]
     visible_package_names: list[str]
     matchspec_query: str
-    matchspec_records_by_package: dict[str, list[RepoDataRecord]]
+    whoneeds_query: str
+    whoneeds_target: str | PackageRecord | None
+    query_records_by_package: dict[str, list[RepoDataRecord]]
     package_records_cache: dict[str, list[RepoDataRecord]]
     version_archive_cache: dict[VersionPreviewKey, PackageArchive]
     version_about_urls_cache: dict[VersionPreviewKey, AboutUrls]

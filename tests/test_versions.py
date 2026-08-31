@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 from typing import cast
 
 import pytest
-from rattler.exceptions import InvalidMatchSpecError
+from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
-from rattler.repo_data import PackageRecord, RepoDataRecord
-from rattler.version import Version
+from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
+from rattler.version import Version, VersionWithSource
 from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
@@ -42,7 +42,11 @@ from pixi_browse.rendering import (
     resolve_info_file_compare_rows,
     syntax_lexer_for_path,
 )
-from pixi_browse.repodata import MatchSpecQueryResult
+from pixi_browse.repodata import (
+    MatchSpecQueryResult,
+    WhoNeedsQueryResult,
+    query_whoneeds_records,
+)
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
     EMPTY_MATCHSPEC_RESULT,
@@ -62,6 +66,7 @@ from pixi_browse.tui import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsScreen,
 )
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
@@ -200,8 +205,10 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     gateway_calls: list[object] = []
     user_agents: list[str] = []
 
-    def _fake_create_gateway(*, client: object | None = None) -> object:
-        gateway_calls.append(client)
+    def _fake_create_gateway(
+        *, client: object | None = None, sharded_enabled: bool = True
+    ) -> object:
+        gateway_calls.append((client, sharded_enabled))
         return object()
 
     def _fake_default_client(*, user_agent: str) -> object:
@@ -220,8 +227,62 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     app = CondaMetadataTui()
 
     assert app._client is shared_client
-    assert gateway_calls == [shared_client]
+    assert gateway_calls == [(shared_client, True), (shared_client, False)]
     assert user_agents == [f"pixi-browse/{__version__}"]
+
+
+def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> None:
+    python = _make_repo_data_record(name="python", version="3.13.1", build="h1_0")
+    numpy = _make_repo_data_record(
+        name="numpy",
+        depends=["python >=3.10", "python"],
+    )
+    legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
+
+    class _FakeGateway:
+        async def query(
+            self,
+            *,
+            sources: list[str],
+            platforms: list[Platform],
+            specs: list[MatchSpec],
+            recursive: bool,
+        ) -> list[list[RepoDataRecord]]:
+            assert sources == ["conda-forge"]
+            assert platforms == [Platform("linux-64")]
+            assert str(specs[0]) == "*"
+            assert recursive is False
+            return [[python, numpy, legacy]]
+
+    def _sort_key(
+        record: RepoDataRecord,
+    ) -> tuple[VersionWithSource, str, str, int]:
+        return (record.version, record.build, record.subdir, record.build_number)
+
+    gateway = cast(Gateway, _FakeGateway())
+    by_name = asyncio.run(
+        query_whoneeds_records(
+            gateway=gateway,
+            channel_name="conda-forge",
+            platforms=[Platform("linux-64")],
+            target="python",
+            record_sort_key=_sort_key,
+        )
+    )
+    by_record = asyncio.run(
+        query_whoneeds_records(
+            gateway=gateway,
+            channel_name="conda-forge",
+            platforms=[Platform("linux-64")],
+            target=python,
+            record_sort_key=_sort_key,
+        )
+    )
+
+    assert by_name.package_names == ["legacy", "numpy"]
+    assert by_name.records_by_package == {"legacy": [legacy], "numpy": [numpy]}
+    assert by_record.package_names == ["numpy"]
+    assert by_record.records_by_package == {"numpy": [numpy]}
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
@@ -1284,7 +1345,7 @@ def test_open_versions_orders_subdirs_by_latest_version_then_name(monkeypatch) -
     assert app._version_subdirs == ["noarch", "linux-64", "osx-arm64"]
 
 
-def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
+def test_open_versions_uses_query_records_when_present(monkeypatch) -> None:
     app = CondaMetadataTui()
     filtered_record = _make_repo_data_record(
         version="2.0.0",
@@ -1293,7 +1354,7 @@ def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
         subdir="linux-64",
         file_name="demo-2.0.0-py313h999_0.conda",
     )
-    app._matchspec_records_by_package = {"demo": [filtered_record]}
+    app._query_records_by_package = {"demo": [filtered_record]}
 
     class _FakeOptionList:
         highlighted = 0
@@ -1653,6 +1714,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
+    assert "w                 Query reverse dependencies" in help_text
 
 
 def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
@@ -1728,6 +1790,137 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     assert screen._initial_value == "numpy >=2"
     assert screen._select_on_focus is True
     assert callback == app._handle_matchspec_result
+
+
+def test_whoneeds_screen_validates_package_name() -> None:
+    package_name = WhoNeedsScreen.validate_package_name(" NumPy ")
+
+    assert package_name.normalized == "numpy"
+    with pytest.raises(InvalidPackageNameError):
+        WhoNeedsScreen.validate_package_name("")
+
+
+def test_whoneeds_screen_updates_inline_error_message(monkeypatch) -> None:
+    screen = WhoNeedsScreen()
+
+    class _FakeStatic:
+        def __init__(self) -> None:
+            self.updates: list[Text] = []
+
+        def update(self, value: Text) -> None:
+            self.updates.append(value)
+
+    error_widget = _FakeStatic()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatic:
+        assert selector == "#whoneeds-error"
+        return error_widget
+
+    monkeypatch.setattr(screen, "query_one", _fake_query_one)
+
+    screen._update_validation_error("")
+    screen._update_validation_error("python")
+
+    assert error_widget.updates[0].plain != ""
+    assert error_widget.updates[-1].plain == ""
+
+
+def test_action_whoneeds_key_w_pushes_whoneeds_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    pushed: list[tuple[WhoNeedsScreen, object | None]] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+
+    app.action_whoneeds_key_w()
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == ""
+    assert callback == app._handle_whoneeds_result
+
+
+def test_action_whoneeds_key_w_uses_selected_detail_record(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    selection = CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+    worker_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
+    monkeypatch.setattr(
+        app,
+        "_open_whoneeds_screen",
+        lambda value: (_ for _ in ()).throw(
+            AssertionError(f"unexpected name query: {value}")
+        ),
+    )
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+    app._mode = "versions"
+
+    app.action_whoneeds_key_w()
+
+    assert worker_calls == [
+        {
+            "group": "whoneeds-selection",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_apply_whoneeds_for_selection_queries_concrete_package_record(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="python", version="3.13.1", build="h123_0")
+    selection = CompareSelection(
+        "python",
+        VersionEntry(
+            version=record.version,
+            build=record.build,
+            build_number=record.build_number,
+            subdir=record.subdir,
+            file_name=record.file_name,
+        ),
+    )
+    queries: list[tuple[str | PackageRecord, str]] = []
+
+    async def _fake_get_record(
+        package_name: str, entry: VersionEntry
+    ) -> RepoDataRecord | None:
+        assert package_name == selection.package_name
+        assert entry == selection.entry
+        return record
+
+    async def _fake_apply_query(target: str | PackageRecord, query: str) -> None:
+        queries.append((target, query))
+
+    monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
+
+    asyncio.run(app._apply_whoneeds_for_selection(selection))
+
+    assert queries == [
+        (record, "python 3.13.1 h123_0"),
+    ]
 
 
 def test_handle_matchspec_result_queues_matchspec_worker(monkeypatch) -> None:
@@ -4122,10 +4315,10 @@ def test_apply_channel_selection_renders_sidebar_loading_placeholder(
     assert option_list.focused is True
 
 
-def test_request_package_preview_uses_matchspec_records(monkeypatch) -> None:
+def test_request_package_preview_uses_query_records(monkeypatch) -> None:
     app = CondaMetadataTui()
     record = _make_repo_data_record(name="demo")
-    app._matchspec_records_by_package = {"demo": [record]}
+    app._query_records_by_package = {"demo": [record]}
     previewed: list[tuple[str, list[RepoDataRecord]]] = []
 
     monkeypatch.setattr(
@@ -4152,7 +4345,7 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     app = CondaMetadataTui()
     app._channel_package_names = ["demo", "numpy"]
     app._matchspec_query = "demo >=1"
-    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
     app._mode = "versions"
     filtered: list[str] = []
     updated: list[str] = []
@@ -4177,7 +4370,7 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     asyncio.run(app._apply_matchspec_query(None))
 
     assert app._matchspec_query == ""
-    assert app._matchspec_records_by_package == {}
+    assert app._query_records_by_package == {}
     assert app._all_package_names == ["demo", "numpy"]
     assert app._mode == "packages"
     assert filtered == ["filtered"]
@@ -4217,7 +4410,7 @@ def test_apply_matchspec_result_auto_opens_versions_for_single_package(
     )
 
     assert app._matchspec_query == "demo >=2"
-    assert app._matchspec_records_by_package == {"demo": [record]}
+    assert app._query_records_by_package == {"demo": [record]}
     assert opened == ["demo"]
     assert focused == ["sidebar"]
 
@@ -4297,6 +4490,44 @@ def test_apply_matchspec_result_keeps_packages_view_for_multiple_packages(
     assert focused == ["sidebar"]
 
 
+def test_apply_whoneeds_result_opens_dependent_packages(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="numpy", depends=["python >=3.10"])
+    focused: list[str] = []
+    opened: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    async def _fake_open_versions(package_name: str) -> None:
+        opened.append(package_name)
+
+    monkeypatch.setattr(app, "_open_versions", _fake_open_versions)
+
+    asyncio.run(
+        app._apply_whoneeds_result(
+            "python",
+            "python",
+            WhoNeedsQueryResult(
+                package_names=["numpy"],
+                records_by_package={"numpy": [record]},
+            ),
+        )
+    )
+
+    assert app._matchspec_query == ""
+    assert app._whoneeds_query == "python"
+    assert app._whoneeds_target == "python"
+    assert app._query_records_by_package == {"numpy": [record]}
+    assert opened == ["numpy"]
+    assert focused == ["sidebar"]
+
+
 def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> None:
     app = CondaMetadataTui(default_platforms={Platform("linux-64")})
     app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
@@ -4361,7 +4592,7 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
 def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._matchspec_query = "demo >=1"
-    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
 
     class _FakeOptionList:
         def __init__(self) -> None:
@@ -4405,7 +4636,7 @@ def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
     asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
 
     assert app._matchspec_query == ""
-    assert app._matchspec_records_by_package == {}
+    assert app._query_records_by_package == {}
     assert notifications == ["Switched to channel: prefix.dev/conda-forge"]
 
 
@@ -4414,7 +4645,7 @@ def test_footer_text_matches_redesigned_shortcuts() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Help: ?"
     )
 
 
@@ -4424,7 +4655,7 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
 
     assert (
         cast(Text, app._footer_text()).plain
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -4445,7 +4676,7 @@ def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
     footer = cast(Text, app._footer_text())
 
     assert footer.plain == (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
     compare_start = footer.plain.index("Compare: C")
     compare_end = compare_start + len("Compare: C")
@@ -4497,7 +4728,7 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
 
     assert (
         cast(Text, app._footer_text()).plain
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -5029,11 +5260,11 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
         value.plain if isinstance(value, Text) else value for value in footer.updates
     ]
     assert (
-        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Downloading {entry.file_name}... | Help: ?"
+        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Downloading {entry.file_name}... | Help: ?"
         in footer_updates
     )
     assert (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
         in footer_updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]

@@ -4,8 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from rattler.exceptions import InvalidMatchSpecError
+from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
+from rattler.package import PackageName
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -1839,6 +1840,116 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         self.dismiss(result)
 
     async def action_dismiss(self, result: MatchSpec | Empty | None = None) -> None:
+        self.dismiss(result)
+
+
+class WhoNeedsScreen(ModalScreen[PackageName | None]):
+    DEFAULT_CSS = """
+    WhoNeedsScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #whoneeds-input {
+        border: tall #ec4899;
+    }
+
+    #whoneeds-input:focus {
+        border: tall #ec4899;
+    }
+
+    #whoneeds-input > .input--selection {
+        background: #ec4899;
+        color: #ffffff;
+    }
+
+    #whoneeds-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, initial_value: str = "") -> None:
+        super().__init__()
+        self._initial_value = initial_value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-dialog"):
+            yield Static("Who needs", id="whoneeds-title")
+            yield Input(
+                value=self._initial_value,
+                placeholder="numpy",
+                id="whoneeds-input",
+            )
+            yield Static(
+                "Find every package that depends on this package name.",
+                id="whoneeds-help",
+            )
+            yield Static("", id="whoneeds-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#whoneeds-input", Input).focus()
+
+    @staticmethod
+    def validate_package_name(value: str) -> PackageName:
+        query = value.strip()
+        if not query:
+            raise InvalidPackageNameError("Package name cannot be empty.")
+        return PackageName(query)
+
+    def _show_error(self, message: str) -> None:
+        self.query_one("#whoneeds-error", Static).update(Text(message))
+
+    def _update_validation_error(self, value: str) -> None:
+        try:
+            self.validate_package_name(value)
+        except InvalidPackageNameError as exc:
+            self._show_error(str(exc))
+            return
+
+        self._show_error("")
+
+    @on(Input.Changed, "#whoneeds-input")
+    def _validate_input(self, event: Input.Changed) -> None:
+        self._update_validation_error(event.value)
+
+    @on(Input.Submitted)
+    def _submit(self, event: Input.Submitted) -> None:
+        event.stop()
+        try:
+            result = self.validate_package_name(event.value)
+        except InvalidPackageNameError as exc:
+            self._show_error(str(exc))
+            return
+
+        self.dismiss(result)
+
+    async def action_dismiss(self, result: PackageName | None = None) -> None:
         self.dismiss(result)
 
 
