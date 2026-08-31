@@ -6,12 +6,13 @@ from datetime import UTC, datetime
 from typing import cast
 
 import pytest
+from rattler import who_needs
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
+from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version, VersionWithSource
 from rich.style import Style
 from rich.syntax import Syntax
@@ -240,19 +241,16 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
     legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
 
     class _FakeGateway:
-        async def query(
+        async def who_needs(
             self,
             *,
             sources: list[str],
             platforms: list[Platform],
-            specs: list[MatchSpec],
-            recursive: bool,
-        ) -> list[list[RepoDataRecord]]:
+            target: str | PackageRecord,
+        ) -> list[Dependent]:
             assert sources == ["conda-forge"]
             assert platforms == [Platform("linux-64")]
-            assert str(specs[0]) == "*"
-            assert recursive is False
-            return [[python, numpy, legacy]]
+            return who_needs([python, numpy, legacy], target)
 
     def _sort_key(
         record: RepoDataRecord,
@@ -260,6 +258,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         return (record.version, record.build, record.subdir, record.build_number)
 
     gateway = cast(Gateway, _FakeGateway())
+    logs: list[str] = []
     by_name = asyncio.run(
         query_whoneeds_records(
             gateway=gateway,
@@ -267,6 +266,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
             platforms=[Platform("linux-64")],
             target="python",
             record_sort_key=_sort_key,
+            log=logs.append,
         )
     )
     by_record = asyncio.run(
@@ -283,6 +283,10 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
     assert by_name.records_by_package == {"legacy": [legacy], "numpy": [numpy]}
     assert by_record.package_names == ["numpy"]
     assert by_record.records_by_package == {"numpy": [numpy]}
+    assert any("starting gateway reverse query" in message for message in logs)
+    assert any("gateway reverse query finished" in message for message in logs)
+    assert any("result grouping finished" in message for message in logs)
+    assert any("result sorting finished" in message for message in logs)
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:

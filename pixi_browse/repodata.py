@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from time import perf_counter
 
-from rattler import who_needs
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -178,35 +178,63 @@ async def query_whoneeds_records(
     record_sort_key: Callable[
         [RepoDataRecord], tuple[VersionWithSource, str, str, int]
     ],
+    log: Callable[[str], None] | None = None,
 ) -> WhoNeedsQueryResult:
     """Return all channel records that depend on ``target``.
 
-    Reverse dependency lookup needs complete repodata, so callers must pass a
-    gateway configured with sharded repodata disabled.
+    The gateway performs the full repodata scan in Rust and only returns
+    matching records to Python. Callers must pass a gateway configured with
+    sharded repodata disabled so the scan does not fetch every package shard.
     """
-    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
-    wildcard = MatchSpec("*", exact_names_only=False)
-    by_source = await gateway.query(
+    target_label = (
+        target
+        if isinstance(target, str)
+        else f"{target.name.normalized} {target.version} {target.build}"
+    )
+    platforms_label = ",".join(str(platform) for platform in platforms)
+    if log is not None:
+        log(
+            "who-needs: starting gateway reverse query "
+            f"target={target_label!r} channel={channel_name!r} "
+            f"platforms={platforms_label!r}"
+        )
+
+    query_started = perf_counter()
+    dependents = await gateway.who_needs(
         sources=[channel_name],
         platforms=platforms,
-        specs=[wildcard],
-        recursive=False,
+        target=target,
     )
-    for source_records in by_source:
-        for record in source_records:
-            unique_records[record_identity_key(record)] = record
+    query_duration = perf_counter() - query_started
+    if log is not None:
+        log(
+            "who-needs: gateway reverse query finished "
+            f"elapsed={query_duration:.3f}s matches={len(dependents):,}"
+        )
 
+    grouping_started = perf_counter()
     grouped_records: dict[
         str, dict[tuple[str, str, str, int, str, str], RepoDataRecord]
     ] = {}
-    for dependent in who_needs(list(unique_records.values()), target):
-        package_name = dependent.record.name.normalized
-        grouped_records.setdefault(package_name, {})[
-            record_identity_key(dependent.record)
-        ] = dependent.record
+    for dependent in dependents:
+        record = dependent.record
+        package_name = record.name.normalized
+        grouped_records.setdefault(package_name, {})[record_identity_key(record)] = (
+            record
+        )
+    grouping_duration = perf_counter() - grouping_started
+    dependent_record_count = sum(len(records) for records in grouped_records.values())
+    if log is not None:
+        log(
+            "who-needs: result grouping finished "
+            f"elapsed={grouping_duration:.3f}s "
+            f"unique_records={dependent_record_count:,} "
+            f"packages={len(grouped_records):,}"
+        )
 
+    sorting_started = perf_counter()
     sorted_package_names = sorted(grouped_records)
-    return WhoNeedsQueryResult(
+    result = WhoNeedsQueryResult(
         package_names=sorted_package_names,
         records_by_package={
             package_name: sorted(
@@ -217,3 +245,10 @@ async def query_whoneeds_records(
             for package_name in sorted_package_names
         },
     )
+    sorting_duration = perf_counter() - sorting_started
+    if log is not None:
+        log(
+            "who-needs: result sorting finished "
+            f"elapsed={sorting_duration:.3f}s packages={len(sorted_package_names):,}"
+        )
+    return result

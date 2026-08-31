@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from hashlib import sha256
 from pathlib import Path
+from time import perf_counter
 from typing import Literal, cast
 
 from rattler.exceptions import GatewayError
@@ -465,6 +466,7 @@ class CondaMetadataTui(App[None]):
             platforms=self._platforms,
             target=target,
             record_sort_key=self._record_sort_key,
+            log=self.log.info,
         )
 
     async def _reapply_active_whoneeds(self) -> None:
@@ -2020,6 +2022,8 @@ class CondaMetadataTui(App[None]):
     async def _apply_whoneeds_query(
         self, target: str | PackageRecord, query: str
     ) -> None:
+        workflow_started = perf_counter()
+        self.log.info(f"who-needs: workflow started query={query!r}")
         previous_state = self._snapshot_channel_state()
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = True
@@ -2030,6 +2034,10 @@ class CondaMetadataTui(App[None]):
         try:
             result = await self._query_whoneeds_records(target)
         except (GatewayError, RuntimeError) as exc:
+            self.log.error(
+                "who-needs: workflow failed "
+                f"elapsed={perf_counter() - workflow_started:.3f}s error={exc!s}"
+            )
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
             package_list.focus()
@@ -2040,10 +2048,21 @@ class CondaMetadataTui(App[None]):
             )
             return
 
+        query_duration = perf_counter() - workflow_started
+        self.log.info(
+            "who-needs: query result ready for UI "
+            f"elapsed={query_duration:.3f}s packages={len(result.package_names):,}"
+        )
         package_list.disabled = False
         await self._apply_whoneeds_result(target, query, result)
+        self.log.info(
+            "who-needs: workflow finished "
+            f"ui_elapsed={perf_counter() - workflow_started - query_duration:.3f}s "
+            f"total_elapsed={perf_counter() - workflow_started:.3f}s"
+        )
 
     async def _apply_whoneeds_for_selection(self, selection: CompareSelection) -> None:
+        resolution_started = perf_counter()
         record = await self._get_record_for_version_entry(
             selection.package_name, selection.entry
         )
@@ -2054,6 +2073,12 @@ class CondaMetadataTui(App[None]):
                 severity="error",
             )
             return
+        self.log.info(
+            "who-needs: selected record resolved "
+            f"elapsed={perf_counter() - resolution_started:.3f}s "
+            f"record={record.name.normalized!r} version={str(record.version)!r} "
+            f"build={record.build!r} subdir={record.subdir!r}"
+        )
         target = record
         query = f"{record.name.normalized} {record.version} {record.build}"
         await self._apply_whoneeds_query(target, query)
