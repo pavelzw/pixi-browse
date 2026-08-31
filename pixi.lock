@@ -283,7 +283,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/yarl-1.24.5-pyh7db6752_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - conda_source: pixi-browse[d7a8cea7] @ .
-      - conda_source: py-rattler[f71da410] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[52b890e5] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -488,7 +488,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zizmor-1.28.0-h19f9e61_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[8da38928] @ .
-      - conda_source: py-rattler[b4bc4f06] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[10463757] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -693,7 +693,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zizmor-1.28.0-h6fdd925_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[0da8684d] @ .
-      - conda_source: py-rattler[dd31c755] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[125ebabe] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -875,7 +875,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[87c1e253] @ .
-      - conda_source: py-rattler[b946b812] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[fbd04140] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
   py313:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -1085,7 +1085,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/uc-micro-py-2.0.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wayland-protocols-1.49-hd8ed1ab_0.conda
       - conda_source: pixi-browse[d7a8cea7] @ .
-      - conda_source: py-rattler[f71da410] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[52b890e5] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -1242,7 +1242,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yarl-1.24.5-py313h035b7d0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[8da38928] @ .
-      - conda_source: py-rattler[b4bc4f06] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[10463757] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -1399,7 +1399,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yarl-1.24.5-py313h65a2061_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[0da8684d] @ .
-      - conda_source: py-rattler[dd31c755] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[125ebabe] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -1534,7 +1534,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[87c1e253] @ .
-      - conda_source: py-rattler[b946b812] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[fbd04140] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
   py314:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -1746,7 +1746,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wayland-protocols-1.49-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/yarl-1.24.5-pyh7db6752_0.conda
       - conda_source: pixi-browse[d7a8cea7] @ .
-      - conda_source: py-rattler[f71da410] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[52b890e5] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -1905,7 +1905,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yaml-0.2.5-h4132b18_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[8da38928] @ .
-      - conda_source: py-rattler[b4bc4f06] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[10463757] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -2064,7 +2064,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h925e9cb_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[0da8684d] @ .
-      - conda_source: py-rattler[dd31c755] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[125ebabe] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
       win-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/aiohappyeyeballs-2.7.1-pyhd8ed1ab_0.conda
@@ -2201,7 +2201,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[87c1e253] @ .
-      - conda_source: py-rattler[b946b812] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+      - conda_source: py-rattler[fbd04140] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -4179,23 +4179,23 @@ packages:
   run_exports: {}
   size: 27424
   timestamp: 1772445227915
-- conda: https://conda.anaconda.org/conda-forge/linux-64/maturin-1.14.1-py310h67c5e53_2.conda
+- conda: https://conda.anaconda.org/conda-forge/linux-64/maturin-1.15.0-py310h67c5e53_0.conda
   noarch: python
-  sha256: 420dd288ed066282e43b876629a02e512e269ed1a775991b37ee5701b60fac52
-  md5: f9eb7b3aa6ded33bcc9801fc19abefe8
+  sha256: 7ae8650a379efbb0beef59ceb65fe7e093ecc208f71e8dbb4b0faa53fc70698e
+  md5: cec19e699d601b630abd004a8ee594d7
   depends:
   - python
   - tomli >=1.1.0
-  - libgcc >=15
   - __glibc >=2.17,<3.0.a0
+  - libgcc >=15
   - openssl >=3.5.7,<4.0a0
   constrains:
   - __glibc >=2.17
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 9539973
-  timestamp: 1786670703157
+  size: 9556979
+  timestamp: 1787587810724
 - conda: https://conda.anaconda.org/conda-forge/linux-64/mpg123-1.32.9-hc50e24c_0.conda
   sha256: 39c4700fb3fbe403a77d8cc27352fa72ba744db487559d5d44bf8411bb4ea200
   md5: c7f302fd11eeb0987a6a5e1f3aed6a21
@@ -8321,10 +8321,10 @@ packages:
   run_exports: {}
   size: 26740
   timestamp: 1772445674690
-- conda: https://conda.anaconda.org/conda-forge/osx-64/maturin-1.14.1-py310h1e6175a_2.conda
+- conda: https://conda.anaconda.org/conda-forge/osx-64/maturin-1.15.0-py310h1e6175a_0.conda
   noarch: python
-  sha256: d22d32c161b2ec695db6f8a0e968d909871145b294ba0bacf0b83cedc01efc9f
-  md5: b0d02a3d20bb50de1b98ce26e2ecaebe
+  sha256: 8888e7ca2b0d1cfd4f825976d5cf1662ea55f1186ca2b6961c8af550ac39049c
+  md5: 842332fa981218dc69158aa96c994214
   depends:
   - python
   - tomli >=1.1.0
@@ -8335,8 +8335,8 @@ packages:
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 9111463
-  timestamp: 1786670852227
+  size: 9133314
+  timestamp: 1787587934409
 - conda: https://conda.anaconda.org/conda-forge/osx-64/mpg123-1.32.9-h78e78a4_0.conda
   sha256: 15e660430e9ed13c98c81c3f0333d6d8aaf1a40f703e2af68973d1c374842e60
   md5: 6bdfebc249f2466c2893bdf6d5faf484
@@ -10743,10 +10743,10 @@ packages:
   run_exports: {}
   size: 27256
   timestamp: 1772445397216
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/maturin-1.14.1-py310h277814e_2.conda
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/maturin-1.15.0-py310h277814e_0.conda
   noarch: python
-  sha256: 5605f4b3cb5ccf62536e982d4c0b41d8b780ebef14c3adfd8ce6ffc8412fbca2
-  md5: 822b33d777fd395bc789fad6da2d788d
+  sha256: 63dab6510dc92c215256390a29454d6ad9bc672800b145188eacda756f745111
+  md5: d5e1fadd2b087f5d8c64edd7113b02e3
   depends:
   - python
   - tomli >=1.1.0
@@ -10757,8 +10757,8 @@ packages:
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 8550441
-  timestamp: 1786670771773
+  size: 8561448
+  timestamp: 1787587876482
 - conda: https://conda.anaconda.org/conda-forge/osx-arm64/mpg123-1.32.9-hf642e45_0.conda
   sha256: 070bbbbb96856c325c0b6637638ce535afdc49adbaff306e2238c6032d28dddf
   md5: d2b4857bdc3b76c36e23236172d09840
@@ -12622,10 +12622,10 @@ packages:
   run_exports: {}
   size: 30022
   timestamp: 1772445159549
-- conda: https://conda.anaconda.org/conda-forge/win-64/maturin-1.14.1-py310h3ce4601_2.conda
+- conda: https://conda.anaconda.org/conda-forge/win-64/maturin-1.15.0-py310h3ce4601_0.conda
   noarch: python
-  sha256: aea4cbf48ca6734af93842bfd71353ec5f98c966c9838527d76ed4c06f53c456
-  md5: b8746f3c901d100f37279673f2abf0f9
+  sha256: 0bbfd094870f72f067f53705c126c748d4b3f204631c6a3cdac1db3b8645a6c9
+  md5: fffde93473ebcba505cf2ffa6742ab5a
   depends:
   - python
   - tomli >=1.1.0
@@ -12635,8 +12635,8 @@ packages:
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 8600656
-  timestamp: 1786670725788
+  size: 8588073
+  timestamp: 1787587816596
 - conda: https://conda.anaconda.org/conda-forge/win-64/mpg123-1.32.9-h01009b0_0.conda
   sha256: a1d7d25f2c448f5c47d1678cca1f6ae5deadb38e176ea0c76ea5c688589dfd7a
   md5: 1ed1580d4211223b285787eff05560f9
@@ -13675,7 +13675,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/trove-classifiers-2026.6.1.19-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-- conda_source: py-rattler[b4bc4f06] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+- conda_source: py-rattler[10463757] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
   version: 0.25.0
   build: h4778241_0
   subdir: osx-64
@@ -13741,60 +13741,14 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/osx-64/liblzma-5.8.3-hbb4bfdb_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/libsqlite-3.53.4-ha5db789_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/libzlib-1.3.2-hbb4bfdb_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/osx-64/maturin-1.14.1-py310h1e6175a_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/osx-64/maturin-1.15.0-py310h1e6175a_0.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/ncurses-6.6-hcc0dc9a_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/openssl-3.6.3-hc881268_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/python-3.10.21-hea035f4_0_cpython.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/readline-8.3-h000c2f7_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/tk-8.6.13-ha6c374e_4.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-64/uv-0.12.5-h7b6789c_1.conda
-- conda_source: py-rattler[b946b812] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
-  version: 0.25.0
-  build: he01afda_0
-  subdir: win-64
-  variants:
-    c_compiler: vs2022
-    target_platform: win-64
-  depends:
-  - python >=3.10
-  - vc >=14.3,<15
-  - vc14_runtime >=14.44.35208
-  - ucrt >=10.0.20348.0
-  - _python_abi3_support 1.*
-  - cpython >=3.10
-  license: BSD-3-Clause
-  build_packages:
-  - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.97.1-h17fc481_2.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/vswhere-3.1.7-h40126e0_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/rust-1.97.1-hf8d6059_2.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/rust_win-64-1.97.1-ha913c02_2.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/vs2022_win-64-19.44.35207-ha74f236_41.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/vs_win-64-2022.14-ha74f236_41.conda
-  host_packages:
-  - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.7.22-h4c7d964_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.10.21-py310hd8ed1ab_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/python-abi3-3.10-h05e3ecb_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.10.21-hd8ed1ab_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.10-8_cp310.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/bzip2-1.0.8-h0ad9c76_10.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/libexpat-2.8.1-hac47afa_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/libffi-3.7.0-h3d046cb_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/liblzma-5.8.3-hfd05255_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/libsqlite-3.53.4-hf5d6505_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/libzlib-1.3.2-hfd05255_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/maturin-1.14.1-py310h3ce4601_2.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/openssl-3.6.3-hf411b9b_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/python-3.10.21-hc20f281_0_cpython.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/tk-8.6.13-h967ab96_4.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/ucrt-10.0.26100.0-h57928b3_0.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/uv-0.12.5-h7ca4a90_1.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
-  - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-- conda_source: py-rattler[dd31c755] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+- conda_source: py-rattler[125ebabe] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
   version: 0.25.0
   build: hea27dcd_0
   subdir: osx-arm64
@@ -13861,14 +13815,14 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/liblzma-5.8.3-h8088a28_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/libsqlite-3.53.4-hca69786_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/libzlib-1.3.2-h8088a28_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/osx-arm64/maturin-1.14.1-py310h277814e_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/osx-arm64/maturin-1.15.0-py310h277814e_0.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ncurses-6.6-he64c551_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/openssl-3.6.3-hd24854e_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/python-3.10.21-hac0b6dc_0_cpython.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h8b90a29_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-hbeba79b_4.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/uv-0.12.5-h58858c0_1.conda
-- conda_source: py-rattler[f71da410] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#5c0c925307dc5faa78d1a9018cbbf2edf55927ec
+- conda_source: py-rattler[52b890e5] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
   version: 0.25.0
   build: ha35fb5c_0
   subdir: linux-64
@@ -13922,7 +13876,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.2-h5347b49_0.conda
   - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcrypt-4.4.38-h280c20c_0.conda
   - conda: https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.2-h25fd6f3_3.conda
-  - conda: https://conda.anaconda.org/conda-forge/linux-64/maturin-1.14.1-py310h67c5e53_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/linux-64/maturin-1.15.0-py310h67c5e53_0.conda
   - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_1.conda
   - conda: https://conda.anaconda.org/conda-forge/linux-64/openssl-3.6.3-h35e630c_1.conda
   - conda: https://conda.anaconda.org/conda-forge/linux-64/python-3.10.21-h267e890_0_cpython.conda
@@ -13938,3 +13892,49 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.10-8_cp310.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
+- conda_source: py-rattler[fbd04140] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=claude%2Frattler-issue-1362-q3aq6r#f6e175e7847ca02320df81841e16f060dbee9e5d
+  version: 0.25.0
+  build: he01afda_0
+  subdir: win-64
+  variants:
+    c_compiler: vs2022
+    target_platform: win-64
+  depends:
+  - python >=3.10
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  - ucrt >=10.0.20348.0
+  - _python_abi3_support 1.*
+  - cpython >=3.10
+  license: BSD-3-Clause
+  build_packages:
+  - conda: https://conda.anaconda.org/conda-forge/noarch/rust-std-x86_64-pc-windows-msvc-1.97.1-h17fc481_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/vswhere-3.1.7-h40126e0_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/rust-1.97.1-hf8d6059_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/rust_win-64-1.97.1-ha913c02_2.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/vs2022_win-64-19.44.35207-ha74f236_41.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/vs_win-64-2022.14-ha74f236_41.conda
+  host_packages:
+  - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_3.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.7.22-h4c7d964_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/cpython-3.10.21-py310hd8ed1ab_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/python-abi3-3.10-h05e3ecb_3.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/python-gil-3.10.21-hd8ed1ab_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.10-8_cp310.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/bzip2-1.0.8-h0ad9c76_10.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/libexpat-2.8.1-hac47afa_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/libffi-3.7.0-h3d046cb_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/liblzma-5.8.3-hfd05255_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/libsqlite-3.53.4-hf5d6505_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/libzlib-1.3.2-hfd05255_3.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/maturin-1.15.0-py310h3ce4601_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/openssl-3.6.3-hf411b9b_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/python-3.10.21-hc20f281_0_cpython.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/tk-8.6.13-h967ab96_4.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/ucrt-10.0.26100.0-h57928b3_0.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/uv-0.12.5-h7ca4a90_1.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
+  - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda

@@ -239,7 +239,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         depends=["python >=3.10", "python"],
     )
     legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
-    gateway_calls: list[Platform] = []
+    gateway_calls: list[list[Platform]] = []
 
     class _FakeGateway:
         async def who_needs(
@@ -250,8 +250,7 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
             target: str | PackageRecord,
         ) -> list[Dependent]:
             assert sources == ["conda-forge"]
-            assert len(platforms) == 1
-            gateway_calls.append(platforms[0])
+            gateway_calls.append(platforms)
             return who_needs([python, numpy, legacy], target)
 
     def _sort_key(
@@ -286,10 +285,8 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
     assert by_record.package_names == ["numpy"]
     assert by_record.records_by_package == {"numpy": [numpy]}
     assert gateway_calls == [
-        Platform("linux-64"),
-        Platform("noarch"),
-        Platform("linux-64"),
-        Platform("noarch"),
+        [Platform("linux-64"), Platform("noarch")],
+        [Platform("linux-64"), Platform("noarch")],
     ]
     assert any("starting gateway reverse query" in message for message in logs)
     assert any("gateway reverse query finished" in message for message in logs)

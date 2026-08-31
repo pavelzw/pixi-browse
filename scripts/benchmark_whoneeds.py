@@ -40,12 +40,6 @@ def parse_args() -> argparse.Namespace:
         help="repeat for multiple platforms; default: current platform and noarch",
     )
     parser.add_argument("-n", "--iterations", type=int, default=5)
-    parser.add_argument(
-        "--max-parallel-platforms",
-        type=int,
-        default=4,
-        help="maximum simultaneous single-platform Gateway queries",
-    )
     return parser.parse_args()
 
 
@@ -101,30 +95,16 @@ async def benchmark(
     platforms: list[Platform],
     target: str | PackageRecord,
     iterations: int,
-    max_parallel_platforms: int,
 ) -> tuple[list[float], list[Dependent]]:
     durations: list[float] = []
     dependents: list[Dependent] = []
     for _ in range(iterations):
         started = perf_counter()
-        semaphore = asyncio.Semaphore(max_parallel_platforms)
-
-        async def query_platform(platform: Platform) -> list[Dependent]:
-            async with semaphore:
-                return await gateway.who_needs(
-                    sources=[channel],
-                    platforms=[platform],
-                    target=target,
-                )
-
-        dependents_by_platform = await asyncio.gather(
-            *(query_platform(platform) for platform in platforms)
+        dependents = await gateway.who_needs(
+            sources=[channel],
+            platforms=platforms,
+            target=target,
         )
-        dependents = [
-            dependent
-            for platform_dependents in dependents_by_platform
-            for dependent in platform_dependents
-        ]
         durations.append(perf_counter() - started)
     return durations, dependents
 
@@ -186,9 +166,8 @@ async def main() -> None:
     channel = cast(str, args.channel)
     platforms = selected_platforms(cast(list[str] | None, args.platforms))
     iterations = cast(int, args.iterations)
-    max_parallel_platforms = cast(int, args.max_parallel_platforms)
-    if iterations < 1 or max_parallel_platforms < 1:
-        raise SystemExit("iteration counts must be at least 1")
+    if iterations < 1:
+        raise SystemExit("iteration count must be at least 1")
 
     print(f"Channel: {channel}")
     print(f"Platforms: {', '.join(str(platform) for platform in platforms)}")
@@ -209,7 +188,6 @@ async def main() -> None:
             platforms,
             package.normalized,
             iterations,
-            max_parallel_platforms,
         ),
     )
     records = await query_target_records(gateway, channel, platforms, package)
@@ -228,7 +206,6 @@ async def main() -> None:
             platforms,
             exact,
             iterations,
-            max_parallel_platforms,
         ),
     )
 
