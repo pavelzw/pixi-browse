@@ -96,6 +96,16 @@ class _Dependent:
     dependency: str
 
 
+class _RecordingGateway:
+    """Gateway stub that records the repodata caches it was asked to drop."""
+
+    def __init__(self) -> None:
+        self.cleared: list[str] = []
+
+    def clear_repodata_cache(self, channel_name: str) -> None:
+        self.cleared.append(channel_name)
+
+
 async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageArchive:
     return cast(PackageArchive, object())
 
@@ -4429,6 +4439,9 @@ def test_apply_whoneeds_query_empty_restores_full_package_selection(
     app._whoneeds_target = "python"
     app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
     app._mode = "versions"
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
     filtered: list[str] = []
     updated: list[str] = []
     focused: list[str] = []
@@ -4456,9 +4469,87 @@ def test_apply_whoneeds_query_empty_restores_full_package_selection(
     assert app._query_records_by_package == {}
     assert app._all_package_names == ["demo", "numpy"]
     assert app._mode == "packages"
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
     assert filtered == ["filtered"]
     assert updated == ["updated"]
     assert focused == ["sidebar"]
+
+
+def test_release_whoneeds_repodata_drops_the_scanned_channel() -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
+
+    # Nothing is cached anymore, so releasing again must not touch the gateway.
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+
+
+def test_release_whoneeds_repodata_uses_the_channel_that_was_scanned() -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+    # Switching the channel must not orphan the repodata of the old one.
+    app._channel_name = "robostack"
+
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+
+
+def test_query_whoneeds_records_tracks_the_scanned_channel() -> None:
+    app = CondaMetadataTui()
+    app._channel_name = "conda-forge"
+    app._platforms = [Platform("noarch")]
+
+    class _FakeGateway:
+        async def who_needs(
+            self,
+            *,
+            sources: list[str],
+            platforms: list[Platform],
+            target: str | PackageRecord,
+        ) -> list[Dependent]:
+            return []
+
+    app._whoneeds_gateway = cast(Gateway, _FakeGateway())
+
+    asyncio.run(app._query_whoneeds_records("python"))
+
+    assert app._whoneeds_scanned_channel == "conda-forge"
+
+
+def test_apply_matchspec_result_releases_whoneeds_repodata(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+    app._whoneeds_query = "python"
+    app._whoneeds_target = "python"
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: None)
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "demo >=2",
+            MatchSpecQueryResult(package_names=[], records_by_package={}),
+        )
+    )
+
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
+    assert app._whoneeds_target is None
 
 
 def test_handle_whoneeds_result_clears_query_for_empty_input(monkeypatch) -> None:

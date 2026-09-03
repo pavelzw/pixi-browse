@@ -140,6 +140,7 @@ class CondaMetadataTui(App[None]):
         self._matchspec_query = ""
         self._whoneeds_query = ""
         self._whoneeds_target: str | PackageRecord | None = None
+        self._whoneeds_scanned_channel: str | None = None
         self._query_records_by_package: dict[str, list[RepoDataRecord]] = {}
         self._current_versions: list[VersionEntry] = []
         self._version_subdirs: list[str] = []
@@ -390,6 +391,25 @@ class CondaMetadataTui(App[None]):
         self._package_records_cache.clear()
         self._version_loader.clear_caches()
 
+    def _release_whoneeds_repodata(self) -> None:
+        """Drop the repodata the who-needs gateway scanned.
+
+        A who-needs query runs against unsharded repodata, so the gateway
+        retains the *complete* repodata of every platform it scanned - well
+        over a gigabyte for a channel the size of conda-forge. Nothing needs
+        it once the who-needs view is gone, and the on-disk cache is kept, so
+        a later query only has to re-read it.
+
+        The scanned channel is tracked separately because the channel may
+        already have been switched by the time this runs.
+        """
+        channel_name = self._whoneeds_scanned_channel
+        if channel_name is None:
+            return
+
+        self._whoneeds_scanned_channel = None
+        self._whoneeds_gateway.clear_repodata_cache(channel_name)
+
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
         self._compare_screen_open = False
@@ -424,6 +444,7 @@ class CondaMetadataTui(App[None]):
         self._whoneeds_query = ""
         self._whoneeds_target = None
         self._query_records_by_package = {}
+        self._release_whoneeds_repodata()
         self._clear_record_caches()
 
     def _reset_query_selection(self) -> None:
@@ -431,6 +452,7 @@ class CondaMetadataTui(App[None]):
         self._whoneeds_query = ""
         self._whoneeds_target = None
         self._query_records_by_package = {}
+        self._release_whoneeds_repodata()
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -460,6 +482,9 @@ class CondaMetadataTui(App[None]):
     async def _query_whoneeds_records(
         self, target: str | PackageRecord
     ) -> WhoNeedsQueryResult:
+        # Remember what the gateway is about to cache so the repodata can be
+        # released again even if the channel changes in the meantime.
+        self._whoneeds_scanned_channel = self._channel_name
         return await query_whoneeds_records(
             gateway=self._whoneeds_gateway,
             channel_name=self._channel_name,
@@ -1935,6 +1960,7 @@ class CondaMetadataTui(App[None]):
         self._matchspec_query = query
         self._whoneeds_query = ""
         self._whoneeds_target = None
+        self._release_whoneeds_repodata()
         self._query_records_by_package = {
             package_name: list(records)
             for package_name, records in result.records_by_package.items()
