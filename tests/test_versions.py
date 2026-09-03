@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import cast
 
 import pytest
-from rattler import who_needs
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import NoArchLiteral, RunExportsJson
@@ -86,6 +85,14 @@ class _Record:
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+@dataclass(frozen=True)
+class _Dependent:
+    """Stand-in for `rattler.repo_data.Dependent`, which Python cannot build."""
+
+    record: RepoDataRecord
+    dependency: str
 
 
 async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageArchive:
@@ -251,7 +258,16 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
         ) -> list[Dependent]:
             assert sources == ["conda-forge"]
             gateway_calls.append(platforms)
-            return who_needs([python, numpy, legacy], target)
+            # The gateway matches dependencies itself; a name target reports
+            # every dependency entry naming the package, while a concrete
+            # record only reports the entries whose match spec matches it.
+            dependents = [
+                _Dependent(numpy, "python >=3.10"),
+                _Dependent(numpy, "python"),
+            ]
+            if not isinstance(target, PackageRecord):
+                dependents.insert(0, _Dependent(legacy, "python <3.10"))
+            return cast(list[Dependent], dependents)
 
     def _sort_key(
         record: RepoDataRecord,

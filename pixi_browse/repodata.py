@@ -188,8 +188,9 @@ async def query_whoneeds_records(
     """Return all channel records that depend on ``target``.
 
     The gateway performs the full repodata scan in Rust and only returns
-    matching records to Python. Callers must pass a gateway configured with
-    sharded repodata disabled so the scan does not fetch every package shard.
+    matching records to Python. Callers should pass a gateway configured with
+    sharded repodata disabled: against sharded repodata the scan fetches one
+    shard per package name, while the full repodata is a single request.
     """
     target_label = (
         target
