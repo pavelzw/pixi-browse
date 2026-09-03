@@ -1603,9 +1603,12 @@ class CompareScreen(Screen[None]):
     @staticmethod
     def _selection_label(selection: CompareSelection) -> str:
         entry = selection.entry
-        return (
+        label = (
             f"{selection.package_name} {entry.version} {entry.build} [{entry.subdir}]"
         )
+        if selection.source is not None:
+            return f"{label} ({selection.source.display_name})"
+        return label
 
     def action_next_section(self) -> None:
         self.query_one(

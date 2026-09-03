@@ -1,18 +1,68 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote, urlparse
 
 from rattler.package import RunExportsJson
+from rattler.repo_data import PackageRecord
 from rattler.version import Version
 
 ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
+ArtifactCacheKey = VersionPreviewKey | str
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 MetadataRow = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class LocalArtifactSource:
+    path: Path
+
+    @property
+    def cache_key(self) -> str:
+        return f"path:{self.path}"
+
+    @property
+    def display_name(self) -> str:
+        return self.path.name
+
+    @property
+    def location(self) -> str:
+        return str(self.path)
+
+
+@dataclass(frozen=True)
+class RemoteArtifactSource:
+    url: str
+
+    @property
+    def cache_key(self) -> str:
+        return f"url:{self.url}"
+
+    @property
+    def display_name(self) -> str:
+        return Path(unquote(urlparse(self.url).path)).name or self.url
+
+    @property
+    def location(self) -> str:
+        return self.url
+
+
+ArtifactSource = LocalArtifactSource | RemoteArtifactSource
+
+
+@dataclass(frozen=True)
+class ArtifactDescriptor:
+    record: PackageRecord
+    source: ArtifactSource
+    file_name: str
+    channel: str | None = None
+    package_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +117,7 @@ class VersionArtifactData:
 class CompareSelection:
     package_name: str
     entry: VersionEntry
+    source: ArtifactSource | None = None
 
 
 @dataclass(frozen=True)

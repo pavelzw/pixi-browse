@@ -19,6 +19,8 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
+- **Inspect local or remote artifacts** in both `.conda` and `.tar.bz2` formats
+- **Compare two artifacts directly** across metadata, dependencies, and files
 - **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
 - **Vim-style keybindings** for fast keyboard-driven navigation
@@ -59,6 +61,13 @@ pixi-browse -m "numpy >=2"
 # Combine channel, platform, and MatchSpec filters
 pixi-browse -c https://prefix.dev/conda-forge -p linux-64 -m "python >=3.13"
 
+# Inspect a local or remote package artifact
+pixi-browse inspect ./package.conda
+pixi-browse inspect https://example.com/package.tar.bz2
+
+# Compare any combination of local and remote artifacts
+pixi-browse compare ./released.conda ./locally-built.conda
+
 # Show version
 pixi-browse --version
 ```
@@ -72,6 +81,13 @@ pixi-browse --version
 | `-m`, `--matchspec` | MatchSpec query to apply at startup                 |
 | `--version`         | Show version and exit                               |
 | `--help`            | Show help and exit                                  |
+
+### CLI Commands
+
+| Command              | Description                                                |
+| -------------------- | ---------------------------------------------------------- |
+| `inspect SOURCE`     | Inspect a local path or HTTP(S) package artifact URL       |
+| `compare LEFT RIGHT` | Compare two local or remote package artifacts side by side |
 
 ## Keybindings
 

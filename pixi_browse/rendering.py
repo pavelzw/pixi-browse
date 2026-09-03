@@ -13,12 +13,15 @@ from rattler.repo_data import RepoDataRecord
 from rattler.version import VersionWithSource
 from rich.markup import escape
 
+from pixi_browse.artifacts import into_package_record
 from pixi_browse.models import (
+    ArtifactDescriptor,
     CompareFileRow,
     CompareRow,
     CompareSelection,
     MetadataRow,
     PackageFile,
+    RemoteArtifactSource,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -323,9 +326,8 @@ def _format_plain_run_exports_lines(run_exports: RunExportsJson | None) -> list[
     return lines
 
 
-def _metadata_rows_for_record(
-    package_name: str,
-    record: RepoDataRecord,
+def _metadata_rows_for_artifact(
+    artifact: ArtifactDescriptor,
     *,
     clickable: bool = False,
     repository_urls: Sequence[str] = (),
@@ -336,15 +338,16 @@ def _metadata_rows_for_record(
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
 ) -> tuple[MetadataRow, ...]:
+    record = artifact.record
     metadata_rows: list[MetadataRow] = [
-        ("Package", package_name),
+        ("Package", artifact.package_name or record.name.normalized),
         ("Name", record.name.source),
         ("Version", format_record_value(record.version)),
         ("Build", format_record_value(record.build)),
         ("Build Number", format_record_value(record.build_number)),
         ("Subdir", format_record_value(record.subdir)),
-        ("File Name", format_record_value(record.file_name)),
-        ("Channel", format_record_value(record.channel)),
+        ("File Name", format_record_value(artifact.file_name)),
+        ("Channel", format_record_value(artifact.channel)),
         ("Size", format_byte_size(record.size)),
         ("Timestamp", format_record_value(record.timestamp)),
         ("License", format_record_value(record.license)),
@@ -362,7 +365,10 @@ def _metadata_rows_for_record(
         ("SHA256", format_record_value(record.sha256)),
         ("Legacy .tar.bz2 MD5", format_record_value(record.legacy_bz2_md5)),
         ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
-        ("Package URL", _format_url_value(str(record.url), clickable=clickable)),
+        (
+            "Package URL",
+            _format_url_value(artifact.source.location, clickable=clickable),
+        ),
     ]
     if repository_urls:
         metadata_rows.append(
@@ -405,6 +411,18 @@ def _metadata_rows_for_record(
     return tuple(metadata_rows)
 
 
+def _artifact_descriptor_from_record(
+    package_name: str, record: RepoDataRecord
+) -> ArtifactDescriptor:
+    return ArtifactDescriptor(
+        record=into_package_record(record),
+        file_name=record.file_name,
+        source=RemoteArtifactSource(str(record.url)),
+        channel=None if record.channel is None else str(record.channel),
+        package_name=package_name,
+    )
+
+
 def build_version_artifact_data(
     package_name: str,
     record: RepoDataRecord,
@@ -420,10 +438,38 @@ def build_version_artifact_data(
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
 ) -> VersionArtifactData:
+    return build_artifact_data(
+        _artifact_descriptor_from_record(package_name, record),
+        package_paths=package_paths,
+        info_files=info_files,
+        repository_urls=repository_urls,
+        documentation_urls=documentation_urls,
+        homepage_urls=homepage_urls,
+        recipe_maintainers=recipe_maintainers,
+        provenance_remote_url=provenance_remote_url,
+        provenance_sha=provenance_sha,
+        rattler_build_version=rattler_build_version,
+        run_exports=run_exports,
+    )
+
+
+def build_artifact_data(
+    artifact: ArtifactDescriptor,
+    *,
+    package_paths: Sequence[PackageFile] = (),
+    info_files: Sequence[PackageFile] = (),
+    repository_urls: Sequence[str] = (),
+    documentation_urls: Sequence[str] = (),
+    homepage_urls: Sequence[str] = (),
+    recipe_maintainers: Sequence[str] = (),
+    provenance_remote_url: str | None = None,
+    provenance_sha: str | None = None,
+    rattler_build_version: str | None = None,
+    run_exports: RunExportsJson | None = None,
+) -> VersionArtifactData:
     return VersionArtifactData(
-        metadata_rows=_metadata_rows_for_record(
-            package_name,
-            record,
+        metadata_rows=_metadata_rows_for_artifact(
+            artifact,
             repository_urls=repository_urls,
             documentation_urls=documentation_urls,
             homepage_urls=homepage_urls,
@@ -432,9 +478,9 @@ def build_version_artifact_data(
             provenance_sha=provenance_sha,
             rattler_build_version=rattler_build_version,
         ),
-        dependencies=tuple(str(dependency) for dependency in record.depends or ()),
-        constraints=tuple(str(constraint) for constraint in record.constrains or ()),
-        package_url=str(record.url),
+        dependencies=tuple(str(dependency) for dependency in artifact.record.depends),
+        constraints=tuple(str(constraint) for constraint in artifact.record.constrains),
+        package_url=artifact.source.location,
         file_paths=tuple(package_paths),
         info_files=tuple(info_files),
         run_exports=run_exports,

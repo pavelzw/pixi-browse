@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import shutil
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -30,10 +32,13 @@ from textual.widgets import OptionList, Static
 
 from pixi_browse import __version__
 from pixi_browse.models import (
+    ArtifactCacheKey,
+    ArtifactSource,
     CompareFileRow,
     CompareSelection,
     DependencyTab,
     FileTab,
+    LocalArtifactSource,
     PackageFile,
     VersionArtifactData,
     VersionEntry,
@@ -63,7 +68,7 @@ from pixi_browse.repodata import (
 from pixi_browse.search import fuzzy_score
 
 from .state import ChannelStateSnapshot
-from .version_loader import VersionDataLoader
+from .version_loader import LoadedArtifact, VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
@@ -108,10 +113,17 @@ class CondaMetadataTui(App[None]):
         default_channel: str = "conda-forge",
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
+        artifact_sources: Iterable[ArtifactSource] = (),
+        compare_artifacts: bool = False,
     ) -> None:
         super().__init__()
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
+        resolved_artifact_sources = tuple(artifact_sources)
+        if compare_artifacts and len(resolved_artifact_sources) != 2:
+            raise ValueError("Artifact comparison requires exactly two sources.")
+        if not compare_artifacts and len(resolved_artifact_sources) > 1:
+            raise ValueError("Artifact inspection accepts exactly one source.")
         self.theme = "ansi-dark"
         self._client = Client.default_client(user_agent=f"pixi-browse/{__version__}")
 
@@ -158,6 +170,9 @@ class CondaMetadataTui(App[None]):
         self._selected_pane: Literal["sidebar", "main"] = "sidebar"
         self._compare_selection: CompareSelection | None = None
         self._compare_screen_open = False
+        self._artifact_sources = resolved_artifact_sources
+        self._compare_artifacts_on_startup = compare_artifacts
+        self._direct_artifacts: dict[VersionPreviewKey, LoadedArtifact] = {}
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="body"):
@@ -172,9 +187,81 @@ class CondaMetadataTui(App[None]):
         package_list.disabled = True
         package_list.focus()
         self._update_filter_indicator()
+        if self._artifact_sources:
+            await self._load_artifact_sources()
+            return
         loaded = await self._load_packages()
         if loaded and self._startup_matchspec is not None:
             await self._apply_matchspec_query(self._startup_matchspec)
+
+    async def _load_artifact_sources(self) -> None:
+        status = self.query_one("#status", Static)
+        status.update("Loading package artifact metadata...")
+        try:
+            artifacts = [
+                await self._version_loader.load_artifact_source(source)
+                for source in self._artifact_sources
+            ]
+        except Exception as exc:
+            status.update(f"Failed to load artifact: {exc!s}")
+            self._show_main_placeholder(
+                f"# Unable to load artifact\n\n{escape(str(exc))}"
+            )
+            return
+
+        if self._compare_artifacts_on_startup:
+            assert len(artifacts) == 2
+            await self._open_direct_compare(artifacts[0], artifacts[1])
+            return
+
+        assert len(artifacts) == 1
+        self._show_direct_artifact(artifacts[0])
+
+    def _show_direct_artifact(self, artifact: LoadedArtifact) -> None:
+        package_name = artifact.descriptor.record.name.normalized
+        preview_key = self._version_preview_key(package_name, artifact.entry)
+        self._direct_artifacts[preview_key] = artifact
+        self._version_archive_cache[preview_key] = artifact.archive
+        self._version_artifact_data_cache[preview_key] = artifact.data
+        self._selected_package = package_name
+        self._current_versions = [artifact.entry]
+        self._version_rows = [VersionRow(kind="entry", entry=artifact.entry)]
+        self._mode = "versions"
+
+        package_list = self.query_one("#sidebar-list", OptionList)
+        package_list.clear_options()
+        package_list.add_option(artifact.source.display_name)
+        package_list.highlighted = 0
+        package_list.disabled = False
+        self._show_version_details(artifact.data)
+        self._previewed_version_key = preview_key
+        self._pending_preview_version_key = preview_key
+        self._update_filter_indicator()
+        self._update_versions_status()
+        self._focus_main_panel()
+
+    async def _open_direct_compare(
+        self, left: LoadedArtifact, right: LoadedArtifact
+    ) -> None:
+        left_selection = CompareSelection(
+            package_name=left.descriptor.record.name.normalized,
+            entry=left.entry,
+            source=left.source,
+        )
+        right_selection = CompareSelection(
+            package_name=right.descriptor.record.name.normalized,
+            entry=right.entry,
+            source=right.source,
+        )
+        compare_data = build_version_compare_data(
+            left_selection,
+            left.data,
+            right_selection,
+            right.data,
+        )
+        self._compare_screen_open = True
+        self.query_one("#footer", Static).update(self._footer_text())
+        self.push_screen(CompareScreen(compare_data), lambda _result: self.exit())
 
     async def _load_packages(self) -> bool:
         status = self.query_one("#status", Static)
@@ -265,6 +352,17 @@ class CondaMetadataTui(App[None]):
 
     def _render_version_options(self, *, preserve_position: bool = False) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
+        if self._artifact_sources and not self._compare_artifacts_on_startup:
+            previous_scroll_y = package_list.scroll_y
+            package_list.clear_options()
+            artifact = next(iter(self._direct_artifacts.values()), None)
+            if artifact is not None:
+                package_list.add_option(artifact.source.display_name)
+                self._version_rows = [VersionRow(kind="entry", entry=artifact.entry)]
+                package_list.highlighted = 0
+                if preserve_position:
+                    package_list.scroll_to(y=previous_scroll_y, animate=False)
+            return
         previous_highlight = package_list.highlighted
         previous_scroll_y = package_list.scroll_y
         package_list.clear_options()
@@ -328,6 +426,9 @@ class CondaMetadataTui(App[None]):
             package_list.scroll_to(y=previous_scroll_y, animate=False)
 
     def _update_versions_status(self) -> None:
+        if self._artifact_sources and not self._compare_artifacts_on_startup:
+            self.query_one("#status", Static).update("Standalone package artifact.")
+            return
         self.query_one("#status", Static).update(
             f"{len(self._current_versions):,} entries across "
             f"{len(self._version_subdirs)} platform{'s' if len(self._version_subdirs) > 1 else ''}."
@@ -721,6 +822,9 @@ class CondaMetadataTui(App[None]):
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
 
+    def _can_query_matchspec(self) -> bool:
+        return not self._artifact_sources
+
     def _dependency_matchspec_at(self, index: int) -> str | None:
         return self.query_one("#main-panel", MainPanel).dependency_matchspec_at(index)
 
@@ -849,19 +953,27 @@ class CondaMetadataTui(App[None]):
                 ("Esc", "Back or close current overlay"),
             ],
         )
-        app = self._format_help_section(
-            "App",
-            [
-                ("?", "Show this help"),
-                ("/", "Start package filter"),
-                ("p", "Open platform selector"),
-                ("c", "Edit channel"),
-                ("C", "Compare selected artifact in versions view"),
-                ("m", "Query MatchSpec"),
-                ("d", "Download selected artifact in versions view"),
-                ("q", "Quit"),
-            ],
-        )
+        app_rows = [("?", "Show this help")]
+        if self._artifact_sources:
+            app_rows.extend(
+                [
+                    ("d", "Download selected artifact in versions view"),
+                    ("q", "Quit"),
+                ]
+            )
+        else:
+            app_rows.extend(
+                [
+                    ("/", "Start package filter"),
+                    ("p", "Open platform selector"),
+                    ("c", "Edit channel"),
+                    ("C", "Compare selected artifact in versions view"),
+                    ("m", "Query MatchSpec"),
+                    ("d", "Download selected artifact in versions view"),
+                    ("q", "Quit"),
+                ]
+            )
+        app = self._format_help_section("App", app_rows)
         return "\n".join([*navigation, "", *app])
 
     @staticmethod
@@ -938,11 +1050,16 @@ class CondaMetadataTui(App[None]):
     @staticmethod
     def _compare_selection_label(selection: CompareSelection) -> str:
         entry = selection.entry
-        return (
+        label = (
             f"{selection.package_name} {entry.version} {entry.build} [{entry.subdir}]"
         )
+        if selection.source is not None:
+            return f"{label} ({selection.source.display_name})"
+        return label
 
-    def _compare_selection_key(self, selection: CompareSelection) -> VersionPreviewKey:
+    def _compare_selection_key(self, selection: CompareSelection) -> ArtifactCacheKey:
+        if selection.source is not None:
+            return selection.source.cache_key
         return self._version_preview_key(selection.package_name, selection.entry)
 
     def _current_compare_selection(self) -> CompareSelection | None:
@@ -952,11 +1069,20 @@ class CondaMetadataTui(App[None]):
         package_name = self._selected_package
         if package_name is None:
             return None
-        return CompareSelection(package_name=package_name, entry=row.entry)
+        preview_key = self._version_preview_key(package_name, row.entry)
+        direct = self._direct_artifacts.get(preview_key)
+        return CompareSelection(
+            package_name=package_name,
+            entry=row.entry,
+            source=None if direct is None else direct.source,
+        )
 
     async def _load_compare_artifact(
         self, selection: CompareSelection
-    ) -> tuple[RepoDataRecord, VersionArtifactData] | None:
+    ) -> tuple[RepoDataRecord | None, VersionArtifactData] | None:
+        if selection.source is not None:
+            loaded = await self._version_loader.load_artifact_source(selection.source)
+            return None, loaded.data
         record = await self._get_record_for_version_entry(
             selection.package_name, selection.entry
         )
@@ -984,6 +1110,18 @@ class CondaMetadataTui(App[None]):
         assert contents is not None
         return sha256(contents).digest()
 
+    async def _archive_for_selection(
+        self, selection: CompareSelection
+    ) -> PackageArchive:
+        if selection.source is not None:
+            return await self._version_loader.get_artifact_archive(selection.source)
+        url = await self._package_url_for_version_entry(
+            selection.package_name, selection.entry
+        )
+        return await self._version_loader.get_package_archive(
+            self._compare_selection_key(selection), url
+        )
+
     async def _resolve_compare_info_file_and_open(
         self, screen: CompareScreen, row: CompareFileRow
     ) -> None:
@@ -994,18 +1132,8 @@ class CondaMetadataTui(App[None]):
         original_left_path = row.left_file.path
         original_right_path = row.right_file.path
         try:
-            left_url = await self._package_url_for_version_entry(
-                original_left.package_name, original_left.entry
-            )
-            right_url = await self._package_url_for_version_entry(
-                original_right.package_name, original_right.entry
-            )
-            left_archive = await self._version_loader.get_package_archive(
-                self._compare_selection_key(original_left), left_url
-            )
-            right_archive = await self._version_loader.get_package_archive(
-                self._compare_selection_key(original_right), right_url
-            )
+            left_archive = await self._archive_for_selection(original_left)
+            right_archive = await self._archive_for_selection(original_right)
             left_sha256 = await self._info_file_sha256(left_archive, original_left_path)
             right_sha256 = await self._info_file_sha256(
                 right_archive, original_right_path
@@ -1095,17 +1223,20 @@ class CondaMetadataTui(App[None]):
         if self._compare_screen_open:
             return
 
-        ordered_pairs = [
+        ordered_pairs: list[
+            tuple[CompareSelection, RepoDataRecord | None, VersionArtifactData]
+        ] = [
             (left_selection, left_record, left_artifact),
             (right_selection, right_record, right_artifact),
         ]
-        ordered_pairs.sort(
-            key=lambda pair: (
-                *self._record_sort_key(pair[1]),
-                pair[1].file_name,
-                pair[1].name.source,
-            ),
-        )
+        if left_record is not None and right_record is not None:
+            ordered_pairs.sort(
+                key=lambda pair: (
+                    *self._record_sort_key(cast(RepoDataRecord, pair[1])),
+                    cast(RepoDataRecord, pair[1]).file_name,
+                    cast(RepoDataRecord, pair[1]).name.source,
+                ),
+            )
         # Deliberately normalize the compare pane order for a stable display,
         # even when the user picked compare A/B in the opposite order.
         (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
@@ -1193,11 +1324,36 @@ class CondaMetadataTui(App[None]):
 
         temporary_destination: Path | None = None
         try:
-            url = await self._package_url_for_version_entry(package_name, entry)
             destination = (Path.cwd() / entry.file_name).resolve()
+            direct = self._direct_artifacts.get(
+                self._version_preview_key(package_name, entry)
+            )
+            if (
+                direct is not None
+                and isinstance(direct.source, LocalArtifactSource)
+                and direct.source.path == destination
+            ):
+                self.notify(
+                    f"Artifact is already at {destination}",
+                    title="Download",
+                )
+                return
             temporary_destination = destination.with_name(f"{destination.name}.part")
-
-            await package_download_to_path(self._client, url, temporary_destination)
+            if direct is None:
+                url = await self._package_url_for_version_entry(package_name, entry)
+                await package_download_to_path(self._client, url, temporary_destination)
+            elif isinstance(direct.source, LocalArtifactSource):
+                await asyncio.to_thread(
+                    shutil.copyfile,
+                    direct.source.path,
+                    temporary_destination,
+                )
+            else:
+                await package_download_to_path(
+                    self._client,
+                    direct.source.url,
+                    temporary_destination,
+                )
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:
@@ -1397,8 +1553,25 @@ class CondaMetadataTui(App[None]):
         self.call_after_refresh(lambda: self._open_compare_file_action_screen(row))
 
     async def _fetch_package_file_bytes(
-        self, package_name: str, entry: VersionEntry, file_path: str
+        self,
+        package_name: str,
+        entry: VersionEntry,
+        file_path: str,
+        *,
+        source: ArtifactSource | None = None,
     ) -> bytes:
+        if source is None:
+            preview_key = self._version_preview_key(package_name, entry)
+            direct = self._direct_artifacts.get(preview_key)
+            if direct is not None:
+                source = direct.source
+        if source is not None:
+            archive = await self._version_loader.get_artifact_archive(source)
+            contents = await archive.read_file(file_path)
+            if contents is None:
+                raise FileNotFoundError(f"Package does not contain {file_path}")
+            return contents
+
         url = await self._package_url_for_version_entry(package_name, entry)
 
         return await fetch_raw_package_file_from_url(self._client, url, file_path)
@@ -1492,6 +1665,7 @@ class CondaMetadataTui(App[None]):
         file_path: str,
         *,
         destination_path: str | None = None,
+        source: ArtifactSource | None = None,
     ) -> None:
         temporary_destination: Path | None = None
         try:
@@ -1502,9 +1676,15 @@ class CondaMetadataTui(App[None]):
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary_destination = destination.with_name(f"{destination.name}.part")
-            temporary_destination.write_bytes(
-                await self._fetch_package_file_bytes(package_name, entry, file_path)
-            )
+            if source is None:
+                package_bytes = await self._fetch_package_file_bytes(
+                    package_name, entry, file_path
+                )
+            else:
+                package_bytes = await self._fetch_package_file_bytes(
+                    package_name, entry, file_path, source=source
+                )
+            temporary_destination.write_bytes(package_bytes)
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:
@@ -1530,6 +1710,7 @@ class CondaMetadataTui(App[None]):
         sha256: bytes | None = None,
         *,
         title_prefix: str | None = None,
+        source: ArtifactSource | None = None,
     ) -> None:
         try:
             preview_title = self._preview_title(file_path, size_in_bytes=size_in_bytes)
@@ -1549,9 +1730,14 @@ class CondaMetadataTui(App[None]):
                     )
                 )
                 return
-            package_bytes = await self._fetch_package_file_bytes(
-                package_name, entry, file_path
-            )
+            if source is None:
+                package_bytes = await self._fetch_package_file_bytes(
+                    package_name, entry, file_path
+                )
+            else:
+                package_bytes = await self._fetch_package_file_bytes(
+                    package_name, entry, file_path, source=source
+                )
             preview_title = self._preview_title(file_path, package_bytes)
             if title_prefix is not None:
                 preview_title = f"{title_prefix}: {preview_title}"
@@ -1655,6 +1841,7 @@ class CondaMetadataTui(App[None]):
                     selection.entry,
                     package_file.path,
                     destination_path=destination_path,
+                    source=selection.source,
                 )
                 return
             if action.action == "preview":
@@ -1665,6 +1852,7 @@ class CondaMetadataTui(App[None]):
                     package_file.size_in_bytes,
                     package_file.sha256,
                     title_prefix=title_prefix,
+                    source=selection.source,
                 )
                 return
         finally:
@@ -1941,6 +2129,9 @@ class CondaMetadataTui(App[None]):
         await self._apply_matchspec_result(query, result)
 
     def _back_to_packages(self) -> None:
+        if self._artifact_sources:
+            self.exit()
+            return
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -2033,6 +2224,8 @@ class CondaMetadataTui(App[None]):
             )
 
         if self._mode == "versions":
+            if self._artifact_sources:
+                return "Artifact files: Enter | Back: esc | Quit: q | Help: ?"
             footer = Text("Search: / | Platform: p | Channel: c | MatchSpec: m")
             footer.append(" | ")
             compare_start = len(footer)
@@ -2047,7 +2240,9 @@ class CondaMetadataTui(App[None]):
         return "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
 
     def _sidebar_title_text(self, *, selected: bool) -> Text:
-        if self._mode == "versions":
+        if self._artifact_sources:
+            label = "Artifact"
+        elif self._mode == "versions":
             label = (
                 f"Versions: {self._selected_package}"
                 if self._selected_package is not None
@@ -2195,6 +2390,8 @@ class CondaMetadataTui(App[None]):
         self._open_platform_selector()
 
     def action_channel_key_c(self) -> None:
+        if self._artifact_sources:
+            return
         if self._channel_edit_mode:
             self._append_channel_char("c")
             return
@@ -2206,6 +2403,8 @@ class CondaMetadataTui(App[None]):
         self._update_filter_indicator()
 
     def action_compare_key_c(self) -> None:
+        if self._artifact_sources:
+            return
         if self._channel_edit_mode:
             self._append_channel_char("C")
             return
@@ -2264,7 +2463,11 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_matchspec_key_m(self) -> None:
-        if self._channel_edit_mode or self._filter_mode:
+        if (
+            not self._can_query_matchspec()
+            or self._channel_edit_mode
+            or self._filter_mode
+        ):
             return
 
         self._open_matchspec_screen(self._matchspec_query)
@@ -2446,6 +2649,9 @@ class CondaMetadataTui(App[None]):
         ):
             main_panel = self.query_one("#main-panel", MainPanel)
             if main_panel.dependency_section_is_active():
+                if not self._can_query_matchspec():
+                    event.stop()
+                    return
                 matchspec = self._selected_dependency_matchspec()
                 if matchspec is not None:
                     self._defer_matchspec_screen(matchspec)
@@ -2744,6 +2950,8 @@ class CondaMetadataTui(App[None]):
         self._sidebar_selection_by_keyboard = False
 
         if event.option_list.id == "detail-option-list-1":
+            if not self._can_query_matchspec():
+                return
             matchspec = self._dependency_matchspec_at(event.option_index)
             if matchspec is None:
                 return

@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
@@ -6,6 +7,7 @@ from typer.testing import CliRunner
 
 import pixi_browse.__main__ as entrypoint
 from pixi_browse import __version__
+from pixi_browse.models import LocalArtifactSource, RemoteArtifactSource
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -156,3 +158,69 @@ def test_cli_exits_for_invalid_matchspec(monkeypatch) -> None:
     assert result.exit_code == 1
     assert result.output.strip()
     assert captured == {}
+
+
+def test_inspect_command_passes_local_artifact_source(tmp_path, monkeypatch) -> None:
+    runner = CliRunner()
+    artifact_path = tmp_path / "demo.conda"
+    artifact_path.write_bytes(b"package")
+    captured: dict[str, object] = {}
+
+    class _FakeTui:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def run(self) -> None:
+            captured["run_called"] = True
+
+    monkeypatch.setattr(entrypoint, "CondaMetadataTui", _FakeTui)
+
+    result = runner.invoke(entrypoint.cli, ["inspect", str(artifact_path)])
+
+    assert result.exit_code == 0
+    assert captured == {
+        "artifact_sources": [LocalArtifactSource(Path(artifact_path).resolve())],
+        "run_called": True,
+    }
+
+
+def test_compare_command_preserves_remote_artifact_order(monkeypatch) -> None:
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    class _FakeTui:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        def run(self) -> None:
+            captured["run_called"] = True
+
+    monkeypatch.setattr(entrypoint, "CondaMetadataTui", _FakeTui)
+
+    result = runner.invoke(
+        entrypoint.cli,
+        [
+            "compare",
+            "https://example.com/old.conda",
+            "https://example.com/new.conda?token=secret",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured == {
+        "artifact_sources": [
+            RemoteArtifactSource("https://example.com/old.conda"),
+            RemoteArtifactSource("https://example.com/new.conda?token=secret"),
+        ],
+        "compare_artifacts": True,
+        "run_called": True,
+    }
+
+
+def test_inspect_command_rejects_missing_local_artifact(tmp_path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(entrypoint.cli, ["inspect", str(tmp_path / "missing.conda")])
+
+    assert result.exit_code == 2
+    assert "Artifact does not exist" in strip_ansi(result.output)
