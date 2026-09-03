@@ -30,7 +30,7 @@ typer = ">=0.26.5,<0.27"
 [dependencies]
 pixi-browse = { path = "." }
 textual-dev = "*"
-py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
+py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "py-rattler-win", subdirectory = "py-rattler" }
 
 [feature.test.dependencies]
 pytest = "*"
