@@ -79,6 +79,7 @@ class CompareFileListEntry:
 
 
 EMPTY_MATCHSPEC_RESULT = Empty()
+EMPTY_WHONEEDS_RESULT = Empty()
 
 
 FileAction = Literal["download", "preview"]
@@ -1843,7 +1844,7 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
         self.dismiss(result)
 
 
-class WhoNeedsScreen(ModalScreen[PackageName | None]):
+class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
     DEFAULT_CSS = """
     WhoNeedsScreen {
         align: center middle;
@@ -1907,7 +1908,8 @@ class WhoNeedsScreen(ModalScreen[PackageName | None]):
                 id="whoneeds-input",
             )
             yield Static(
-                "Find every package that depends on this package name.",
+                "Find every package that depends on this package name."
+                " Leave empty to show the whole channel again.",
                 id="whoneeds-help",
             )
             yield Static("", id="whoneeds-error")
@@ -1916,10 +1918,10 @@ class WhoNeedsScreen(ModalScreen[PackageName | None]):
         self.query_one("#whoneeds-input", Input).focus()
 
     @staticmethod
-    def validate_package_name(value: str) -> PackageName:
+    def validate_package_name(value: str) -> PackageName | Empty:
         query = value.strip()
         if not query:
-            raise InvalidPackageNameError("Package name cannot be empty.")
+            return EMPTY_WHONEEDS_RESULT
         return PackageName(query)
 
     def _show_error(self, message: str) -> None:
@@ -1949,7 +1951,7 @@ class WhoNeedsScreen(ModalScreen[PackageName | None]):
 
         self.dismiss(result)
 
-    async def action_dismiss(self, result: PackageName | None = None) -> None:
+    async def action_dismiss(self, result: PackageName | Empty | None = None) -> None:
         self.dismiss(result)
 
 

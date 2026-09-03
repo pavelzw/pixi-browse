@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
-from rattler.package import NoArchLiteral, RunExportsJson
+from rattler.package import NoArchLiteral, PackageName, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
@@ -50,6 +50,7 @@ from pixi_browse.repodata import (
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
     EMPTY_MATCHSPEC_RESULT,
+    EMPTY_WHONEEDS_RESULT,
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
@@ -1819,10 +1820,15 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
 
 def test_whoneeds_screen_validates_package_name() -> None:
     package_name = WhoNeedsScreen.validate_package_name(" NumPy ")
+    empty = WhoNeedsScreen.validate_package_name("   ")
 
+    assert isinstance(package_name, PackageName)
     assert package_name.normalized == "numpy"
+    assert isinstance(empty, Empty)
+    assert empty == EMPTY_WHONEEDS_RESULT
+
     with pytest.raises(InvalidPackageNameError):
-        WhoNeedsScreen.validate_package_name("")
+        WhoNeedsScreen.validate_package_name("numpy >=2")
 
 
 def test_whoneeds_screen_updates_inline_error_message(monkeypatch) -> None:
@@ -1843,11 +1849,22 @@ def test_whoneeds_screen_updates_inline_error_message(monkeypatch) -> None:
 
     monkeypatch.setattr(screen, "query_one", _fake_query_one)
 
-    screen._update_validation_error("")
+    screen._update_validation_error("numpy >=2")
     screen._update_validation_error("python")
 
     assert error_widget.updates[0].plain != ""
     assert error_widget.updates[-1].plain == ""
+
+
+def test_whoneeds_screen_reports_no_error_for_empty_input(monkeypatch) -> None:
+    screen = WhoNeedsScreen()
+    messages: list[str] = []
+
+    monkeypatch.setattr(screen, "_show_error", lambda message: messages.append(message))
+
+    screen._update_validation_error("")
+
+    assert messages == [""]
 
 
 def test_action_whoneeds_key_w_pushes_whoneeds_screen(monkeypatch) -> None:
@@ -4401,6 +4418,73 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     assert filtered == ["filtered"]
     assert updated == ["updated"]
     assert focused == ["sidebar"]
+
+
+def test_apply_whoneeds_query_empty_restores_full_package_selection(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_package_names = ["demo", "numpy"]
+    app._whoneeds_query = "python"
+    app._whoneeds_target = "python"
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._mode = "versions"
+    filtered: list[str] = []
+    updated: list[str] = []
+    focused: list[str] = []
+    footer = _FakeFooter()
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
+    monkeypatch.setattr(
+        app, "_update_filter_indicator", lambda: updated.append("updated")
+    )
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
+
+    asyncio.run(app._apply_whoneeds_query(None, ""))
+
+    assert app._whoneeds_query == ""
+    assert app._whoneeds_target is None
+    assert app._query_records_by_package == {}
+    assert app._all_package_names == ["demo", "numpy"]
+    assert app._mode == "packages"
+    assert filtered == ["filtered"]
+    assert updated == ["updated"]
+    assert focused == ["sidebar"]
+
+
+def test_handle_whoneeds_result_clears_query_for_empty_input(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    workers: list[tuple[Coroutine[None, None, None], str]] = []
+
+    monkeypatch.setattr(
+        app,
+        "run_worker",
+        lambda coroutine, group="", **_kwargs: workers.append((coroutine, group)),
+    )
+
+    applied: list[tuple[str | PackageRecord | None, str]] = []
+
+    async def _fake_apply_query(target: str | PackageRecord | None, query: str) -> None:
+        applied.append((target, query))
+
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
+
+    app._handle_whoneeds_result(EMPTY_WHONEEDS_RESULT)
+
+    assert len(workers) == 1
+    coroutine, group = workers[0]
+    assert group == "whoneeds-selection"
+    asyncio.run(coroutine)
+    assert applied == [(None, "")]
 
 
 def test_apply_matchspec_result_auto_opens_versions_for_single_package(

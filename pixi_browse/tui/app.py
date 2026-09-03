@@ -426,7 +426,7 @@ class CondaMetadataTui(App[None]):
         self._query_records_by_package = {}
         self._clear_record_caches()
 
-    def _reset_matchspec_selection(self) -> None:
+    def _reset_query_selection(self) -> None:
         self._matchspec_query = ""
         self._whoneeds_query = ""
         self._whoneeds_target = None
@@ -1959,7 +1959,7 @@ class CondaMetadataTui(App[None]):
 
     async def _apply_matchspec_query(self, matchspec: MatchSpec | None) -> None:
         if matchspec is None:
-            self._reset_matchspec_selection()
+            self._reset_query_selection()
             self._filter_packages()
             self._update_filter_indicator()
             self._focus_sidebar()
@@ -2020,8 +2020,15 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _apply_whoneeds_query(
-        self, target: str | PackageRecord, query: str
+        self, target: str | PackageRecord | None, query: str
     ) -> None:
+        if target is None:
+            self._reset_query_selection()
+            self._filter_packages()
+            self._update_filter_indicator()
+            self._focus_sidebar()
+            return
+
         workflow_started = perf_counter()
         self.log.info(f"who-needs: workflow started query={query!r}")
         previous_state = self._snapshot_channel_state()
@@ -2417,12 +2424,18 @@ class CondaMetadataTui(App[None]):
 
         self._open_matchspec_screen(self._matchspec_query)
 
-    def _handle_whoneeds_result(self, result: PackageName | None) -> None:
+    def _handle_whoneeds_result(self, result: PackageName | Empty | None) -> None:
         if result is None:
             return
-        target = result.normalized
+
+        if isinstance(result, Empty):
+            target: str | None = None
+            query = ""
+        else:
+            target = result.normalized
+            query = target
         self.run_worker(
-            self._apply_whoneeds_query(target, target),
+            self._apply_whoneeds_query(target, query),
             group="whoneeds-selection",
             exclusive=True,
             exit_on_error=False,
