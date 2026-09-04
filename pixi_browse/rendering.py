@@ -240,7 +240,7 @@ def render_package_preview(
     records: list[RepoDataRecord],
     *,
     record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+        [RepoDataRecord], tuple[VersionWithSource, int, str, str]
     ],
 ) -> str:
     if not records:

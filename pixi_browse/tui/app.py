@@ -668,8 +668,8 @@ class CondaMetadataTui(App[None]):
 
     def _record_sort_key(
         self, record: RepoDataRecord
-    ) -> tuple[VersionWithSource, str, str, int]:
-        return (record.version, record.build, record.subdir, record.build_number)
+    ) -> tuple[VersionWithSource, int, str, str]:
+        return (record.version, record.build_number, record.build, record.subdir)
 
     async def _get_package_records(self, package_name: str) -> list[RepoDataRecord]:
         cached = self._package_records_cache.get(package_name)
@@ -2012,9 +2012,9 @@ class CondaMetadataTui(App[None]):
             versions_by_key.values(),
             key=lambda entry: (
                 entry.version,
+                entry.build_number,
                 entry.build,
                 entry.subdir,
-                entry.build_number,
                 entry.file_name,
             ),
             reverse=True,

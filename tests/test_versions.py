@@ -252,6 +252,42 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
+def test_build_version_entries_sorts_by_build_number_within_version() -> None:
+    app = CondaMetadataTui()
+    records = [
+        _make_repo_data_record(
+            version="1.2.3",
+            build=f"py313h123_{build_number}",
+            build_number=build_number,
+            subdir="noarch",
+            file_name=f"demo-1.2.3-py313h123_{build_number}.conda",
+        )
+        for build_number in (2, 10, 9)
+    ]
+
+    entries = app._build_version_entries(records)
+
+    assert [entry.build_number for entry in entries] == [10, 9, 2]
+
+
+def test_record_sort_key_orders_build_number_before_build_string() -> None:
+    app = CondaMetadataTui()
+    records = [
+        _make_repo_data_record(
+            version="1.2.3",
+            build=f"py313h123_{build_number}",
+            build_number=build_number,
+            subdir="noarch",
+            file_name=f"demo-1.2.3-py313h123_{build_number}.conda",
+        )
+        for build_number in (9, 10)
+    ]
+
+    ordered = sorted(records, key=app._record_sort_key, reverse=True)
+
+    assert [record.build_number for record in ordered] == [10, 9]
+
+
 def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
@@ -877,9 +913,9 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
         records,
         record_sort_key=lambda record: (
             record.version,
+            record.build_number,
             record.build,
             record.subdir,
-            record.build_number,
         ),
     )
 
@@ -905,9 +941,9 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
         records,
         record_sort_key=lambda record: (
             record.version,
+            record.build_number,
             record.build,
             record.subdir,
-            record.build_number,
         ),
     )
 

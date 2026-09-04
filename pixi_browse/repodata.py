@@ -96,7 +96,7 @@ async def query_package_records(
     platforms: list[Platform],
     package_name: str,
     record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+        [RepoDataRecord], tuple[VersionWithSource, int, str, str]
     ],
 ) -> list[RepoDataRecord]:
     unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
@@ -124,7 +124,7 @@ async def query_matchspec_records(
     platforms: list[Platform],
     matchspec: MatchSpec,
     record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
+        [RepoDataRecord], tuple[VersionWithSource, int, str, str]
     ],
 ) -> MatchSpecQueryResult:
     unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
