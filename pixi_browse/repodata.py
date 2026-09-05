@@ -15,7 +15,6 @@ from rattler.repo_data import (
     RepoDataRecord,
     SourceConfig,
 )
-from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
 
@@ -112,9 +111,6 @@ async def query_package_records(
     channel_name: str,
     platforms: list[Platform],
     package_name: str,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> list[RepoDataRecord]:
     unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
@@ -127,11 +123,7 @@ async def query_package_records(
         for record in source_records:
             unique_records[record_identity_key(record)] = record
 
-    return sorted(
-        unique_records.values(),
-        key=record_sort_key,
-        reverse=True,
-    )
+    return sorted(unique_records.values(), reverse=True)
 
 
 async def query_matchspec_records(
@@ -140,9 +132,6 @@ async def query_matchspec_records(
     channel_name: str,
     platforms: list[Platform],
     matchspec: MatchSpec,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> MatchSpecQueryResult:
     unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
@@ -164,11 +153,7 @@ async def query_matchspec_records(
     return MatchSpecQueryResult(
         package_names=sorted_package_names,
         records_by_package={
-            package_name: sorted(
-                grouped_records[package_name],
-                key=record_sort_key,
-                reverse=True,
-            )
+            package_name: sorted(grouped_records[package_name], reverse=True)
             for package_name in sorted_package_names
         },
     )
@@ -180,9 +165,6 @@ async def query_whoneeds_records(
     channel_name: str,
     platforms: list[Platform],
     target: str | PackageRecord,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
     log: Callable[[str], None] | None = None,
 ) -> WhoNeedsQueryResult:
     """Return all channel records that depend on ``target``.
@@ -245,7 +227,6 @@ async def query_whoneeds_records(
         records_by_package={
             package_name: sorted(
                 grouped_records[package_name].values(),
-                key=record_sort_key,
                 reverse=True,
             )
             for package_name in sorted_package_names

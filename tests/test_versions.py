@@ -12,7 +12,7 @@ from rattler.package import NoArchLiteral, PackageName, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
-from rattler.version import Version, VersionWithSource
+from rattler.version import Version
 from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
@@ -72,15 +72,6 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
-
-
-@dataclass(frozen=True)
-class _Record:
-    version: Version
-    build: str
-    build_number: int
-    subdir: str
-    file_name: str
 
 
 @dataclass(frozen=True)
@@ -280,11 +271,6 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
                 dependents.insert(0, _Dependent(legacy, "python <3.10"))
             return cast(list[Dependent], dependents)
 
-    def _sort_key(
-        record: RepoDataRecord,
-    ) -> tuple[VersionWithSource, str, str, int]:
-        return (record.version, record.build, record.subdir, record.build_number)
-
     gateway = cast(Gateway, _FakeGateway())
     logs: list[str] = []
     by_name = asyncio.run(
@@ -293,7 +279,6 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
             channel_name="conda-forge",
             platforms=[Platform("linux-64"), Platform("noarch")],
             target="python",
-            record_sort_key=_sort_key,
             log=logs.append,
         )
     )
@@ -303,7 +288,6 @@ def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> N
             channel_name="conda-forge",
             platforms=[Platform("linux-64"), Platform("noarch")],
             target=python,
-            record_sort_key=_sort_key,
         )
     )
 
@@ -969,16 +953,7 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
         ),
     ]
 
-    rendered = render_package_preview(
-        "demo",
-        records,
-        record_sort_key=lambda record: (
-            record.version,
-            record.build,
-            record.subdir,
-            record.build_number,
-        ),
-    )
+    rendered = render_package_preview("demo", records)
 
     assert "Version selector preview" in rendered
     assert "Press Enter to open the version list." in rendered
@@ -997,16 +972,7 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
         _make_repo_data_record(version="1.34.0", subdir="noarch"),
     ]
 
-    rendered = render_package_preview(
-        "demo",
-        records,
-        record_sort_key=lambda record: (
-            record.version,
-            record.build,
-            record.subdir,
-            record.build_number,
-        ),
-    )
+    rendered = render_package_preview("demo", records)
 
     headings = [
         rendered.index("▾ noarch"),
@@ -1330,11 +1296,13 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
         assert selector == "#sidebar-list"
         return option_list
 
-    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+    async def _fake_get_package_records(
+        package_name: str,
+    ) -> list[RepoDataRecord]:
         assert package_name == "demo"
         return [
-            _Record(
-                version=Version("1.2.3"),
+            _make_repo_data_record(
+                version="1.2.3",
                 build="py313h123_0",
                 build_number=0,
                 subdir="noarch",
@@ -1362,12 +1330,14 @@ def test_open_versions_orders_subdirs_by_latest_version_then_name(monkeypatch) -
         highlighted = 0
         scroll_y = 0.0
 
-    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+    async def _fake_get_package_records(
+        package_name: str,
+    ) -> list[RepoDataRecord]:
         assert package_name == "demo"
         return [
-            _Record(Version("1.33.1"), "build", 0, "osx-arm64", "osx.conda"),
-            _Record(Version("1.33.1"), "build", 0, "linux-64", "linux.conda"),
-            _Record(Version("1.34.0"), "build", 0, "noarch", "noarch.conda"),
+            _make_repo_data_record(version="1.33.1", subdir="osx-arm64"),
+            _make_repo_data_record(version="1.33.1", subdir="linux-64"),
+            _make_repo_data_record(version="1.34.0", subdir="noarch"),
         ]
 
     monkeypatch.setattr(app, "query_one", lambda *_args: _FakeOptionList())
