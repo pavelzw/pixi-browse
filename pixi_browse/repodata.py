@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cmp_to_key
 
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord, SourceConfig
-from rattler.version import VersionWithSource
 
 from pixi_browse.platform_utils import platform_sort_key
 
@@ -89,15 +89,37 @@ def record_identity_key(record: RepoDataRecord) -> tuple[str, str, int, str, str
     )
 
 
+def compare_records(left: RepoDataRecord, right: RepoDataRecord) -> int:
+    """Compare two records using rattler's ordering with a deterministic tiebreak.
+
+    rattler orders records by package name, track features, version, build number
+    and timestamp. Records that compare equal under that ordering are further
+    ordered by build string, subdir and file name so that sorting is stable across
+    runs regardless of the order in which the gateway returned them.
+    """
+    if left < right:
+        return -1
+    if right < left:
+        return 1
+
+    left_tiebreak = (left.build, left.subdir, left.file_name)
+    right_tiebreak = (right.build, right.subdir, right.file_name)
+    if left_tiebreak < right_tiebreak:
+        return -1
+    if right_tiebreak < left_tiebreak:
+        return 1
+    return 0
+
+
+record_sort_key = cmp_to_key(compare_records)
+
+
 async def query_package_records(
     *,
     gateway: Gateway,
     channel_name: str,
     platforms: list[Platform],
     package_name: str,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> list[RepoDataRecord]:
     unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
@@ -123,9 +145,6 @@ async def query_matchspec_records(
     channel_name: str,
     platforms: list[Platform],
     matchspec: MatchSpec,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> MatchSpecQueryResult:
     unique_records: dict[tuple[str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(

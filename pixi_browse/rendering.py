@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
@@ -10,7 +10,6 @@ from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import RunExportsJson
 from rattler.repo_data import RepoDataRecord
-from rattler.version import VersionWithSource
 from rich.markup import escape
 
 from pixi_browse.models import (
@@ -23,6 +22,7 @@ from pixi_browse.models import (
     VersionCompareData,
 )
 from pixi_browse.platform_utils import sort_subdirs_by_latest_version
+from pixi_browse.repodata import record_sort_key
 
 _SYNTAX_LEXERS_BY_SUFFIX: dict[str, str] = {
     ".bash": "bash",
@@ -238,10 +238,6 @@ def format_human_byte_size(value: Any) -> str:
 def render_package_preview(
     package_name: str,
     records: list[RepoDataRecord],
-    *,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> str:
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
@@ -251,13 +247,7 @@ def render_package_preview(
         grouped_by_subdir[record.subdir].append(record)
 
     for subdir_records in grouped_by_subdir.values():
-        subdir_records.sort(
-            key=lambda record: (
-                *record_sort_key(record),
-                record.file_name,
-            ),
-            reverse=True,
-        )
+        subdir_records.sort(key=record_sort_key, reverse=True)
 
     sorted_subdirs = sort_subdirs_by_latest_version(
         grouped_by_subdir,

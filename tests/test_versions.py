@@ -42,7 +42,7 @@ from pixi_browse.rendering import (
     resolve_info_file_compare_rows,
     syntax_lexer_for_path,
 )
-from pixi_browse.repodata import MatchSpecQueryResult
+from pixi_browse.repodata import MatchSpecQueryResult, record_sort_key
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
     EMPTY_MATCHSPEC_RESULT,
@@ -66,15 +66,6 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
-
-
-@dataclass(frozen=True)
-class _Record:
-    version: Version
-    build: str
-    build_number: int
-    subdir: str
-    file_name: str
 
 
 @dataclass(frozen=True)
@@ -250,6 +241,56 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
         "demo-1.2.3-py313h123_0.conda",
         "demo-1.2.3-py313h123_0.tar.bz2",
     }
+
+
+def test_record_sort_key_orders_by_build_number_before_build_string() -> None:
+    records = [
+        _make_repo_data_record(version="1.2.3", build="hbbbbbb_2", build_number=2),
+        _make_repo_data_record(version="1.2.3", build="h9f8e7d_99", build_number=99),
+        _make_repo_data_record(version="1.2.3", build="h1a2b3c_100", build_number=100),
+        _make_repo_data_record(version="1.2.4", build="haaaaaa_0", build_number=0),
+    ]
+
+    ordered = sorted(records, key=record_sort_key, reverse=True)
+
+    assert [(str(record.version), record.build_number) for record in ordered] == [
+        ("1.2.4", 0),
+        ("1.2.3", 100),
+        ("1.2.3", 99),
+        ("1.2.3", 2),
+    ]
+
+
+def test_record_sort_key_breaks_ties_deterministically() -> None:
+    conda = _make_repo_data_record(file_name="demo-1.2.3-py313h123_0.conda")
+    tarball = _make_repo_data_record(file_name="demo-1.2.3-py313h123_0.tar.bz2")
+    expected = [conda.file_name, tarball.file_name]
+
+    assert [
+        record.file_name for record in sorted([tarball, conda], key=record_sort_key)
+    ] == expected
+    assert [
+        record.file_name for record in sorted([conda, tarball], key=record_sort_key)
+    ] == expected
+
+
+def test_build_version_entries_orders_builds_by_build_number() -> None:
+    app = CondaMetadataTui()
+    records = [
+        _make_repo_data_record(
+            version="1.2.3", build="h9f8e7d_99", build_number=99, subdir="linux-64"
+        ),
+        _make_repo_data_record(
+            version="1.2.3", build="h1a2b3c_100", build_number=100, subdir="linux-64"
+        ),
+        _make_repo_data_record(
+            version="1.2.3", build="hbbbbbb_2", build_number=2, subdir="linux-64"
+        ),
+    ]
+
+    entries = app._build_version_entries(records)
+
+    assert [entry.build_number for entry in entries] == [100, 99, 2]
 
 
 def test_build_version_artifact_data_includes_package_paths() -> None:
@@ -872,16 +913,7 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
         ),
     ]
 
-    rendered = render_package_preview(
-        "demo",
-        records,
-        record_sort_key=lambda record: (
-            record.version,
-            record.build,
-            record.subdir,
-            record.build_number,
-        ),
-    )
+    rendered = render_package_preview("demo", records)
 
     assert "Version selector preview" in rendered
     assert "Press Enter to open the version list." in rendered
@@ -900,16 +932,7 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
         _make_repo_data_record(version="1.34.0", subdir="noarch"),
     ]
 
-    rendered = render_package_preview(
-        "demo",
-        records,
-        record_sort_key=lambda record: (
-            record.version,
-            record.build,
-            record.subdir,
-            record.build_number,
-        ),
-    )
+    rendered = render_package_preview("demo", records)
 
     headings = [
         rendered.index("▾ noarch"),
@@ -917,6 +940,21 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
         rendered.index("▾ osx-arm64"),
     ]
     assert headings == sorted(headings)
+
+
+def test_render_package_preview_orders_builds_by_build_number() -> None:
+    records = [
+        _make_repo_data_record(
+            version="1.2.3", build="h9f8e7d_99", build_number=99, subdir="linux-64"
+        ),
+        _make_repo_data_record(
+            version="1.2.3", build="h1a2b3c_100", build_number=100, subdir="linux-64"
+        ),
+    ]
+
+    rendered = render_package_preview("demo", records)
+
+    assert rendered.index("h1a2b3c_100") < rendered.index("h9f8e7d_99")
 
 
 def test_get_package_paths_caches_archive_paths() -> None:
@@ -1233,11 +1271,13 @@ def test_open_versions_keeps_focus_in_sidebar(monkeypatch) -> None:
         assert selector == "#sidebar-list"
         return option_list
 
-    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+    async def _fake_get_package_records(
+        package_name: str,
+    ) -> list[RepoDataRecord]:
         assert package_name == "demo"
         return [
-            _Record(
-                version=Version("1.2.3"),
+            _make_repo_data_record(
+                version="1.2.3",
                 build="py313h123_0",
                 build_number=0,
                 subdir="noarch",
@@ -1265,12 +1305,14 @@ def test_open_versions_orders_subdirs_by_latest_version_then_name(monkeypatch) -
         highlighted = 0
         scroll_y = 0.0
 
-    async def _fake_get_package_records(package_name: str) -> list[_Record]:
+    async def _fake_get_package_records(
+        package_name: str,
+    ) -> list[RepoDataRecord]:
         assert package_name == "demo"
         return [
-            _Record(Version("1.33.1"), "build", 0, "osx-arm64", "osx.conda"),
-            _Record(Version("1.33.1"), "build", 0, "linux-64", "linux.conda"),
-            _Record(Version("1.34.0"), "build", 0, "noarch", "noarch.conda"),
+            _make_repo_data_record(version="1.33.1", subdir="osx-arm64"),
+            _make_repo_data_record(version="1.33.1", subdir="linux-64"),
+            _make_repo_data_record(version="1.34.0", subdir="noarch"),
         ]
 
     monkeypatch.setattr(app, "query_one", lambda *_args: _FakeOptionList())
