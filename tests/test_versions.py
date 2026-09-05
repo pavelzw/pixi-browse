@@ -2123,7 +2123,7 @@ def test_handle_whoneeds_confirmation_opens_the_prompt_for_a_custom_query(
 
     def _fail_run_worker(coro: object, **_kwargs: object) -> None:
         coro.close()  # type: ignore[attr-defined]
-        raise AssertionError("asking something else must not query the build")
+        raise AssertionError("querying something else must not query the build")
 
     monkeypatch.setattr(
         app,
@@ -2327,7 +2327,7 @@ def test_whoneeds_confirm_screen_reports_the_chosen_action(
             assert [
                 str(option_list.get_option_at_index(index).prompt)
                 for index in range(option_list.option_count)
-            ] == ["Run the query", "Ask about something else", "Cancel"]
+            ] == ["Run the query", "Query something else", "Cancel"]
             assert (
                 screen.query_one("#whoneeds-confirm-target", Static).content
                 == "demo 1.2.3 py313h123_0 [noarch]"

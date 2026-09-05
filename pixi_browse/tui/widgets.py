@@ -1963,7 +1963,7 @@ class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
     Pressing `w` in the version details targets the highlighted build rather
     than the package name, which is both a much narrower question and a slow
     one, so it is worth showing what is about to be asked. The build is rarely
-    the wrong question but often not the only one, so asking something else is
+    the wrong question but often not the only one, so querying something else is
     offered right here instead of behind a cancel.
     """
 
@@ -2022,7 +2022,7 @@ class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
 
     CHOICES: tuple[tuple[str, WhoNeedsConfirmChoice | None], ...] = (
         ("Run the query", "run"),
-        ("Ask about something else", "custom"),
+        ("Query something else", "custom"),
         ("Cancel", None),
     )
 
