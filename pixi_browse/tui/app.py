@@ -27,6 +27,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
 
@@ -2438,6 +2439,7 @@ class CondaMetadataTui(App[None]):
         self._open_matchspec_screen(self._matchspec_query)
 
     def _handle_whoneeds_result(self, result: PackageName | Empty | None) -> None:
+        self.log.info(f"who-needs: name prompt closed result={result!r}")
         if result is None:
             return
 
@@ -2457,6 +2459,10 @@ class CondaMetadataTui(App[None]):
     def _handle_whoneeds_confirmation(
         self, selection: CompareSelection, confirmed: bool | None
     ) -> None:
+        self.log.info(
+            f"who-needs: confirm screen closed confirmed={confirmed!r} "
+            f"target={self._compare_selection_label(selection)!r}"
+        )
         if not confirmed:
             return
 
@@ -2476,8 +2482,52 @@ class CondaMetadataTui(App[None]):
             return self._whoneeds_target
         return self._whoneeds_query.split(" ", maxsplit=1)[0]
 
+    def _whoneeds_key_context(self) -> str:
+        """Describe the app state that decides what pressing ``w`` does.
+
+        Everything in here has to survive an app that is not running (the tests
+        build one without starting it), and must not raise: it only ever feeds a
+        log line.
+        """
+        screens = ",".join(type(screen).__name__ for screen in self.screen_stack)
+        focused = "n/a"
+        highlighted: int | None = None
+        # Both the focus and the query below reach for the active screen, which
+        # only exists once the app runs.
+        if self.screen_stack:
+            focused_widget = self.focused
+            focused = (
+                "none" if focused_widget is None else type(focused_widget).__name__
+            )
+            try:
+                highlighted = self.query_one("#sidebar-list", OptionList).highlighted
+            except NoMatches:
+                pass
+
+        # Read the row directly instead of going through the version-row
+        # helpers, so this stays a pure observation of the state.
+        row_kind = "n/a"
+        if highlighted is not None and 0 <= highlighted < len(self._version_rows):
+            row_kind = self._version_rows[highlighted].kind
+
+        return (
+            f"mode={self._mode!r} pane={self._selected_pane!r} "
+            f"selected_package={self._selected_package!r} "
+            f"filter_mode={self._filter_mode} "
+            f"channel_edit_mode={self._channel_edit_mode} "
+            f"screens=[{screens}] focused={focused} "
+            f"sidebar_highlight={highlighted} version_rows={len(self._version_rows)} "
+            f"highlighted_kind={row_kind}"
+        )
+
     def action_whoneeds_key_w(self) -> None:
+        # Logged unconditionally: if this line is missing from the log the key
+        # never reached the action, so the binding itself was blocked.
+        self.log.info(f"who-needs: key w pressed {self._whoneeds_key_context()}")
         if self._channel_edit_mode or self._filter_mode:
+            self.log.info(
+                "who-needs: key w ignored, channel edit or filter mode active"
+            )
             return
 
         if self._mode == "versions":
@@ -2487,10 +2537,18 @@ class CondaMetadataTui(App[None]):
                 # record behind it is already cached - opening the versions view
                 # built the rows from it - so this does not wait for the details
                 # view, which is still streaming the package archive.
+                label = self._compare_selection_label(selection)
+                self.log.info(f"who-needs: key w opens confirm screen target={label!r}")
                 self._open_whoneeds_confirm_screen(selection)
                 return
+            self.log.info(
+                "who-needs: key w found no highlighted entry, "
+                "falling back to the name prompt"
+            )
 
-        self._open_whoneeds_screen(self._whoneeds_screen_initial_value())
+        initial_value = self._whoneeds_screen_initial_value()
+        self.log.info(f"who-needs: key w opens name prompt initial={initial_value!r}")
+        self._open_whoneeds_screen(initial_value)
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
@@ -2569,6 +2627,14 @@ class CondaMetadataTui(App[None]):
             self._set_filter_mode(False, reset_query=True)
 
     def on_key(self, event: Key) -> None:
+        if event.key == "w":
+            # Bindings run after this handler, so a "key w reached the app" line
+            # without a following "key w pressed" line means something below
+            # swallowed it.
+            self.log.info(
+                f"who-needs: key w reached the app {self._whoneeds_key_context()}"
+            )
+
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
             if event.key == "tab":

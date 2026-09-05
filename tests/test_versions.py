@@ -18,7 +18,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual.app import App
-from textual.events import Paste
+from textual.events import Key, Paste
 from textual.widgets import LoadingIndicator, OptionList, Static
 
 from pixi_browse import __version__
@@ -1937,6 +1937,89 @@ def test_action_whoneeds_key_w_confirms_the_highlighted_entry_while_details_load
     assert [screen._target_label for screen in pushed] == [
         "demo 1.2.3 py313h123_0 [noarch]"
     ]
+
+
+def _capture_log(app: CondaMetadataTui, monkeypatch) -> list[str]:
+    """Collect what the app writes to the textual dev console."""
+    messages: list[str] = []
+
+    class _Recorder:
+        def info(self, *args: object) -> None:
+            messages.append(" ".join(str(arg) for arg in args))
+
+        def error(self, *args: object) -> None:
+            messages.append(" ".join(str(arg) for arg in args))
+
+    monkeypatch.setattr(type(app), "log", property(lambda _self: _Recorder()))
+    return messages
+
+
+def test_whoneeds_key_context_describes_the_decision_inputs() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    app._filter_mode = True
+
+    context = app._whoneeds_key_context()
+
+    assert "mode='versions'" in context
+    assert "selected_package='demo'" in context
+    assert "filter_mode=True" in context
+    assert "channel_edit_mode=False" in context
+    # Without a running app there is no screen to inspect, and asking for one
+    # raises - the context must stay a safe observation either way.
+    assert "screens=[]" in context
+    assert "focused=n/a" in context
+    assert "sidebar_highlight=None" in context
+
+
+def test_action_whoneeds_key_w_logs_the_confirmed_target(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(app, "push_screen", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
+    messages = _capture_log(app, monkeypatch)
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    app.action_whoneeds_key_w()
+
+    assert any("who-needs: key w pressed" in message for message in messages)
+    assert any(
+        "who-needs: key w opens confirm screen "
+        "target='demo 1.2.3 py313h123_0 [noarch]'" in message
+        for message in messages
+    )
+
+
+def test_action_whoneeds_key_w_logs_a_silent_early_return(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("filter mode must swallow the key"),
+    )
+    messages = _capture_log(app, monkeypatch)
+    app._filter_mode = True
+
+    app.action_whoneeds_key_w()
+
+    assert any(
+        "who-needs: key w ignored, channel edit or filter mode active" in message
+        for message in messages
+    )
+
+
+def test_on_key_logs_the_whoneeds_key_without_consuming_it(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    messages = _capture_log(app, monkeypatch)
+    event = _FakeKeyEvent("w", "w")
+
+    app.on_key(cast(Key, event))
+
+    # The binding runs after this handler, so the key has to pass through.
+    assert not event.stopped
+    assert any("who-needs: key w reached the app" in message for message in messages)
 
 
 def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -> None:
