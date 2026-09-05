@@ -1877,7 +1877,6 @@ def test_action_whoneeds_key_w_prefills_the_open_package_name(monkeypatch) -> No
         "push_screen",
         lambda screen, callback=None: pushed.append((screen, callback)),
     )
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
     monkeypatch.setattr(app, "_current_compare_selection", lambda: None)
     app._mode = "versions"
     app._selected_package = "demo"
@@ -1904,11 +1903,10 @@ def _detail_selection() -> CompareSelection:
     )
 
 
-def test_action_whoneeds_key_w_confirms_the_highlighted_detail_record(
+def test_action_whoneeds_key_w_confirms_the_highlighted_entry_while_details_load(
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    selection = _detail_selection()
     pushed: list[WhoNeedsConfirmScreen] = []
 
     def _fake_push_screen(screen: object, callback: object = None) -> None:
@@ -1921,37 +1919,24 @@ def test_action_whoneeds_key_w_confirms_the_highlighted_detail_record(
 
     monkeypatch.setattr(app, "push_screen", _fake_push_screen)
     monkeypatch.setattr(app, "run_worker", _fail_run_worker)
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
-    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
+    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
+    # The repodata record is cached before the details view starts streaming the
+    # package archive, so the query must not depend on what the panel shows.
+    monkeypatch.setattr(
+        app,
+        "_main_panel_shows_version_details",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("who needs must not wait for the details view")
+        ),
+    )
     app._mode = "versions"
+    app._selected_package = "demo"
 
     app.action_whoneeds_key_w()
 
     assert [screen._target_label for screen in pushed] == [
         "demo 1.2.3 py313h123_0 [noarch]"
     ]
-
-
-def test_action_whoneeds_key_w_waits_while_the_detail_view_is_loading(
-    monkeypatch,
-) -> None:
-    app = CondaMetadataTui()
-
-    def _fail_push_screen(screen: object, callback: object = None) -> None:
-        raise AssertionError(f"unexpected screen: {screen}")
-
-    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
-        coro.close()  # type: ignore[attr-defined]
-        raise AssertionError("who needs must not query an unresolved entry")
-
-    monkeypatch.setattr(app, "push_screen", _fail_push_screen)
-    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
-    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
-    app._mode = "versions"
-    app._selected_package = "demo"
-
-    app.action_whoneeds_key_w()
 
 
 def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -> None:

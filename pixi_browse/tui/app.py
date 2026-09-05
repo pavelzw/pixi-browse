@@ -2483,12 +2483,11 @@ class CondaMetadataTui(App[None]):
         if self._mode == "versions":
             selection = self._current_compare_selection()
             if selection is not None:
-                # An entry is highlighted, so the key means "who needs this
-                # build". Until its details are on screen the record behind it
-                # is not resolved, and falling back to the name prompt would
-                # silently ask a different question, so wait instead.
-                if self._main_panel_shows_version_details():
-                    self._open_whoneeds_confirm_screen(selection)
+                # A highlighted entry means "who needs this build". The repodata
+                # record behind it is already cached - opening the versions view
+                # built the rows from it - so this does not wait for the details
+                # view, which is still streaming the package archive.
+                self._open_whoneeds_confirm_screen(selection)
                 return
 
         self._open_whoneeds_screen(self._whoneeds_screen_initial_value())
