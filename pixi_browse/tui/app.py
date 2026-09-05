@@ -19,7 +19,7 @@ from rattler.package_streaming import (
 )
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, RepoDataRecord
-from rattler.version import Version, VersionWithSource
+from rattler.version import Version
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -431,7 +431,6 @@ class CondaMetadataTui(App[None]):
             channel_name=self._channel_name,
             platforms=self._platforms,
             matchspec=matchspec,
-            record_sort_key=self._record_sort_key,
         )
 
     async def _reapply_active_matchspec(self) -> None:
@@ -666,11 +665,6 @@ class CondaMetadataTui(App[None]):
             f"{len(self._visible_package_names):,} packages in selection."
         )
 
-    def _record_sort_key(
-        self, record: RepoDataRecord
-    ) -> tuple[VersionWithSource, str, str, int]:
-        return (record.version, record.build, record.subdir, record.build_number)
-
     async def _get_package_records(self, package_name: str) -> list[RepoDataRecord]:
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
@@ -681,7 +675,6 @@ class CondaMetadataTui(App[None]):
             channel_name=self._channel_name,
             platforms=self._platforms,
             package_name=package_name,
-            record_sort_key=self._record_sort_key,
         )
         self._package_records_cache[package_name] = records
         return records
@@ -1099,13 +1092,7 @@ class CondaMetadataTui(App[None]):
             (left_selection, left_record, left_artifact),
             (right_selection, right_record, right_artifact),
         ]
-        ordered_pairs.sort(
-            key=lambda pair: (
-                *self._record_sort_key(pair[1]),
-                pair[1].file_name,
-                pair[1].name.source,
-            ),
-        )
+        ordered_pairs.sort(key=lambda pair: pair[1])
         # Deliberately normalize the compare pane order for a stable display,
         # even when the user picked compare A/B in the opposite order.
         (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
@@ -1816,11 +1803,7 @@ class CondaMetadataTui(App[None]):
     def _render_package_preview(
         self, package_name: str, records: list[RepoDataRecord]
     ) -> str:
-        return render_package_preview(
-            package_name,
-            records,
-            record_sort_key=self._record_sort_key,
-        )
+        return render_package_preview(package_name, records)
 
     def _update_main_panel_for_package(
         self, package_name: str, records: list[RepoDataRecord]
@@ -1991,6 +1974,7 @@ class CondaMetadataTui(App[None]):
     def _build_version_entries(
         self, records: list[RepoDataRecord]
     ) -> list[VersionEntry]:
+        """Build version entries. Expects `records` sorted newest first."""
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
         for record in records:
             key = (
@@ -2008,17 +1992,7 @@ class CondaMetadataTui(App[None]):
                 file_name=record.file_name,
             )
 
-        return sorted(
-            versions_by_key.values(),
-            key=lambda entry: (
-                entry.version,
-                entry.build,
-                entry.subdir,
-                entry.build_number,
-                entry.file_name,
-            ),
-            reverse=True,
-        )
+        return list(versions_by_key.values())
 
     def _footer_text(self) -> str | Text:
         if self._channel_edit_mode:

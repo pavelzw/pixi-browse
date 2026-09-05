@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
@@ -10,7 +10,6 @@ from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import RunExportsJson
 from rattler.repo_data import RepoDataRecord
-from rattler.version import VersionWithSource
 from rich.markup import escape
 
 from pixi_browse.models import (
@@ -238,26 +237,14 @@ def format_human_byte_size(value: Any) -> str:
 def render_package_preview(
     package_name: str,
     records: list[RepoDataRecord],
-    *,
-    record_sort_key: Callable[
-        [RepoDataRecord], tuple[VersionWithSource, str, str, int]
-    ],
 ) -> str:
+    """Render the package preview. Expects `records` sorted newest first."""
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
 
     grouped_by_subdir: dict[str, list[RepoDataRecord]] = defaultdict(list)
     for record in records:
         grouped_by_subdir[record.subdir].append(record)
-
-    for subdir_records in grouped_by_subdir.values():
-        subdir_records.sort(
-            key=lambda record: (
-                *record_sort_key(record),
-                record.file_name,
-            ),
-            reverse=True,
-        )
 
     sorted_subdirs = sort_subdirs_by_latest_version(
         grouped_by_subdir,
