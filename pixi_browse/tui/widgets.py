@@ -1956,6 +1956,99 @@ class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
         self.dismiss(result)
 
 
+class WhoNeedsConfirmScreen(ModalScreen[bool | None]):
+    """Confirm a who-needs query for one concrete repodata entry.
+
+    Pressing `w` in the version details targets the highlighted build rather
+    than the package name, which is both a much narrower question and a slow
+    one, so it is worth showing what is about to be asked.
+    """
+
+    DEFAULT_CSS = """
+    WhoNeedsConfirmScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-confirm-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-confirm-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-target {
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-list {
+        border: none;
+        background: $background;
+        padding: 0 0 0 1;
+    }
+
+    #whoneeds-confirm-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #whoneeds-confirm-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, target_label: str) -> None:
+        super().__init__()
+        self._target_label = target_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-confirm-dialog"):
+            yield Static("Who needs", id="whoneeds-confirm-title")
+            yield Static(self._target_label, id="whoneeds-confirm-target", markup=False)
+            yield Static(
+                "Find every package whose dependency matches this exact build."
+                " Scanning the full repodata takes a while.",
+                id="whoneeds-confirm-help",
+            )
+            yield OptionList(
+                "Run the query",
+                "Cancel",
+                id="whoneeds-confirm-list",
+                markup=False,
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#whoneeds-confirm-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#whoneeds-confirm-list")
+    def _select_action(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(event.option_index == 0)
+
+    async def action_dismiss(self, result: bool | None = None) -> None:
+        self.dismiss(result)
+
+
 class WhoNeedsLoadingScreen(ModalScreen[None]):
     """Modal that holds the user in place while a who-needs query runs.
 

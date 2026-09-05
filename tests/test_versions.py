@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Paste
-from textual.widgets import LoadingIndicator, Static
+from textual.widgets import LoadingIndicator, OptionList, Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
@@ -67,6 +67,7 @@ from pixi_browse.tui import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsConfirmScreen,
     WhoNeedsLoadingScreen,
     WhoNeedsScreen,
 )
@@ -1876,13 +1877,7 @@ def test_action_whoneeds_key_w_prefills_the_open_package_name(monkeypatch) -> No
         "push_screen",
         lambda screen, callback=None: pushed.append((screen, callback)),
     )
-
-    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
-        coro.close()  # type: ignore[attr-defined]
-        raise AssertionError("who needs must not query without confirmation")
-
-    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: False)
     app._mode = "versions"
     app._selected_package = "demo"
 
@@ -1893,6 +1888,117 @@ def test_action_whoneeds_key_w_prefills_the_open_package_name(monkeypatch) -> No
     assert isinstance(screen, WhoNeedsScreen)
     assert screen._initial_value == "demo"
     assert callback == app._handle_whoneeds_result
+
+
+def _detail_selection() -> CompareSelection:
+    return CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+
+
+def test_action_whoneeds_key_w_confirms_the_highlighted_detail_record(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    selection = _detail_selection()
+    pushed: list[WhoNeedsConfirmScreen] = []
+
+    def _fake_push_screen(screen: object, callback: object = None) -> None:
+        assert isinstance(screen, WhoNeedsConfirmScreen)
+        pushed.append(screen)
+
+    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
+        coro.close()  # type: ignore[attr-defined]
+        raise AssertionError("who needs must not query before it is confirmed")
+
+    monkeypatch.setattr(app, "push_screen", _fake_push_screen)
+    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
+    app._mode = "versions"
+
+    app.action_whoneeds_key_w()
+
+    assert [screen._target_label for screen in pushed] == [
+        "demo 1.2.3 py313h123_0 [noarch]"
+    ]
+
+
+def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    selection = _detail_selection()
+    worker_calls: list[dict[str, object]] = []
+    applied: list[CompareSelection] = []
+
+    async def _fake_apply_for_selection(target: CompareSelection) -> None:
+        applied.append(target)
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        asyncio.run(cast(Coroutine[None, None, None], coro))
+
+    monkeypatch.setattr(app, "_apply_whoneeds_for_selection", _fake_apply_for_selection)
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+
+    app._handle_whoneeds_confirmation(selection, None)
+    app._handle_whoneeds_confirmation(selection, False)
+
+    assert worker_calls == []
+
+    app._handle_whoneeds_confirmation(selection, True)
+
+    assert applied == [selection]
+    assert worker_calls == [
+        {
+            "group": "whoneeds-selection",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_apply_whoneeds_for_selection_queries_concrete_package_record(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="python", version="3.13.1", build="h123_0")
+    selection = CompareSelection(
+        "python",
+        VersionEntry(
+            version=record.version,
+            build=record.build,
+            build_number=record.build_number,
+            subdir=record.subdir,
+            file_name=record.file_name,
+        ),
+    )
+    queries: list[tuple[str | PackageRecord, str]] = []
+
+    async def _fake_get_record(
+        package_name: str, entry: VersionEntry
+    ) -> RepoDataRecord | None:
+        assert package_name == selection.package_name
+        assert entry == selection.entry
+        return record
+
+    async def _fake_apply_query(target: str | PackageRecord, query: str) -> None:
+        queries.append((target, query))
+
+    monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
+
+    asyncio.run(app._apply_whoneeds_for_selection(selection))
+
+    assert queries == [
+        (record, "python 3.13.1 h123_0"),
+    ]
 
 
 def test_action_whoneeds_key_w_prefills_the_active_whoneeds_target(
@@ -2011,6 +2117,60 @@ def test_close_whoneeds_loading_screen_leaves_other_screens_alone(monkeypatch) -
     app._close_whoneeds_loading_screen(screen)
 
     assert dismissed == []
+
+
+def test_whoneeds_confirm_screen_offers_running_and_cancelling() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    results: list[bool | None] = []
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            app.push_screen(
+                WhoNeedsConfirmScreen("demo 1.2.3 py313h123_0 [noarch]"),
+                results.append,
+            )
+            await pilot.pause()
+            screen = cast(WhoNeedsConfirmScreen, app.screen)
+            option_list = screen.query_one("#whoneeds-confirm-list", OptionList)
+
+            assert option_list.has_focus
+            assert [
+                str(option_list.get_option_at_index(index).prompt)
+                for index in range(option_list.option_count)
+            ] == ["Run the query", "Cancel"]
+            assert (
+                screen.query_one("#whoneeds-confirm-target", Static).content
+                == "demo 1.2.3 py313h123_0 [noarch]"
+            )
+
+            await pilot.press("down", "enter")
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+    assert results == [False]
+
+
+def test_whoneeds_confirm_screen_escape_cancels() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    results: list[bool | None] = []
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            app.push_screen(WhoNeedsConfirmScreen("demo 1.2.3"), results.append)
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+    assert results == [None]
 
 
 def test_whoneeds_loading_screen_shows_the_target_and_elapsed_time() -> None:

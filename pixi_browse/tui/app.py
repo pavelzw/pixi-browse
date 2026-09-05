@@ -84,6 +84,7 @@ from .widgets import (
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
+    WhoNeedsConfirmScreen,
     WhoNeedsLoadingScreen,
     WhoNeedsScreen,
 )
@@ -818,6 +819,12 @@ class CondaMetadataTui(App[None]):
         self.push_screen(
             WhoNeedsScreen(initial_value),
             self._handle_whoneeds_result,
+        )
+
+    def _open_whoneeds_confirm_screen(self, selection: CompareSelection) -> None:
+        self.push_screen(
+            WhoNeedsConfirmScreen(self._compare_selection_label(selection)),
+            lambda confirmed: self._handle_whoneeds_confirmation(selection, confirmed),
         )
 
     def _close_whoneeds_loading_screen(self, screen: WhoNeedsLoadingScreen) -> None:
@@ -2083,6 +2090,28 @@ class CondaMetadataTui(App[None]):
             f"total_elapsed={perf_counter() - workflow_started:.3f}s"
         )
 
+    async def _apply_whoneeds_for_selection(self, selection: CompareSelection) -> None:
+        resolution_started = perf_counter()
+        record = await self._get_record_for_version_entry(
+            selection.package_name, selection.entry
+        )
+        if record is None:
+            self.notify(
+                "Could not find the selected package record.",
+                title="Who needs",
+                severity="error",
+            )
+            return
+        self.log.info(
+            "who-needs: selected record resolved "
+            f"elapsed={perf_counter() - resolution_started:.3f}s "
+            f"record={record.name.normalized!r} version={str(record.version)!r} "
+            f"build={record.build!r} subdir={record.subdir!r}"
+        )
+        target = record
+        query = f"{record.name.normalized} {record.version} {record.build}"
+        await self._apply_whoneeds_query(target, query)
+
     def _back_to_packages(self) -> None:
         self._mode = "packages"
         self._draft_selected_platform_names = None
@@ -2425,9 +2454,22 @@ class CondaMetadataTui(App[None]):
             exit_on_error=False,
         )
 
+    def _handle_whoneeds_confirmation(
+        self, selection: CompareSelection, confirmed: bool | None
+    ) -> None:
+        if not confirmed:
+            return
+
+        self.run_worker(
+            self._apply_whoneeds_for_selection(selection),
+            group="whoneeds-selection",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
     def _whoneeds_screen_initial_value(self) -> str:
         # While a package is open its name is the obvious thing to ask about,
-        # so offer it for editing rather than running the query right away.
+        # so offer it for editing rather than the last query that ran.
         if self._mode == "versions" and self._selected_package is not None:
             return self._selected_package
         if isinstance(self._whoneeds_target, str):
@@ -2437,6 +2479,12 @@ class CondaMetadataTui(App[None]):
     def action_whoneeds_key_w(self) -> None:
         if self._channel_edit_mode or self._filter_mode:
             return
+
+        if self._mode == "versions" and self._main_panel_shows_version_details():
+            selection = self._current_compare_selection()
+            if selection is not None:
+                self._open_whoneeds_confirm_screen(selection)
+                return
 
         self._open_whoneeds_screen(self._whoneeds_screen_initial_value())
 
