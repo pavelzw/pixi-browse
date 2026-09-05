@@ -1974,8 +1974,9 @@ class CondaMetadataTui(App[None]):
     def _build_version_entries(
         self, records: list[RepoDataRecord]
     ) -> list[VersionEntry]:
+        """Build version entries. Expects `records` sorted newest first."""
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
-        for record in sorted(records, reverse=True):
+        for record in records:
             key = (
                 record.version,
                 record.build,

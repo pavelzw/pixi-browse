@@ -238,15 +238,13 @@ def render_package_preview(
     package_name: str,
     records: list[RepoDataRecord],
 ) -> str:
+    """Render the package preview. Expects `records` sorted newest first."""
     if not records:
         return f"# {package_name}\n\nNo metadata records found."
 
     grouped_by_subdir: dict[str, list[RepoDataRecord]] = defaultdict(list)
     for record in records:
         grouped_by_subdir[record.subdir].append(record)
-
-    for subdir_records in grouped_by_subdir.values():
-        subdir_records.sort(reverse=True)
 
     sorted_subdirs = sort_subdirs_by_latest_version(
         grouped_by_subdir,
