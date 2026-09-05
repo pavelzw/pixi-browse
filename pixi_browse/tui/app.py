@@ -2480,10 +2480,15 @@ class CondaMetadataTui(App[None]):
         if self._channel_edit_mode or self._filter_mode:
             return
 
-        if self._mode == "versions" and self._main_panel_shows_version_details():
+        if self._mode == "versions":
             selection = self._current_compare_selection()
             if selection is not None:
-                self._open_whoneeds_confirm_screen(selection)
+                # An entry is highlighted, so the key means "who needs this
+                # build". Until its details are on screen the record behind it
+                # is not resolved, and falling back to the name prompt would
+                # silently ask a different question, so wait instead.
+                if self._main_panel_shows_version_details():
+                    self._open_whoneeds_confirm_screen(selection)
                 return
 
         self._open_whoneeds_screen(self._whoneeds_screen_initial_value())
