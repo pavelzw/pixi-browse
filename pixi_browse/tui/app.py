@@ -59,7 +59,6 @@ from pixi_browse.repodata import (
     fetch_package_names,
     query_matchspec_records,
     query_package_records,
-    record_sort_key,
 )
 from pixi_browse.search import fuzzy_score
 
@@ -1093,7 +1092,7 @@ class CondaMetadataTui(App[None]):
             (left_selection, left_record, left_artifact),
             (right_selection, right_record, right_artifact),
         ]
-        ordered_pairs.sort(key=lambda pair: record_sort_key(pair[1]))
+        ordered_pairs.sort(key=lambda pair: pair[1])
         # Deliberately normalize the compare pane order for a stable display,
         # even when the user picked compare A/B in the opposite order.
         (left_selection, _, left_artifact), (right_selection, _, right_artifact) = (
@@ -1976,7 +1975,7 @@ class CondaMetadataTui(App[None]):
         self, records: list[RepoDataRecord]
     ) -> list[VersionEntry]:
         versions_by_key: dict[tuple[Version, str, int, str, str], VersionEntry] = {}
-        for record in sorted(records, key=record_sort_key, reverse=True):
+        for record in sorted(records, reverse=True):
             key = (
                 record.version,
                 record.build,

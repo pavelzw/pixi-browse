@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import cmp_to_key
 
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
@@ -89,31 +88,6 @@ def record_identity_key(record: RepoDataRecord) -> tuple[str, str, int, str, str
     )
 
 
-def compare_records(left: RepoDataRecord, right: RepoDataRecord) -> int:
-    """Compare two records using rattler's ordering with a deterministic tiebreak.
-
-    rattler orders records by package name, track features, version, build number
-    and timestamp. Records that compare equal under that ordering are further
-    ordered by build string, subdir and file name so that sorting is stable across
-    runs regardless of the order in which the gateway returned them.
-    """
-    if left < right:
-        return -1
-    if right < left:
-        return 1
-
-    left_tiebreak = (left.build, left.subdir, left.file_name)
-    right_tiebreak = (right.build, right.subdir, right.file_name)
-    if left_tiebreak < right_tiebreak:
-        return -1
-    if right_tiebreak < left_tiebreak:
-        return 1
-    return 0
-
-
-record_sort_key = cmp_to_key(compare_records)
-
-
 async def query_package_records(
     *,
     gateway: Gateway,
@@ -132,11 +106,7 @@ async def query_package_records(
         for record in source_records:
             unique_records[record_identity_key(record)] = record
 
-    return sorted(
-        unique_records.values(),
-        key=record_sort_key,
-        reverse=True,
-    )
+    return sorted(unique_records.values(), reverse=True)
 
 
 async def query_matchspec_records(
@@ -166,11 +136,7 @@ async def query_matchspec_records(
     return MatchSpecQueryResult(
         package_names=sorted_package_names,
         records_by_package={
-            package_name: sorted(
-                grouped_records[package_name],
-                key=record_sort_key,
-                reverse=True,
-            )
+            package_name: sorted(grouped_records[package_name], reverse=True)
             for package_name in sorted_package_names
         },
     )

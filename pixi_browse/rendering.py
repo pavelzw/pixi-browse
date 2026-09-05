@@ -22,7 +22,6 @@ from pixi_browse.models import (
     VersionCompareData,
 )
 from pixi_browse.platform_utils import sort_subdirs_by_latest_version
-from pixi_browse.repodata import record_sort_key
 
 _SYNTAX_LEXERS_BY_SUFFIX: dict[str, str] = {
     ".bash": "bash",
@@ -247,7 +246,7 @@ def render_package_preview(
         grouped_by_subdir[record.subdir].append(record)
 
     for subdir_records in grouped_by_subdir.values():
-        subdir_records.sort(key=record_sort_key, reverse=True)
+        subdir_records.sort(reverse=True)
 
     sorted_subdirs = sort_subdirs_by_latest_version(
         grouped_by_subdir,

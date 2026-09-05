@@ -42,7 +42,7 @@ from pixi_browse.rendering import (
     resolve_info_file_compare_rows,
     syntax_lexer_for_path,
 )
-from pixi_browse.repodata import MatchSpecQueryResult, record_sort_key
+from pixi_browse.repodata import MatchSpecQueryResult
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
     EMPTY_MATCHSPEC_RESULT,
@@ -243,7 +243,7 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
-def test_record_sort_key_orders_by_build_number_before_build_string() -> None:
+def test_records_sort_by_build_number_before_build_string() -> None:
     records = [
         _make_repo_data_record(version="1.2.3", build="hbbbbbb_2", build_number=2),
         _make_repo_data_record(version="1.2.3", build="h9f8e7d_99", build_number=99),
@@ -251,7 +251,7 @@ def test_record_sort_key_orders_by_build_number_before_build_string() -> None:
         _make_repo_data_record(version="1.2.4", build="haaaaaa_0", build_number=0),
     ]
 
-    ordered = sorted(records, key=record_sort_key, reverse=True)
+    ordered = sorted(records, reverse=True)
 
     assert [(str(record.version), record.build_number) for record in ordered] == [
         ("1.2.4", 0),
@@ -259,19 +259,6 @@ def test_record_sort_key_orders_by_build_number_before_build_string() -> None:
         ("1.2.3", 99),
         ("1.2.3", 2),
     ]
-
-
-def test_record_sort_key_breaks_ties_deterministically() -> None:
-    conda = _make_repo_data_record(file_name="demo-1.2.3-py313h123_0.conda")
-    tarball = _make_repo_data_record(file_name="demo-1.2.3-py313h123_0.tar.bz2")
-    expected = [conda.file_name, tarball.file_name]
-
-    assert [
-        record.file_name for record in sorted([tarball, conda], key=record_sort_key)
-    ] == expected
-    assert [
-        record.file_name for record in sorted([conda, tarball], key=record_sort_key)
-    ] == expected
 
 
 def test_build_version_entries_orders_builds_by_build_number() -> None:
