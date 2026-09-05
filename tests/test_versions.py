@@ -19,6 +19,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Key, Paste
+from textual.screen import ModalScreen
 from textual.widgets import LoadingIndicator, OptionList, Static
 
 from pixi_browse import __version__
@@ -1800,6 +1801,59 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     assert callback == app._handle_matchspec_result
 
 
+@pytest.mark.parametrize(
+    ("action_name", "screen_type"),
+    [
+        ("action_matchspec_key_m", MatchSpecScreen),
+        ("action_whoneeds_key_w", WhoNeedsScreen),
+    ],
+)
+def test_query_keys_stay_out_of_the_package_search(
+    action_name: str, screen_type: type[ModalScreen[object]], monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("the key belongs to the search"),
+    )
+    app._mode = "packages"
+    app._filter_mode = True
+
+    # on_key has already appended the character to the search query.
+    getattr(app, action_name)()
+
+
+@pytest.mark.parametrize(
+    ("action_name", "screen_type"),
+    [
+        ("action_matchspec_key_m", MatchSpecScreen),
+        ("action_whoneeds_key_w", WhoNeedsScreen),
+    ],
+)
+def test_query_keys_work_once_a_package_is_open_from_a_filtered_list(
+    action_name: str, screen_type: type[ModalScreen[object]], monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen),
+    )
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: None)
+    # Opening a package leaves filter mode on, but the search stops taking input
+    # there, so the key has to reach the query prompt again.
+    app._mode = "versions"
+    app._filter_mode = True
+    app._selected_package = "polars"
+
+    getattr(app, action_name)()
+
+    assert [type(screen) for screen in pushed] == [screen_type]
+
+
 def test_whoneeds_screen_validates_package_name() -> None:
     package_name = WhoNeedsScreen.validate_package_name(" NumPy ")
     empty = WhoNeedsScreen.validate_package_name("   ")
@@ -1999,12 +2053,13 @@ def test_action_whoneeds_key_w_logs_a_silent_early_return(monkeypatch) -> None:
         lambda *_args, **_kwargs: pytest.fail("filter mode must swallow the key"),
     )
     messages = _capture_log(app, monkeypatch)
+    app._mode = "packages"
     app._filter_mode = True
 
     app.action_whoneeds_key_w()
 
     assert any(
-        "who-needs: key w ignored, channel edit or filter mode active" in message
+        "who-needs: key w ignored, the key was typed into a prompt" in message
         for message in messages
     )
 

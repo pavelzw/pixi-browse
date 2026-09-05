@@ -2433,7 +2433,8 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_matchspec_key_m(self) -> None:
-        if self._channel_edit_mode or self._filter_mode:
+        # Same input handover as action_whoneeds_key_w.
+        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
             return
 
         self._open_matchspec_screen(self._matchspec_query)
@@ -2524,10 +2525,12 @@ class CondaMetadataTui(App[None]):
         # Logged unconditionally: if this line is missing from the log the key
         # never reached the action, so the binding itself was blocked.
         self.log.info(f"who-needs: key w pressed {self._whoneeds_key_context()}")
-        if self._channel_edit_mode or self._filter_mode:
-            self.log.info(
-                "who-needs: key w ignored, channel edit or filter mode active"
-            )
+        # While the package search or the channel prompt is taking input, on_key
+        # has already typed this key into it, so the binding must stand down. The
+        # search only takes input in the package list: filter mode outlives
+        # opening a package, and there the key belongs to who-needs again.
+        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
+            self.log.info("who-needs: key w ignored, the key was typed into a prompt")
             return
 
         if self._mode == "versions":
