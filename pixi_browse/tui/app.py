@@ -2046,15 +2046,9 @@ class CondaMetadataTui(App[None]):
 
         workflow_started = perf_counter()
         self.log.info(f"who-needs: workflow started query={query!r}")
-        previous_state = self._snapshot_channel_state()
-        package_list = self.query_one("#sidebar-list", OptionList)
-        package_list.disabled = True
-        self._render_sidebar_loading_option("Querying who needs...")
-        self._show_main_placeholder(
-            f"# Who needs\n\nFinding packages that depend on `{escape(query)}`..."
-        )
-        # The scan takes long enough that the user needs somewhere to wait; the
-        # modal stays up until the finished result is rendered underneath it.
+        # The modal covers the whole app until the result is rendered underneath
+        # it, so the view behind it is left untouched: a failed query needs no
+        # undoing, and nothing half-updated is ever on screen.
         loading_screen = WhoNeedsLoadingScreen(
             query=query, channel_name=self._channel_name
         )
@@ -2067,9 +2061,6 @@ class CondaMetadataTui(App[None]):
                 "who-needs: workflow failed "
                 f"elapsed={perf_counter() - workflow_started:.3f}s error={exc!s}"
             )
-            self._restore_channel_state(previous_state)
-            self._restore_ui_from_snapshot(previous_state)
-            package_list.focus()
             self.notify(
                 f"Failed to query who needs: {exc!s}",
                 title="Who needs",
@@ -2082,7 +2073,6 @@ class CondaMetadataTui(App[None]):
             "who-needs: query result ready for UI "
             f"elapsed={query_duration:.3f}s packages={len(result.package_names):,}"
         )
-        package_list.disabled = False
         try:
             await self._apply_whoneeds_result(target, query, result)
         finally:

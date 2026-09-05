@@ -1,6 +1,6 @@
 import asyncio
 import shutil
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -1916,42 +1916,31 @@ def test_action_whoneeds_key_w_prefills_the_active_whoneeds_target(
     assert [screen._initial_value for screen in pushed] == ["python"]
 
 
-class _FakeSidebarList:
-    def __init__(self) -> None:
-        self.disabled = False
-        self.options: list[str] = []
-        self.highlighted: int | None = None
-        self.scroll_y = 0.0
-        self.focused = False
+def _forbid_background_updates(app: CondaMetadataTui, monkeypatch) -> None:
+    """Fail the test if the query touches the view behind the loading modal."""
 
-    def clear_options(self) -> None:
-        self.options.clear()
+    def _fail(name: str) -> Callable[..., object]:
+        def _raise(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError(f"{name} must not run behind the loading screen")
 
-    def add_option(self, option: str) -> None:
-        self.options.append(option)
+        return _raise
 
-    def focus(self) -> None:
-        self.focused = True
-
-
-def _stub_whoneeds_workflow_ui(app: CondaMetadataTui, monkeypatch) -> _FakeSidebarList:
-    sidebar_list = _FakeSidebarList()
-
-    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeSidebarList:
-        assert selector == "#sidebar-list"
-        return sidebar_list
-
-    monkeypatch.setattr(app, "query_one", _fake_query_one)
-    monkeypatch.setattr(app, "_snapshot_channel_state", lambda: "snapshot")
-    monkeypatch.setattr(app, "_show_main_placeholder", lambda _content: None)
-    return sidebar_list
+    for name in (
+        "query_one",
+        "_snapshot_channel_state",
+        "_render_sidebar_loading_option",
+        "_show_main_placeholder",
+        "_restore_channel_state",
+        "_restore_ui_from_snapshot",
+    ):
+        monkeypatch.setattr(app, name, _fail(name))
 
 
 def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    _stub_whoneeds_workflow_ui(app, monkeypatch)
+    _forbid_background_updates(app, monkeypatch)
     events: list[str] = []
     pushed: list[WhoNeedsLoadingScreen] = []
     result = WhoNeedsQueryResult(package_names=[], records_by_package={})
@@ -1989,7 +1978,7 @@ def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    sidebar_list = _stub_whoneeds_workflow_ui(app, monkeypatch)
+    _forbid_background_updates(app, monkeypatch)
     events: list[str] = []
 
     async def _failing_query(_target: str | PackageRecord) -> WhoNeedsQueryResult:
@@ -1997,8 +1986,6 @@ def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure
 
     monkeypatch.setattr(app, "push_screen", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(app, "_query_whoneeds_records", _failing_query)
-    monkeypatch.setattr(app, "_restore_channel_state", lambda _snapshot: None)
-    monkeypatch.setattr(app, "_restore_ui_from_snapshot", lambda _snapshot: None)
     monkeypatch.setattr(
         app, "_close_whoneeds_loading_screen", lambda _screen: events.append("closed")
     )
@@ -2009,7 +1996,6 @@ def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure
     asyncio.run(app._apply_whoneeds_query("python", "python"))
 
     assert events == ["closed", "notified:Failed to query who needs: scan exploded"]
-    assert sidebar_list.focused is True
 
 
 def test_close_whoneeds_loading_screen_leaves_other_screens_alone(monkeypatch) -> None:
