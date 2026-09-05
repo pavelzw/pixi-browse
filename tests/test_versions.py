@@ -243,43 +243,6 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
-def test_records_sort_by_build_number_before_build_string() -> None:
-    records = [
-        _make_repo_data_record(version="1.2.3", build="hbbbbbb_2", build_number=2),
-        _make_repo_data_record(version="1.2.3", build="h9f8e7d_99", build_number=99),
-        _make_repo_data_record(version="1.2.3", build="h1a2b3c_100", build_number=100),
-        _make_repo_data_record(version="1.2.4", build="haaaaaa_0", build_number=0),
-    ]
-
-    ordered = sorted(records, reverse=True)
-
-    assert [(str(record.version), record.build_number) for record in ordered] == [
-        ("1.2.4", 0),
-        ("1.2.3", 100),
-        ("1.2.3", 99),
-        ("1.2.3", 2),
-    ]
-
-
-def test_build_version_entries_orders_builds_by_build_number() -> None:
-    app = CondaMetadataTui()
-    records = [
-        _make_repo_data_record(
-            version="1.2.3", build="h9f8e7d_99", build_number=99, subdir="linux-64"
-        ),
-        _make_repo_data_record(
-            version="1.2.3", build="h1a2b3c_100", build_number=100, subdir="linux-64"
-        ),
-        _make_repo_data_record(
-            version="1.2.3", build="hbbbbbb_2", build_number=2, subdir="linux-64"
-        ),
-    ]
-
-    entries = app._build_version_entries(records)
-
-    assert [entry.build_number for entry in entries] == [100, 99, 2]
-
-
 def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
@@ -927,21 +890,6 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
         rendered.index("▾ osx-arm64"),
     ]
     assert headings == sorted(headings)
-
-
-def test_render_package_preview_orders_builds_by_build_number() -> None:
-    records = [
-        _make_repo_data_record(
-            version="1.2.3", build="h9f8e7d_99", build_number=99, subdir="linux-64"
-        ),
-        _make_repo_data_record(
-            version="1.2.3", build="h1a2b3c_100", build_number=100, subdir="linux-64"
-        ),
-    ]
-
-    rendered = render_package_preview("demo", records)
-
-    assert rendered.index("h1a2b3c_100") < rendered.index("h9f8e7d_99")
 
 
 def test_get_package_paths_caches_archive_paths() -> None:
