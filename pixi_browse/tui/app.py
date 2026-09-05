@@ -85,6 +85,7 @@ from .widgets import (
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
+    WhoNeedsConfirmChoice,
     WhoNeedsConfirmScreen,
     WhoNeedsLoadingScreen,
     WhoNeedsScreen,
@@ -825,7 +826,7 @@ class CondaMetadataTui(App[None]):
     def _open_whoneeds_confirm_screen(self, selection: CompareSelection) -> None:
         self.push_screen(
             WhoNeedsConfirmScreen(self._compare_selection_label(selection)),
-            lambda confirmed: self._handle_whoneeds_confirmation(selection, confirmed),
+            lambda choice: self._handle_whoneeds_confirmation(selection, choice),
         )
 
     def _close_whoneeds_loading_screen(self, screen: WhoNeedsLoadingScreen) -> None:
@@ -2458,13 +2459,19 @@ class CondaMetadataTui(App[None]):
         )
 
     def _handle_whoneeds_confirmation(
-        self, selection: CompareSelection, confirmed: bool | None
+        self, selection: CompareSelection, choice: WhoNeedsConfirmChoice | None
     ) -> None:
         self.log.info(
-            f"who-needs: confirm screen closed confirmed={confirmed!r} "
+            f"who-needs: confirm screen closed choice={choice!r} "
             f"target={self._compare_selection_label(selection)!r}"
         )
-        if not confirmed:
+        if choice is None:
+            return
+
+        if choice == "custom":
+            # The name of the open package is the closest starting point for a
+            # different question about it.
+            self._open_whoneeds_screen(selection.package_name)
             return
 
         self.run_worker(

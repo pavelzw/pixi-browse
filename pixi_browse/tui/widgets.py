@@ -85,6 +85,7 @@ EMPTY_WHONEEDS_RESULT = Empty()
 
 FileAction = Literal["download", "preview"]
 FileActionSource = Literal["default", "left", "right"]
+WhoNeedsConfirmChoice = Literal["run", "custom"]
 
 
 @dataclass(frozen=True)
@@ -1956,12 +1957,14 @@ class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
         self.dismiss(result)
 
 
-class WhoNeedsConfirmScreen(ModalScreen[bool | None]):
+class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
     """Confirm a who-needs query for one concrete repodata entry.
 
     Pressing `w` in the version details targets the highlighted build rather
     than the package name, which is both a much narrower question and a slow
-    one, so it is worth showing what is about to be asked.
+    one, so it is worth showing what is about to be asked. The build is rarely
+    the wrong question but often not the only one, so asking something else is
+    offered right here instead of behind a cancel.
     """
 
     DEFAULT_CSS = """
@@ -2017,6 +2020,12 @@ class WhoNeedsConfirmScreen(ModalScreen[bool | None]):
         Binding("q", "dismiss", show=False),
     ]
 
+    CHOICES: tuple[tuple[str, WhoNeedsConfirmChoice | None], ...] = (
+        ("Run the query", "run"),
+        ("Ask about something else", "custom"),
+        ("Cancel", None),
+    )
+
     def __init__(self, target_label: str) -> None:
         super().__init__()
         self._target_label = target_label
@@ -2031,8 +2040,7 @@ class WhoNeedsConfirmScreen(ModalScreen[bool | None]):
                 id="whoneeds-confirm-help",
             )
             yield OptionList(
-                "Run the query",
-                "Cancel",
+                *(label for label, _choice in self.CHOICES),
                 id="whoneeds-confirm-list",
                 markup=False,
             )
@@ -2043,9 +2051,9 @@ class WhoNeedsConfirmScreen(ModalScreen[bool | None]):
     @on(OptionList.OptionSelected, "#whoneeds-confirm-list")
     def _select_action(self, event: OptionList.OptionSelected) -> None:
         event.stop()
-        self.dismiss(event.option_index == 0)
+        self.dismiss(self.CHOICES[event.option_index][1])
 
-    async def action_dismiss(self, result: bool | None = None) -> None:
+    async def action_dismiss(self, result: WhoNeedsConfirmChoice | None = None) -> None:
         self.dismiss(result)
 
 

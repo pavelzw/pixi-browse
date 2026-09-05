@@ -68,6 +68,7 @@ from pixi_browse.tui import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsConfirmChoice,
     WhoNeedsConfirmScreen,
     WhoNeedsLoadingScreen,
     WhoNeedsScreen,
@@ -2092,13 +2093,17 @@ def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -
 
     monkeypatch.setattr(app, "_apply_whoneeds_for_selection", _fake_apply_for_selection)
     monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("cancelling must not open a prompt"),
+    )
 
     app._handle_whoneeds_confirmation(selection, None)
-    app._handle_whoneeds_confirmation(selection, False)
 
     assert worker_calls == []
 
-    app._handle_whoneeds_confirmation(selection, True)
+    app._handle_whoneeds_confirmation(selection, "run")
 
     assert applied == [selection]
     assert worker_calls == [
@@ -2108,6 +2113,32 @@ def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -
             "exit_on_error": False,
         }
     ]
+
+
+def test_handle_whoneeds_confirmation_opens_the_prompt_for_a_custom_query(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[tuple[object, object | None]] = []
+
+    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
+        coro.close()  # type: ignore[attr-defined]
+        raise AssertionError("asking something else must not query the build")
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
+
+    app._handle_whoneeds_confirmation(_detail_selection(), "custom")
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == "demo"
+    assert callback == app._handle_whoneeds_result
 
 
 def test_apply_whoneeds_for_selection_queries_concrete_package_record(
@@ -2265,11 +2296,21 @@ def test_close_whoneeds_loading_screen_leaves_other_screens_alone(monkeypatch) -
     assert dismissed == []
 
 
-def test_whoneeds_confirm_screen_offers_running_and_cancelling() -> None:
+@pytest.mark.parametrize(
+    ("presses", "expected"),
+    [
+        (("enter",), "run"),
+        (("down", "enter"), "custom"),
+        (("down", "down", "enter"), None),
+    ],
+)
+def test_whoneeds_confirm_screen_reports_the_chosen_action(
+    presses: tuple[str, ...], expected: WhoNeedsConfirmChoice | None
+) -> None:
     class _HostApp(App[None]):
         pass
 
-    results: list[bool | None] = []
+    results: list[WhoNeedsConfirmChoice | None] = []
 
     async def _run() -> None:
         app = _HostApp()
@@ -2286,25 +2327,25 @@ def test_whoneeds_confirm_screen_offers_running_and_cancelling() -> None:
             assert [
                 str(option_list.get_option_at_index(index).prompt)
                 for index in range(option_list.option_count)
-            ] == ["Run the query", "Cancel"]
+            ] == ["Run the query", "Ask about something else", "Cancel"]
             assert (
                 screen.query_one("#whoneeds-confirm-target", Static).content
                 == "demo 1.2.3 py313h123_0 [noarch]"
             )
 
-            await pilot.press("down", "enter")
+            await pilot.press(*presses)
             await pilot.pause()
 
     asyncio.run(_run())
 
-    assert results == [False]
+    assert results == [expected]
 
 
 def test_whoneeds_confirm_screen_escape_cancels() -> None:
     class _HostApp(App[None]):
         pass
 
-    results: list[bool | None] = []
+    results: list[WhoNeedsConfirmChoice | None] = []
 
     async def _run() -> None:
         app = _HostApp()
