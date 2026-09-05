@@ -1,25 +1,26 @@
 import asyncio
 import shutil
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 
 import pytest
-from rattler.exceptions import InvalidMatchSpecError
+from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
-from rattler.package import NoArchLiteral, RunExportsJson
+from rattler.package import NoArchLiteral, PackageName, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
-from rattler.repo_data import PackageRecord, RepoDataRecord
+from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual.app import App
-from textual.events import Paste
-from textual.widgets import Static
+from textual.events import Key, Paste
+from textual.screen import ModalScreen
+from textual.widgets import LoadingIndicator, OptionList, Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
@@ -42,10 +43,15 @@ from pixi_browse.rendering import (
     resolve_info_file_compare_rows,
     syntax_lexer_for_path,
 )
-from pixi_browse.repodata import MatchSpecQueryResult
+from pixi_browse.repodata import (
+    MatchSpecQueryResult,
+    WhoNeedsQueryResult,
+    query_whoneeds_records,
+)
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
     EMPTY_MATCHSPEC_RESULT,
+    EMPTY_WHONEEDS_RESULT,
     INACTIVE_SECTION_TITLE_STYLE,
     INACTIVE_SELECTED_TAB_STYLE,
     INACTIVE_TAB_STYLE,
@@ -62,6 +68,10 @@ from pixi_browse.tui import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsConfirmChoice,
+    WhoNeedsConfirmScreen,
+    WhoNeedsLoadingScreen,
+    WhoNeedsScreen,
 )
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
@@ -71,6 +81,24 @@ from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
 @dataclass(frozen=True)
 class _RecordWithUrl:
     url: str
+
+
+@dataclass(frozen=True)
+class _Dependent:
+    """Stand-in for `rattler.repo_data.Dependent`, which Python cannot build."""
+
+    record: RepoDataRecord
+    dependency: str
+
+
+class _RecordingGateway:
+    """Gateway stub that records the repodata caches it was asked to drop."""
+
+    def __init__(self) -> None:
+        self.cleared: list[str] = []
+
+    def clear_repodata_cache(self, channel_name: str) -> None:
+        self.cleared.append(channel_name)
 
 
 async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageArchive:
@@ -191,8 +219,10 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     gateway_calls: list[object] = []
     user_agents: list[str] = []
 
-    def _fake_create_gateway(*, client: object | None = None) -> object:
-        gateway_calls.append(client)
+    def _fake_create_gateway(
+        *, client: object | None = None, sharded_enabled: bool = True
+    ) -> object:
+        gateway_calls.append((client, sharded_enabled))
         return object()
 
     def _fake_default_client(*, user_agent: str) -> object:
@@ -211,8 +241,72 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     app = CondaMetadataTui()
 
     assert app._client is shared_client
-    assert gateway_calls == [shared_client]
+    assert gateway_calls == [(shared_client, True), (shared_client, False)]
     assert user_agents == [f"pixi-browse/{__version__}"]
+
+
+def test_query_whoneeds_records_supports_name_and_concrete_record_targets() -> None:
+    python = _make_repo_data_record(name="python", version="3.13.1", build="h1_0")
+    numpy = _make_repo_data_record(
+        name="numpy",
+        depends=["python >=3.10", "python"],
+    )
+    legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
+    gateway_calls: list[list[Platform]] = []
+
+    class _FakeGateway:
+        async def who_needs(
+            self,
+            *,
+            sources: list[str],
+            platforms: list[Platform],
+            target: str | PackageRecord,
+        ) -> list[Dependent]:
+            assert sources == ["conda-forge"]
+            gateway_calls.append(platforms)
+            # The gateway matches dependencies itself; a name target reports
+            # every dependency entry naming the package, while a concrete
+            # record only reports the entries whose match spec matches it.
+            dependents = [
+                _Dependent(numpy, "python >=3.10"),
+                _Dependent(numpy, "python"),
+            ]
+            if not isinstance(target, PackageRecord):
+                dependents.insert(0, _Dependent(legacy, "python <3.10"))
+            return cast(list[Dependent], dependents)
+
+    gateway = cast(Gateway, _FakeGateway())
+    logs: list[str] = []
+    by_name = asyncio.run(
+        query_whoneeds_records(
+            gateway=gateway,
+            channel_name="conda-forge",
+            platforms=[Platform("linux-64"), Platform("noarch")],
+            target="python",
+            log=logs.append,
+        )
+    )
+    by_record = asyncio.run(
+        query_whoneeds_records(
+            gateway=gateway,
+            channel_name="conda-forge",
+            platforms=[Platform("linux-64"), Platform("noarch")],
+            target=python,
+        )
+    )
+
+    assert by_name.package_names == ["legacy", "numpy"]
+    assert by_name.records_by_package == {"legacy": [legacy], "numpy": [numpy]}
+    assert by_record.package_names == ["numpy"]
+    assert by_record.records_by_package == {"numpy": [numpy]}
+    assert gateway_calls == [
+        [Platform("linux-64"), Platform("noarch")],
+        [Platform("linux-64"), Platform("noarch")],
+    ]
+    assert any("starting gateway reverse query" in message for message in logs)
+    assert any("gateway reverse query finished" in message for message in logs)
+    assert any("result grouping finished" in message for message in logs)
+    assert any("result sorting finished" in message for message in logs)
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
@@ -1261,7 +1355,7 @@ def test_open_versions_orders_subdirs_by_latest_version_then_name(monkeypatch) -
     assert app._version_subdirs == ["noarch", "linux-64", "osx-arm64"]
 
 
-def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
+def test_open_versions_uses_query_records_when_present(monkeypatch) -> None:
     app = CondaMetadataTui()
     filtered_record = _make_repo_data_record(
         version="2.0.0",
@@ -1270,7 +1364,7 @@ def test_open_versions_uses_matchspec_records_when_present(monkeypatch) -> None:
         subdir="linux-64",
         file_name="demo-2.0.0-py313h999_0.conda",
     )
-    app._matchspec_records_by_package = {"demo": [filtered_record]}
+    app._query_records_by_package = {"demo": [filtered_record]}
 
     class _FakeOptionList:
         highlighted = 0
@@ -1630,6 +1724,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "[ / ]             Cycle dependency tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
+    assert "w                 Query reverse dependencies" in help_text
 
 
 def test_action_show_help_pushes_help_screen(monkeypatch) -> None:
@@ -1705,6 +1800,635 @@ def test_action_matchspec_key_m_pushes_matchspec_screen(monkeypatch) -> None:
     assert screen._initial_value == "numpy >=2"
     assert screen._select_on_focus is True
     assert callback == app._handle_matchspec_result
+
+
+@pytest.mark.parametrize(
+    ("action_name", "screen_type"),
+    [
+        ("action_matchspec_key_m", MatchSpecScreen),
+        ("action_whoneeds_key_w", WhoNeedsScreen),
+    ],
+)
+def test_query_keys_stay_out_of_the_package_search(
+    action_name: str, screen_type: type[ModalScreen[object]], monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("the key belongs to the search"),
+    )
+    app._mode = "packages"
+    app._filter_mode = True
+
+    # on_key has already appended the character to the search query.
+    getattr(app, action_name)()
+
+
+@pytest.mark.parametrize(
+    ("action_name", "screen_type"),
+    [
+        ("action_matchspec_key_m", MatchSpecScreen),
+        ("action_whoneeds_key_w", WhoNeedsScreen),
+    ],
+)
+def test_query_keys_work_once_a_package_is_open_from_a_filtered_list(
+    action_name: str, screen_type: type[ModalScreen[object]], monkeypatch
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[object] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen),
+    )
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: None)
+    # Opening a package leaves filter mode on, but the search stops taking input
+    # there, so the key has to reach the query prompt again.
+    app._mode = "versions"
+    app._filter_mode = True
+    app._selected_package = "polars"
+
+    getattr(app, action_name)()
+
+    assert [type(screen) for screen in pushed] == [screen_type]
+
+
+def test_whoneeds_screen_validates_package_name() -> None:
+    package_name = WhoNeedsScreen.validate_package_name(" NumPy ")
+    empty = WhoNeedsScreen.validate_package_name("   ")
+
+    assert isinstance(package_name, PackageName)
+    assert package_name.normalized == "numpy"
+    assert isinstance(empty, Empty)
+    assert empty == EMPTY_WHONEEDS_RESULT
+
+    with pytest.raises(InvalidPackageNameError):
+        WhoNeedsScreen.validate_package_name("numpy >=2")
+
+
+def test_whoneeds_screen_updates_inline_error_message(monkeypatch) -> None:
+    screen = WhoNeedsScreen()
+
+    class _FakeStatic:
+        def __init__(self) -> None:
+            self.updates: list[Text] = []
+
+        def update(self, value: Text) -> None:
+            self.updates.append(value)
+
+    error_widget = _FakeStatic()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeStatic:
+        assert selector == "#whoneeds-error"
+        return error_widget
+
+    monkeypatch.setattr(screen, "query_one", _fake_query_one)
+
+    screen._update_validation_error("numpy >=2")
+    screen._update_validation_error("python")
+
+    assert error_widget.updates[0].plain != ""
+    assert error_widget.updates[-1].plain == ""
+
+
+def test_whoneeds_screen_reports_no_error_for_empty_input(monkeypatch) -> None:
+    screen = WhoNeedsScreen()
+    messages: list[str] = []
+
+    monkeypatch.setattr(screen, "_show_error", lambda message: messages.append(message))
+
+    screen._update_validation_error("")
+
+    assert messages == [""]
+
+
+def test_action_whoneeds_key_w_pushes_whoneeds_screen(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    pushed: list[tuple[WhoNeedsScreen, object | None]] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+
+    app.action_whoneeds_key_w()
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == ""
+    assert callback == app._handle_whoneeds_result
+
+
+def test_action_whoneeds_key_w_prefills_the_open_package_name(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    pushed: list[tuple[WhoNeedsScreen, object | None]] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+    monkeypatch.setattr(app, "_current_compare_selection", lambda: None)
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    app.action_whoneeds_key_w()
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == "demo"
+    assert callback == app._handle_whoneeds_result
+
+
+def _detail_selection() -> CompareSelection:
+    return CompareSelection(
+        "demo",
+        VersionEntry(
+            version=Version("1.2.3"),
+            build="py313h123_0",
+            build_number=0,
+            subdir="noarch",
+            file_name="demo-1.2.3-py313h123_0.conda",
+        ),
+    )
+
+
+def test_action_whoneeds_key_w_confirms_the_highlighted_entry_while_details_load(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[WhoNeedsConfirmScreen] = []
+
+    def _fake_push_screen(screen: object, callback: object = None) -> None:
+        assert isinstance(screen, WhoNeedsConfirmScreen)
+        pushed.append(screen)
+
+    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
+        coro.close()  # type: ignore[attr-defined]
+        raise AssertionError("who needs must not query before it is confirmed")
+
+    monkeypatch.setattr(app, "push_screen", _fake_push_screen)
+    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
+    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
+    # The repodata record is cached before the details view starts streaming the
+    # package archive, so the query must not depend on what the panel shows.
+    monkeypatch.setattr(
+        app,
+        "_main_panel_shows_version_details",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("who needs must not wait for the details view")
+        ),
+    )
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    app.action_whoneeds_key_w()
+
+    assert [screen._target_label for screen in pushed] == [
+        "demo 1.2.3 py313h123_0 [noarch]"
+    ]
+
+
+def _capture_log(app: CondaMetadataTui, monkeypatch) -> list[str]:
+    """Collect what the app writes to the textual dev console."""
+    messages: list[str] = []
+
+    class _Recorder:
+        def info(self, *args: object) -> None:
+            messages.append(" ".join(str(arg) for arg in args))
+
+        def error(self, *args: object) -> None:
+            messages.append(" ".join(str(arg) for arg in args))
+
+    monkeypatch.setattr(type(app), "log", property(lambda _self: _Recorder()))
+    return messages
+
+
+def test_whoneeds_key_context_describes_the_decision_inputs() -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_package = "demo"
+    app._filter_mode = True
+
+    context = app._whoneeds_key_context()
+
+    assert "mode='versions'" in context
+    assert "selected_package='demo'" in context
+    assert "filter_mode=True" in context
+    assert "channel_edit_mode=False" in context
+    # Without a running app there is no screen to inspect, and asking for one
+    # raises - the context must stay a safe observation either way.
+    assert "screens=[]" in context
+    assert "focused=n/a" in context
+    assert "sidebar_highlight=None" in context
+
+
+def test_action_whoneeds_key_w_logs_the_confirmed_target(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(app, "push_screen", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
+    messages = _capture_log(app, monkeypatch)
+    app._mode = "versions"
+    app._selected_package = "demo"
+
+    app.action_whoneeds_key_w()
+
+    assert any("who-needs: key w pressed" in message for message in messages)
+    assert any(
+        "who-needs: key w opens confirm screen "
+        "target='demo 1.2.3 py313h123_0 [noarch]'" in message
+        for message in messages
+    )
+
+
+def test_action_whoneeds_key_w_logs_a_silent_early_return(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("filter mode must swallow the key"),
+    )
+    messages = _capture_log(app, monkeypatch)
+    app._mode = "packages"
+    app._filter_mode = True
+
+    app.action_whoneeds_key_w()
+
+    assert any(
+        "who-needs: key w ignored, the key was typed into a prompt" in message
+        for message in messages
+    )
+
+
+def test_on_key_logs_the_whoneeds_key_without_consuming_it(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    messages = _capture_log(app, monkeypatch)
+    event = _FakeKeyEvent("w", "w")
+
+    app.on_key(cast(Key, event))
+
+    # The binding runs after this handler, so the key has to pass through.
+    assert not event.stopped
+    assert any("who-needs: key w reached the app" in message for message in messages)
+
+
+def test_handle_whoneeds_confirmation_queries_only_once_confirmed(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    selection = _detail_selection()
+    worker_calls: list[dict[str, object]] = []
+    applied: list[CompareSelection] = []
+
+    async def _fake_apply_for_selection(target: CompareSelection) -> None:
+        applied.append(target)
+
+    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+        worker_calls.append(kwargs)
+        asyncio.run(cast(Coroutine[None, None, None], coro))
+
+    monkeypatch.setattr(app, "_apply_whoneeds_for_selection", _fake_apply_for_selection)
+    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda *_args, **_kwargs: pytest.fail("cancelling must not open a prompt"),
+    )
+
+    app._handle_whoneeds_confirmation(selection, None)
+
+    assert worker_calls == []
+
+    app._handle_whoneeds_confirmation(selection, "run")
+
+    assert applied == [selection]
+    assert worker_calls == [
+        {
+            "group": "whoneeds-selection",
+            "exclusive": True,
+            "exit_on_error": False,
+        }
+    ]
+
+
+def test_handle_whoneeds_confirmation_opens_the_prompt_for_a_custom_query(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[tuple[object, object | None]] = []
+
+    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
+        coro.close()  # type: ignore[attr-defined]
+        raise AssertionError("querying something else must not query the build")
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
+    )
+    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
+
+    app._handle_whoneeds_confirmation(_detail_selection(), "custom")
+
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == "demo"
+    assert callback == app._handle_whoneeds_result
+
+
+def test_apply_whoneeds_for_selection_queries_concrete_package_record(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="python", version="3.13.1", build="h123_0")
+    selection = CompareSelection(
+        "python",
+        VersionEntry(
+            version=record.version,
+            build=record.build,
+            build_number=record.build_number,
+            subdir=record.subdir,
+            file_name=record.file_name,
+        ),
+    )
+    queries: list[tuple[str | PackageRecord, str]] = []
+
+    async def _fake_get_record(
+        package_name: str, entry: VersionEntry
+    ) -> RepoDataRecord | None:
+        assert package_name == selection.package_name
+        assert entry == selection.entry
+        return record
+
+    async def _fake_apply_query(target: str | PackageRecord, query: str) -> None:
+        queries.append((target, query))
+
+    monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
+
+    asyncio.run(app._apply_whoneeds_for_selection(selection))
+
+    assert queries == [
+        (record, "python 3.13.1 h123_0"),
+    ]
+
+
+def test_action_whoneeds_key_w_prefills_the_active_whoneeds_target(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    pushed: list[WhoNeedsScreen] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen),
+    )
+    app._mode = "packages"
+    app._selected_package = "demo"
+    app._whoneeds_target = "python"
+    app._whoneeds_query = "python"
+
+    app.action_whoneeds_key_w()
+
+    assert [screen._initial_value for screen in pushed] == ["python"]
+
+
+def _forbid_background_updates(app: CondaMetadataTui, monkeypatch) -> None:
+    """Fail the test if the query touches the view behind the loading modal."""
+
+    def _fail(name: str) -> Callable[..., object]:
+        def _raise(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError(f"{name} must not run behind the loading screen")
+
+        return _raise
+
+    for name in (
+        "query_one",
+        "_snapshot_channel_state",
+        "_render_sidebar_loading_option",
+        "_show_main_placeholder",
+        "_restore_channel_state",
+        "_restore_ui_from_snapshot",
+    ):
+        monkeypatch.setattr(app, name, _fail(name))
+
+
+def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    _forbid_background_updates(app, monkeypatch)
+    events: list[str] = []
+    pushed: list[WhoNeedsLoadingScreen] = []
+    result = WhoNeedsQueryResult(package_names=[], records_by_package={})
+
+    def _fake_push_screen(screen: object, callback: object = None) -> None:
+        assert isinstance(screen, WhoNeedsLoadingScreen)
+        pushed.append(screen)
+        events.append("pushed")
+
+    async def _fake_query(_target: str | PackageRecord) -> WhoNeedsQueryResult:
+        events.append("queried")
+        return result
+
+    async def _fake_apply_result(
+        _target: str | PackageRecord, _query: str, _result: WhoNeedsQueryResult
+    ) -> None:
+        events.append("applied")
+
+    monkeypatch.setattr(app, "push_screen", _fake_push_screen)
+    monkeypatch.setattr(app, "_query_whoneeds_records", _fake_query)
+    monkeypatch.setattr(app, "_apply_whoneeds_result", _fake_apply_result)
+    monkeypatch.setattr(
+        app,
+        "_close_whoneeds_loading_screen",
+        lambda screen: events.append(f"closed:{screen is pushed[0]}"),
+    )
+
+    asyncio.run(app._apply_whoneeds_query("python", "python"))
+
+    assert events == ["pushed", "queried", "applied", "closed:True"]
+    assert pushed[0]._query == "python"
+
+
+def test_matchspec_and_whoneeds_query_transitions_do_not_overlap(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    matchspec_started = asyncio.Event()
+    finish_matchspec = asyncio.Event()
+    whoneeds_started = asyncio.Event()
+    events: list[str] = []
+
+    async def _fake_matchspec_query(_matchspec: MatchSpec | None) -> None:
+        events.append("matchspec-started")
+        matchspec_started.set()
+        await finish_matchspec.wait()
+        events.append("matchspec-finished")
+
+    async def _fake_whoneeds_query(
+        _target: str | PackageRecord | None, _query: str
+    ) -> None:
+        events.append("whoneeds-started")
+        whoneeds_started.set()
+
+    monkeypatch.setattr(app, "_apply_matchspec_query_serialized", _fake_matchspec_query)
+    monkeypatch.setattr(app, "_apply_whoneeds_query_serialized", _fake_whoneeds_query)
+
+    async def _run_queries() -> None:
+        matchspec_task = asyncio.create_task(
+            app._apply_matchspec_query(MatchSpec("python"))
+        )
+        await matchspec_started.wait()
+
+        whoneeds_task = asyncio.create_task(
+            app._apply_whoneeds_query("python", "python")
+        )
+        await asyncio.sleep(0)
+        assert not whoneeds_started.is_set()
+
+        finish_matchspec.set()
+        await asyncio.gather(matchspec_task, whoneeds_task)
+
+    asyncio.run(_run_queries())
+
+    assert events == ["matchspec-started", "matchspec-finished", "whoneeds-started"]
+
+
+def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    _forbid_background_updates(app, monkeypatch)
+    events: list[str] = []
+
+    async def _failing_query(_target: str | PackageRecord) -> WhoNeedsQueryResult:
+        raise RuntimeError("scan exploded")
+
+    monkeypatch.setattr(app, "push_screen", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app, "_query_whoneeds_records", _failing_query)
+    monkeypatch.setattr(
+        app, "_close_whoneeds_loading_screen", lambda _screen: events.append("closed")
+    )
+    monkeypatch.setattr(
+        app, "notify", lambda message, **_kwargs: events.append(f"notified:{message}")
+    )
+
+    asyncio.run(app._apply_whoneeds_query("python", "python"))
+
+    assert events == ["closed", "notified:Failed to query who needs: scan exploded"]
+
+
+def test_close_whoneeds_loading_screen_leaves_other_screens_alone(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    screen = WhoNeedsLoadingScreen(query="python", channel_name="conda-forge")
+    dismissed: list[object] = []
+
+    monkeypatch.setattr(screen, "dismiss", lambda result=None: dismissed.append(result))
+    monkeypatch.setattr(
+        type(app), "screen", property(lambda _self: cast(object, "other screen"))
+    )
+
+    app._close_whoneeds_loading_screen(screen)
+
+    assert dismissed == []
+
+
+@pytest.mark.parametrize(
+    ("presses", "expected"),
+    [
+        (("enter",), "run"),
+        (("down", "enter"), "custom"),
+        (("down", "down", "enter"), None),
+    ],
+)
+def test_whoneeds_confirm_screen_reports_the_chosen_action(
+    presses: tuple[str, ...], expected: WhoNeedsConfirmChoice | None
+) -> None:
+    class _HostApp(App[None]):
+        pass
+
+    results: list[WhoNeedsConfirmChoice | None] = []
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            app.push_screen(
+                WhoNeedsConfirmScreen("demo 1.2.3 py313h123_0 [noarch]"),
+                results.append,
+            )
+            await pilot.pause()
+            screen = cast(WhoNeedsConfirmScreen, app.screen)
+            option_list = screen.query_one("#whoneeds-confirm-list", OptionList)
+
+            assert option_list.has_focus
+            assert [
+                str(option_list.get_option_at_index(index).prompt)
+                for index in range(option_list.option_count)
+            ] == ["Run the query", "Query something else", "Cancel"]
+            assert (
+                screen.query_one("#whoneeds-confirm-target", Static).content
+                == "demo 1.2.3 py313h123_0 [noarch]"
+            )
+
+            await pilot.press(*presses)
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+    assert results == [expected]
+
+
+def test_whoneeds_confirm_screen_escape_cancels() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    results: list[WhoNeedsConfirmChoice | None] = []
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            app.push_screen(WhoNeedsConfirmScreen("demo 1.2.3"), results.append)
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+    assert results == [None]
+
+
+def test_whoneeds_loading_screen_shows_the_target_and_elapsed_time() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = WhoNeedsLoadingScreen(query="python", channel_name="conda-forge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            title = cast(
+                Text, screen.query_one("#whoneeds-loading-title", Static).content
+            )
+            elapsed = cast(
+                Text, screen.query_one("#whoneeds-loading-elapsed", Static).content
+            )
+            help_text = cast(
+                str, screen.query_one("#whoneeds-loading-help", Static).content
+            )
+
+            assert title.plain == "Who needs python"
+            assert elapsed.plain == "Elapsed 0s"
+            assert "conda-forge" in help_text
+            assert screen.query_one("#whoneeds-loading-indicator", LoadingIndicator)
+
+    asyncio.run(_run())
 
 
 def test_handle_matchspec_result_queues_matchspec_worker(monkeypatch) -> None:
@@ -4099,10 +4823,10 @@ def test_apply_channel_selection_renders_sidebar_loading_placeholder(
     assert option_list.focused is True
 
 
-def test_request_package_preview_uses_matchspec_records(monkeypatch) -> None:
+def test_request_package_preview_uses_query_records(monkeypatch) -> None:
     app = CondaMetadataTui()
     record = _make_repo_data_record(name="demo")
-    app._matchspec_records_by_package = {"demo": [record]}
+    app._query_records_by_package = {"demo": [record]}
     previewed: list[tuple[str, list[RepoDataRecord]]] = []
 
     monkeypatch.setattr(
@@ -4129,7 +4853,7 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     app = CondaMetadataTui()
     app._channel_package_names = ["demo", "numpy"]
     app._matchspec_query = "demo >=1"
-    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
     app._mode = "versions"
     filtered: list[str] = []
     updated: list[str] = []
@@ -4154,12 +4878,160 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     asyncio.run(app._apply_matchspec_query(None))
 
     assert app._matchspec_query == ""
-    assert app._matchspec_records_by_package == {}
+    assert app._query_records_by_package == {}
     assert app._all_package_names == ["demo", "numpy"]
     assert app._mode == "packages"
     assert filtered == ["filtered"]
     assert updated == ["updated"]
     assert focused == ["sidebar"]
+
+
+def test_apply_whoneeds_query_empty_restores_full_package_selection(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    app._channel_package_names = ["demo", "numpy"]
+    app._whoneeds_query = "python"
+    app._whoneeds_target = "python"
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._mode = "versions"
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+    filtered: list[str] = []
+    updated: list[str] = []
+    focused: list[str] = []
+    footer = _FakeFooter()
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: filtered.append("filtered"))
+    monkeypatch.setattr(
+        app, "_update_filter_indicator", lambda: updated.append("updated")
+    )
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: (
+            footer
+            if selector == "#footer"
+            else (_ for _ in ()).throw(AssertionError(selector))
+        ),
+    )
+
+    asyncio.run(app._apply_whoneeds_query(None, ""))
+
+    assert app._whoneeds_query == ""
+    assert app._whoneeds_target is None
+    assert app._query_records_by_package == {}
+    assert app._all_package_names == ["demo", "numpy"]
+    assert app._mode == "packages"
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
+    assert filtered == ["filtered"]
+    assert updated == ["updated"]
+    assert focused == ["sidebar"]
+
+
+def test_release_whoneeds_repodata_drops_the_scanned_channel() -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
+
+    # Nothing is cached anymore, so releasing again must not touch the gateway.
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+
+
+def test_release_whoneeds_repodata_uses_the_channel_that_was_scanned() -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+    # Switching the channel must not orphan the repodata of the old one.
+    app._channel_name = "robostack"
+
+    app._release_whoneeds_repodata()
+
+    assert gateway.cleared == ["conda-forge"]
+
+
+def test_query_whoneeds_records_tracks_the_scanned_channel() -> None:
+    app = CondaMetadataTui()
+    app._channel_name = "conda-forge"
+    app._platforms = [Platform("noarch")]
+
+    class _FakeGateway:
+        async def who_needs(
+            self,
+            *,
+            sources: list[str],
+            platforms: list[Platform],
+            target: str | PackageRecord,
+        ) -> list[Dependent]:
+            return []
+
+    app._whoneeds_gateway = cast(Gateway, _FakeGateway())
+
+    asyncio.run(app._query_whoneeds_records("python"))
+
+    assert app._whoneeds_scanned_channel == "conda-forge"
+
+
+def test_apply_matchspec_result_releases_whoneeds_repodata(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    gateway = _RecordingGateway()
+    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._whoneeds_scanned_channel = "conda-forge"
+    app._whoneeds_query = "python"
+    app._whoneeds_target = "python"
+
+    monkeypatch.setattr(app, "_filter_packages", lambda: None)
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: None)
+
+    asyncio.run(
+        app._apply_matchspec_result(
+            "demo >=2",
+            MatchSpecQueryResult(package_names=[], records_by_package={}),
+        )
+    )
+
+    assert gateway.cleared == ["conda-forge"]
+    assert app._whoneeds_scanned_channel is None
+    assert app._whoneeds_target is None
+
+
+def test_handle_whoneeds_result_clears_query_for_empty_input(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    workers: list[tuple[Coroutine[None, None, None], str]] = []
+
+    monkeypatch.setattr(
+        app,
+        "run_worker",
+        lambda coroutine, group="", **_kwargs: workers.append((coroutine, group)),
+    )
+
+    applied: list[tuple[str | PackageRecord | None, str]] = []
+
+    async def _fake_apply_query(target: str | PackageRecord | None, query: str) -> None:
+        applied.append((target, query))
+
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
+
+    app._handle_whoneeds_result(EMPTY_WHONEEDS_RESULT)
+
+    assert len(workers) == 1
+    coroutine, group = workers[0]
+    assert group == "whoneeds-selection"
+    asyncio.run(coroutine)
+    assert applied == [(None, "")]
 
 
 def test_apply_matchspec_result_auto_opens_versions_for_single_package(
@@ -4194,7 +5066,7 @@ def test_apply_matchspec_result_auto_opens_versions_for_single_package(
     )
 
     assert app._matchspec_query == "demo >=2"
-    assert app._matchspec_records_by_package == {"demo": [record]}
+    assert app._query_records_by_package == {"demo": [record]}
     assert opened == ["demo"]
     assert focused == ["sidebar"]
 
@@ -4274,6 +5146,44 @@ def test_apply_matchspec_result_keeps_packages_view_for_multiple_packages(
     assert focused == ["sidebar"]
 
 
+def test_apply_whoneeds_result_opens_dependent_packages(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    record = _make_repo_data_record(name="numpy", depends=["python >=3.10"])
+    focused: list[str] = []
+    opened: list[str] = []
+
+    monkeypatch.setattr(
+        app,
+        "_filter_packages",
+        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
+    )
+    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
+    monkeypatch.setattr(app, "_focus_sidebar", lambda: focused.append("sidebar"))
+
+    async def _fake_open_versions(package_name: str) -> None:
+        opened.append(package_name)
+
+    monkeypatch.setattr(app, "_open_versions", _fake_open_versions)
+
+    asyncio.run(
+        app._apply_whoneeds_result(
+            "python",
+            "python",
+            WhoNeedsQueryResult(
+                package_names=["numpy"],
+                records_by_package={"numpy": [record]},
+            ),
+        )
+    )
+
+    assert app._matchspec_query == ""
+    assert app._whoneeds_query == "python"
+    assert app._whoneeds_target == "python"
+    assert app._query_records_by_package == {"numpy": [record]}
+    assert opened == ["numpy"]
+    assert focused == ["sidebar"]
+
+
 def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> None:
     app = CondaMetadataTui(default_platforms={Platform("linux-64")})
     app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
@@ -4338,7 +5248,7 @@ def test_apply_platform_selection_reapplies_active_matchspec(monkeypatch) -> Non
 def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._matchspec_query = "demo >=1"
-    app._matchspec_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
+    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
 
     class _FakeOptionList:
         def __init__(self) -> None:
@@ -4382,7 +5292,7 @@ def test_apply_channel_selection_clears_active_matchspec(monkeypatch) -> None:
     asyncio.run(app._apply_channel_selection("prefix.dev/conda-forge"))
 
     assert app._matchspec_query == ""
-    assert app._matchspec_records_by_package == {}
+    assert app._query_records_by_package == {}
     assert notifications == ["Switched to channel: prefix.dev/conda-forge"]
 
 
@@ -4391,7 +5301,7 @@ def test_footer_text_matches_redesigned_shortcuts() -> None:
 
     assert (
         app._footer_text()
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Help: ?"
     )
 
 
@@ -4401,7 +5311,7 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
 
     assert (
         cast(Text, app._footer_text()).plain
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -4422,7 +5332,7 @@ def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
     footer = cast(Text, app._footer_text())
 
     assert footer.plain == (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
     compare_start = footer.plain.index("Compare: C")
     compare_end = compare_start + len("Compare: C")
@@ -4474,7 +5384,7 @@ def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
 
     assert (
         cast(Text, app._footer_text()).plain
-        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        == "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
     )
 
 
@@ -5006,11 +5916,11 @@ def test_download_selected_version_entry_downloads_to_cwd_and_notifies(
         value.plain if isinstance(value, Text) else value for value in footer.updates
     ]
     assert (
-        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Downloading {entry.file_name}... | Help: ?"
+        f"Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Downloading {entry.file_name}... | Help: ?"
         in footer_updates
     )
     assert (
-        "Search: / | Platform: p | Channel: c | MatchSpec: m | Compare: C | Download: d | Help: ?"
+        "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w | Compare: C | Download: d | Help: ?"
         in footer_updates
     )
     assert notifications == [f"Downloaded successfully to {destination}"]

@@ -94,6 +94,9 @@ pixi-browse --version
 | `/` or `f` | Start package filter                          |
 | `p`        | Open platform selector                        |
 | `c`        | Edit channel                                  |
+| `C`        | Compare selected artifact (in versions view)  |
+| `m`        | Query packages with a MatchSpec               |
+| `w`        | Query packages that need a package            |
 | `d`        | Download selected artifact (in versions view) |
 | `q`        | Quit                                          |
 

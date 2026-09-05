@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from hashlib import sha256
 from pathlib import Path
+from time import perf_counter
 from typing import Literal, cast
 
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
+from rattler.package import PackageName
 from rattler.package_streaming import (
     PackageArchive,
     fetch_raw_package_file_from_url,
@@ -18,13 +21,14 @@ from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, RepoDataRecord
+from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
 
@@ -54,11 +58,13 @@ from pixi_browse.rendering import (
 )
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
+    WhoNeedsQueryResult,
     create_gateway,
     discover_available_platforms,
     fetch_package_names,
     query_matchspec_records,
     query_package_records,
+    query_whoneeds_records,
 )
 from pixi_browse.search import fuzzy_score
 
@@ -80,6 +86,10 @@ from .widgets import (
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
+    WhoNeedsConfirmChoice,
+    WhoNeedsConfirmScreen,
+    WhoNeedsLoadingScreen,
+    WhoNeedsScreen,
 )
 
 _PREVIEW_MAX_BYTES = 256 * 1024
@@ -96,6 +106,7 @@ class CondaMetadataTui(App[None]):
         Binding("c", "channel_key_c", "Channel"),
         Binding("C", "compare_key_c", "Compare"),
         Binding("m", "matchspec_key_m", "MatchSpec"),
+        Binding("w", "whoneeds_key_w", "Who needs"),
         Binding("slash", "filter_key_slash", show=False),
         Binding("escape", "escape", "Back", show=False),
         Binding("q", "quit_or_type_q", "Quit"),
@@ -116,6 +127,9 @@ class CondaMetadataTui(App[None]):
         self._client = Client.default_client(user_agent=f"pixi-browse/{__version__}")
 
         self._gateway: Gateway = create_gateway(client=self._client)
+        self._whoneeds_gateway: Gateway = create_gateway(
+            client=self._client, sharded_enabled=False
+        )
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -129,7 +143,11 @@ class CondaMetadataTui(App[None]):
         self._visible_package_names: list[str] = []
         self._startup_matchspec = default_matchspec
         self._matchspec_query = ""
-        self._matchspec_records_by_package: dict[str, list[RepoDataRecord]] = {}
+        self._whoneeds_query = ""
+        self._whoneeds_target: str | PackageRecord | None = None
+        self._whoneeds_scanned_channel: str | None = None
+        self._query_records_by_package: dict[str, list[RepoDataRecord]] = {}
+        self._query_selection_lock = asyncio.Lock()
         self._current_versions: list[VersionEntry] = []
         self._version_subdirs: list[str] = []
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
@@ -379,6 +397,25 @@ class CondaMetadataTui(App[None]):
         self._package_records_cache.clear()
         self._version_loader.clear_caches()
 
+    def _release_whoneeds_repodata(self) -> None:
+        """Drop the repodata the who-needs gateway scanned.
+
+        A who-needs query runs against unsharded repodata, so the gateway
+        retains the *complete* repodata of every platform it scanned - well
+        over a gigabyte for a channel the size of conda-forge. Nothing needs
+        it once the who-needs view is gone, and the on-disk cache is kept, so
+        a later query only has to re-read it.
+
+        The scanned channel is tracked separately because the channel may
+        already have been switched by the time this runs.
+        """
+        channel_name = self._whoneeds_scanned_channel
+        if channel_name is None:
+            return
+
+        self._whoneeds_scanned_channel = None
+        self._whoneeds_gateway.clear_repodata_cache(channel_name)
+
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
         self._compare_screen_open = False
@@ -410,12 +447,18 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = []
         self._visible_package_names = []
         self._matchspec_query = ""
-        self._matchspec_records_by_package = {}
+        self._whoneeds_query = ""
+        self._whoneeds_target = None
+        self._query_records_by_package = {}
+        self._release_whoneeds_repodata()
         self._clear_record_caches()
 
-    def _reset_matchspec_selection(self) -> None:
+    def _reset_query_selection(self) -> None:
         self._matchspec_query = ""
-        self._matchspec_records_by_package = {}
+        self._whoneeds_query = ""
+        self._whoneeds_target = None
+        self._query_records_by_package = {}
+        self._release_whoneeds_repodata()
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -440,6 +483,28 @@ class CondaMetadataTui(App[None]):
             MatchSpec(self._matchspec_query, exact_names_only=False)
         )
         await self._apply_matchspec_result(self._matchspec_query, result)
+
+    async def _query_whoneeds_records(
+        self, target: str | PackageRecord
+    ) -> WhoNeedsQueryResult:
+        # Remember what the gateway is about to cache so the repodata can be
+        # released again even if the channel changes in the meantime.
+        self._whoneeds_scanned_channel = self._channel_name
+        return await query_whoneeds_records(
+            gateway=self._whoneeds_gateway,
+            channel_name=self._channel_name,
+            platforms=self._platforms,
+            target=target,
+            log=self.log.info,
+        )
+
+    async def _reapply_active_whoneeds(self) -> None:
+        if self._whoneeds_target is None:
+            return
+        result = await self._query_whoneeds_records(self._whoneeds_target)
+        await self._apply_whoneeds_result(
+            self._whoneeds_target, self._whoneeds_query, result
+        )
 
     def _snapshot_channel_state(self) -> ChannelStateSnapshot:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -471,9 +536,11 @@ class CondaMetadataTui(App[None]):
             all_package_names=list(self._all_package_names),
             visible_package_names=list(self._visible_package_names),
             matchspec_query=self._matchspec_query,
-            matchspec_records_by_package={
+            whoneeds_query=self._whoneeds_query,
+            whoneeds_target=self._whoneeds_target,
+            query_records_by_package={
                 package_name: list(records)
-                for package_name, records in self._matchspec_records_by_package.items()
+                for package_name, records in self._query_records_by_package.items()
             },
             package_records_cache={
                 package_name: list(records)
@@ -514,7 +581,9 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = snapshot.all_package_names
         self._visible_package_names = snapshot.visible_package_names
         self._matchspec_query = snapshot.matchspec_query
-        self._matchspec_records_by_package = snapshot.matchspec_records_by_package
+        self._whoneeds_query = snapshot.whoneeds_query
+        self._whoneeds_target = snapshot.whoneeds_target
+        self._query_records_by_package = snapshot.query_records_by_package
         self._package_records_cache = snapshot.package_records_cache
         self._version_loader.restore_caches(
             archive_cache=snapshot.version_archive_cache,
@@ -586,6 +655,8 @@ class CondaMetadataTui(App[None]):
             self._all_package_names = list(self._channel_package_names)
             if self._matchspec_query:
                 await self._reapply_active_matchspec()
+            elif self._whoneeds_target is not None:
+                await self._reapply_active_whoneeds()
             else:
                 self._mode = "packages"
                 self._filter_packages()
@@ -682,9 +753,9 @@ class CondaMetadataTui(App[None]):
     async def _get_current_package_records(
         self, package_name: str
     ) -> list[RepoDataRecord]:
-        matchspec_records = self._matchspec_records_by_package.get(package_name)
-        if matchspec_records is not None:
-            return matchspec_records
+        query_records = self._query_records_by_package.get(package_name)
+        if query_records is not None:
+            return query_records
         return await self._get_package_records(package_name)
 
     def _show_main_placeholder(self, content: str | Text) -> None:
@@ -747,6 +818,24 @@ class CondaMetadataTui(App[None]):
         self.call_after_refresh(
             lambda: self._open_matchspec_screen(initial_value, select_on_focus=False)
         )
+
+    def _open_whoneeds_screen(self, initial_value: str) -> None:
+        self.push_screen(
+            WhoNeedsScreen(initial_value),
+            self._handle_whoneeds_result,
+        )
+
+    def _open_whoneeds_confirm_screen(self, selection: CompareSelection) -> None:
+        self.push_screen(
+            WhoNeedsConfirmScreen(self._compare_selection_label(selection)),
+            lambda choice: self._handle_whoneeds_confirmation(selection, choice),
+        )
+
+    def _close_whoneeds_loading_screen(self, screen: WhoNeedsLoadingScreen) -> None:
+        # Dismissing pops whatever sits on top of the stack, so only the screen
+        # that is actually showing may be dismissed.
+        if self.screen is screen:
+            screen.dismiss(None)
 
     def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
         self._selected_pane = pane
@@ -851,6 +940,7 @@ class CondaMetadataTui(App[None]):
                 ("c", "Edit channel"),
                 ("C", "Compare selected artifact in versions view"),
                 ("m", "Query MatchSpec"),
+                ("w", "Query reverse dependencies"),
                 ("d", "Download selected artifact in versions view"),
                 ("q", "Quit"),
             ],
@@ -1824,9 +1914,9 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package = package_name
         if self._previewed_package == package_name:
             return
-        matchspec_records = self._matchspec_records_by_package.get(package_name)
-        if matchspec_records is not None:
-            self._update_main_panel_for_package(package_name, matchspec_records)
+        query_records = self._query_records_by_package.get(package_name)
+        if query_records is not None:
+            self._update_main_panel_for_package(package_name, query_records)
             return
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
@@ -1868,7 +1958,10 @@ class CondaMetadataTui(App[None]):
         self, query: str, result: MatchSpecQueryResult
     ) -> None:
         self._matchspec_query = query
-        self._matchspec_records_by_package = {
+        self._whoneeds_query = ""
+        self._whoneeds_target = None
+        self._release_whoneeds_repodata()
+        self._query_records_by_package = {
             package_name: list(records)
             for package_name, records in result.records_by_package.items()
         }
@@ -1891,8 +1984,14 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _apply_matchspec_query(self, matchspec: MatchSpec | None) -> None:
+        async with self._query_selection_lock:
+            await self._apply_matchspec_query_serialized(matchspec)
+
+    async def _apply_matchspec_query_serialized(
+        self, matchspec: MatchSpec | None
+    ) -> None:
         if matchspec is None:
-            self._reset_matchspec_selection()
+            self._reset_query_selection()
             self._filter_packages()
             self._update_filter_indicator()
             self._focus_sidebar()
@@ -1922,6 +2021,112 @@ class CondaMetadataTui(App[None]):
 
         package_list.disabled = False
         await self._apply_matchspec_result(query, result)
+
+    async def _apply_whoneeds_result(
+        self,
+        target: str | PackageRecord,
+        query: str,
+        result: WhoNeedsQueryResult,
+    ) -> None:
+        self._matchspec_query = ""
+        self._whoneeds_query = query
+        self._whoneeds_target = target
+        self._query_records_by_package = {
+            package_name: list(records)
+            for package_name, records in result.records_by_package.items()
+        }
+        self._filter_mode = False
+        self._search_query = ""
+        self._mode = "packages"
+        self._draft_selected_platform_names = None
+        self._clear_version_state()
+        self._reset_preview_state()
+        self._all_package_names = list(result.package_names)
+        self._filter_packages()
+        self._update_filter_indicator()
+        if (
+            len(result.package_names) == 1
+            and result.package_names[0] in self._visible_package_names
+        ):
+            await self._open_versions(result.package_names[0])
+        self._focus_sidebar()
+
+    async def _apply_whoneeds_query(
+        self, target: str | PackageRecord | None, query: str
+    ) -> None:
+        async with self._query_selection_lock:
+            await self._apply_whoneeds_query_serialized(target, query)
+
+    async def _apply_whoneeds_query_serialized(
+        self, target: str | PackageRecord | None, query: str
+    ) -> None:
+        if target is None:
+            self._reset_query_selection()
+            self._filter_packages()
+            self._update_filter_indicator()
+            self._focus_sidebar()
+            return
+
+        workflow_started = perf_counter()
+        self.log.info(f"who-needs: workflow started query={query!r}")
+        # The modal covers the whole app until the result is rendered underneath
+        # it, so the view behind it is left untouched: a failed query needs no
+        # undoing, and nothing half-updated is ever on screen.
+        loading_screen = WhoNeedsLoadingScreen(
+            query=query, channel_name=self._channel_name
+        )
+        self.push_screen(loading_screen)
+        try:
+            result = await self._query_whoneeds_records(target)
+        except (GatewayError, RuntimeError) as exc:
+            self._close_whoneeds_loading_screen(loading_screen)
+            self.log.error(
+                "who-needs: workflow failed "
+                f"elapsed={perf_counter() - workflow_started:.3f}s error={exc!s}"
+            )
+            self.notify(
+                f"Failed to query who needs: {exc!s}",
+                title="Who needs",
+                severity="error",
+            )
+            return
+
+        query_duration = perf_counter() - workflow_started
+        self.log.info(
+            "who-needs: query result ready for UI "
+            f"elapsed={query_duration:.3f}s packages={len(result.package_names):,}"
+        )
+        try:
+            await self._apply_whoneeds_result(target, query, result)
+        finally:
+            self._close_whoneeds_loading_screen(loading_screen)
+        self.log.info(
+            "who-needs: workflow finished "
+            f"ui_elapsed={perf_counter() - workflow_started - query_duration:.3f}s "
+            f"total_elapsed={perf_counter() - workflow_started:.3f}s"
+        )
+
+    async def _apply_whoneeds_for_selection(self, selection: CompareSelection) -> None:
+        resolution_started = perf_counter()
+        record = await self._get_record_for_version_entry(
+            selection.package_name, selection.entry
+        )
+        if record is None:
+            self.notify(
+                "Could not find the selected package record.",
+                title="Who needs",
+                severity="error",
+            )
+            return
+        self.log.info(
+            "who-needs: selected record resolved "
+            f"elapsed={perf_counter() - resolution_started:.3f}s "
+            f"record={record.name.normalized!r} version={str(record.version)!r} "
+            f"build={record.build!r} subdir={record.subdir!r}"
+        )
+        target = record
+        query = f"{record.name.normalized} {record.version} {record.build}"
+        await self._apply_whoneeds_query(target, query)
 
     def _back_to_packages(self) -> None:
         self._mode = "packages"
@@ -2007,7 +2212,9 @@ class CondaMetadataTui(App[None]):
             )
 
         if self._mode == "versions":
-            footer = Text("Search: / | Platform: p | Channel: c | MatchSpec: m")
+            footer = Text(
+                "Search: / | Platform: p | Channel: c | MatchSpec: m | Who needs: w"
+            )
             footer.append(" | ")
             compare_start = len(footer)
             footer.append("Compare: C")
@@ -2018,7 +2225,10 @@ class CondaMetadataTui(App[None]):
             footer.append(" | Help: ?")
             return footer
 
-        return "Search: / | Platform: p | Channel: c | MatchSpec: m | Help: ?"
+        return (
+            "Search: / | Platform: p | Channel: c | MatchSpec: m | "
+            "Who needs: w | Help: ?"
+        )
 
     def _sidebar_title_text(self, *, selected: bool) -> Text:
         if self._mode == "versions":
@@ -2238,10 +2448,131 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_matchspec_key_m(self) -> None:
-        if self._channel_edit_mode or self._filter_mode:
+        # Same input handover as action_whoneeds_key_w.
+        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
             return
 
         self._open_matchspec_screen(self._matchspec_query)
+
+    def _handle_whoneeds_result(self, result: PackageName | Empty | None) -> None:
+        self.log.info(f"who-needs: name prompt closed result={result!r}")
+        if result is None:
+            return
+
+        if isinstance(result, Empty):
+            target: str | None = None
+            query = ""
+        else:
+            target = result.normalized
+            query = target
+        self.run_worker(
+            self._apply_whoneeds_query(target, query),
+            group="whoneeds-selection",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    def _handle_whoneeds_confirmation(
+        self, selection: CompareSelection, choice: WhoNeedsConfirmChoice | None
+    ) -> None:
+        self.log.info(
+            f"who-needs: confirm screen closed choice={choice!r} "
+            f"target={self._compare_selection_label(selection)!r}"
+        )
+        if choice is None:
+            return
+
+        if choice == "custom":
+            # The name of the open package is the closest starting point for a
+            # different question about it.
+            self._open_whoneeds_screen(selection.package_name)
+            return
+
+        self.run_worker(
+            self._apply_whoneeds_for_selection(selection),
+            group="whoneeds-selection",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    def _whoneeds_screen_initial_value(self) -> str:
+        # While a package is open its name is the obvious thing to ask about,
+        # so offer it for editing rather than the last query that ran.
+        if self._mode == "versions" and self._selected_package is not None:
+            return self._selected_package
+        if isinstance(self._whoneeds_target, str):
+            return self._whoneeds_target
+        return self._whoneeds_query.split(" ", maxsplit=1)[0]
+
+    def _whoneeds_key_context(self) -> str:
+        """Describe the app state that decides what pressing ``w`` does.
+
+        Everything in here has to survive an app that is not running (the tests
+        build one without starting it), and must not raise: it only ever feeds a
+        log line.
+        """
+        screens = ",".join(type(screen).__name__ for screen in self.screen_stack)
+        focused = "n/a"
+        highlighted: int | None = None
+        # Both the focus and the query below reach for the active screen, which
+        # only exists once the app runs.
+        if self.screen_stack:
+            focused_widget = self.focused
+            focused = (
+                "none" if focused_widget is None else type(focused_widget).__name__
+            )
+            try:
+                highlighted = self.query_one("#sidebar-list", OptionList).highlighted
+            except NoMatches:
+                pass
+
+        # Read the row directly instead of going through the version-row
+        # helpers, so this stays a pure observation of the state.
+        row_kind = "n/a"
+        if highlighted is not None and 0 <= highlighted < len(self._version_rows):
+            row_kind = self._version_rows[highlighted].kind
+
+        return (
+            f"mode={self._mode!r} pane={self._selected_pane!r} "
+            f"selected_package={self._selected_package!r} "
+            f"filter_mode={self._filter_mode} "
+            f"channel_edit_mode={self._channel_edit_mode} "
+            f"screens=[{screens}] focused={focused} "
+            f"sidebar_highlight={highlighted} version_rows={len(self._version_rows)} "
+            f"highlighted_kind={row_kind}"
+        )
+
+    def action_whoneeds_key_w(self) -> None:
+        # Logged unconditionally: if this line is missing from the log the key
+        # never reached the action, so the binding itself was blocked.
+        self.log.info(f"who-needs: key w pressed {self._whoneeds_key_context()}")
+        # While the package search or the channel prompt is taking input, on_key
+        # has already typed this key into it, so the binding must stand down. The
+        # search only takes input in the package list: filter mode outlives
+        # opening a package, and there the key belongs to who-needs again.
+        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
+            self.log.info("who-needs: key w ignored, the key was typed into a prompt")
+            return
+
+        if self._mode == "versions":
+            selection = self._current_compare_selection()
+            if selection is not None:
+                # A highlighted entry means "who needs this build". The repodata
+                # record behind it is already cached - opening the versions view
+                # built the rows from it - so this does not wait for the details
+                # view, which is still streaming the package archive.
+                label = self._compare_selection_label(selection)
+                self.log.info(f"who-needs: key w opens confirm screen target={label!r}")
+                self._open_whoneeds_confirm_screen(selection)
+                return
+            self.log.info(
+                "who-needs: key w found no highlighted entry, "
+                "falling back to the name prompt"
+            )
+
+        initial_value = self._whoneeds_screen_initial_value()
+        self.log.info(f"who-needs: key w opens name prompt initial={initial_value!r}")
+        self._open_whoneeds_screen(initial_value)
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
@@ -2320,6 +2651,14 @@ class CondaMetadataTui(App[None]):
             self._set_filter_mode(False, reset_query=True)
 
     def on_key(self, event: Key) -> None:
+        if event.key == "w":
+            # Bindings run after this handler, so a "key w reached the app" line
+            # without a following "key w pressed" line means something below
+            # swallowed it.
+            self.log.info(
+                f"who-needs: key w reached the app {self._whoneeds_key_context()}"
+            )
+
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
             if event.key == "tab":
@@ -2694,9 +3033,9 @@ class CondaMetadataTui(App[None]):
         if row.kind == "back":
             self._previewed_version_key = None
             self._pending_preview_version_key = None
-            matchspec_records = self._matchspec_records_by_package.get(package_name)
-            if matchspec_records is not None:
-                self._update_main_panel_for_package(package_name, matchspec_records)
+            query_records = self._query_records_by_package.get(package_name)
+            if query_records is not None:
+                self._update_main_panel_for_package(package_name, query_records)
                 return
             cached = self._package_records_cache.get(package_name)
             if cached is not None:

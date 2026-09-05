@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 from typing import Literal, cast
 
-from rattler.exceptions import InvalidMatchSpecError
+from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
+from rattler.package import PackageName
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -18,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, LoadingIndicator, OptionList, Static
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
@@ -78,10 +80,12 @@ class CompareFileListEntry:
 
 
 EMPTY_MATCHSPEC_RESULT = Empty()
+EMPTY_WHONEEDS_RESULT = Empty()
 
 
 FileAction = Literal["download", "preview"]
 FileActionSource = Literal["default", "left", "right"]
+WhoNeedsConfirmChoice = Literal["run", "custom"]
 
 
 @dataclass(frozen=True)
@@ -1840,6 +1844,292 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
 
     async def action_dismiss(self, result: MatchSpec | Empty | None = None) -> None:
         self.dismiss(result)
+
+
+class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
+    DEFAULT_CSS = """
+    WhoNeedsScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #whoneeds-input {
+        border: tall #ec4899;
+    }
+
+    #whoneeds-input:focus {
+        border: tall #ec4899;
+    }
+
+    #whoneeds-input > .input--selection {
+        background: #ec4899;
+        color: #ffffff;
+    }
+
+    #whoneeds-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    def __init__(self, initial_value: str = "") -> None:
+        super().__init__()
+        self._initial_value = initial_value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-dialog"):
+            yield Static("Who needs", id="whoneeds-title")
+            yield Input(
+                value=self._initial_value,
+                placeholder="numpy",
+                id="whoneeds-input",
+            )
+            yield Static(
+                "Find every package that depends on this package name."
+                " Leave empty to show the whole channel again.",
+                id="whoneeds-help",
+            )
+            yield Static("", id="whoneeds-error")
+
+    def on_mount(self) -> None:
+        self.query_one("#whoneeds-input", Input).focus()
+
+    @staticmethod
+    def validate_package_name(value: str) -> PackageName | Empty:
+        query = value.strip()
+        if not query:
+            return EMPTY_WHONEEDS_RESULT
+        return PackageName(query)
+
+    def _show_error(self, message: str) -> None:
+        self.query_one("#whoneeds-error", Static).update(Text(message))
+
+    def _update_validation_error(self, value: str) -> None:
+        try:
+            self.validate_package_name(value)
+        except InvalidPackageNameError as exc:
+            self._show_error(str(exc))
+            return
+
+        self._show_error("")
+
+    @on(Input.Changed, "#whoneeds-input")
+    def _validate_input(self, event: Input.Changed) -> None:
+        self._update_validation_error(event.value)
+
+    @on(Input.Submitted)
+    def _submit(self, event: Input.Submitted) -> None:
+        event.stop()
+        try:
+            result = self.validate_package_name(event.value)
+        except InvalidPackageNameError as exc:
+            self._show_error(str(exc))
+            return
+
+        self.dismiss(result)
+
+    async def action_dismiss(self, result: PackageName | Empty | None = None) -> None:
+        self.dismiss(result)
+
+
+class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
+    """Confirm a who-needs query for one concrete repodata entry.
+
+    Pressing `w` in the version details targets the highlighted build rather
+    than the package name, which is both a much narrower question and a slow
+    one, so it is worth showing what is about to be asked. The build is rarely
+    the wrong question but often not the only one, so querying something else is
+    offered right here instead of behind a cancel.
+    """
+
+    DEFAULT_CSS = """
+    WhoNeedsConfirmScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-confirm-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-confirm-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-target {
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #whoneeds-confirm-list {
+        border: none;
+        background: $background;
+        padding: 0 0 0 1;
+    }
+
+    #whoneeds-confirm-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #whoneeds-confirm-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    CHOICES: tuple[tuple[str, WhoNeedsConfirmChoice | None], ...] = (
+        ("Run the query", "run"),
+        ("Query something else", "custom"),
+        ("Cancel", None),
+    )
+
+    def __init__(self, target_label: str) -> None:
+        super().__init__()
+        self._target_label = target_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-confirm-dialog"):
+            yield Static("Who needs", id="whoneeds-confirm-title")
+            yield Static(self._target_label, id="whoneeds-confirm-target", markup=False)
+            yield Static(
+                "Find every package whose dependency matches this exact build."
+                " Scanning the full repodata takes a while.",
+                id="whoneeds-confirm-help",
+            )
+            yield OptionList(
+                *(label for label, _choice in self.CHOICES),
+                id="whoneeds-confirm-list",
+                markup=False,
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#whoneeds-confirm-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#whoneeds-confirm-list")
+    def _select_action(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.CHOICES[event.option_index][1])
+
+    async def action_dismiss(self, result: WhoNeedsConfirmChoice | None = None) -> None:
+        self.dismiss(result)
+
+
+class WhoNeedsLoadingScreen(ModalScreen[None]):
+    """Modal that holds the user in place while a who-needs query runs.
+
+    The query scans the complete repodata of every selected platform, so it
+    takes long enough that handing the main screen back straight away looks
+    like nothing happened. This screen has no bindings on purpose: the scan
+    runs in Rust and cannot be cancelled halfway through.
+    """
+
+    DEFAULT_CSS = """
+    WhoNeedsLoadingScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-loading-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-loading-title {
+        text-style: bold;
+    }
+
+    #whoneeds-loading-indicator {
+        height: 1;
+        margin: 1 0;
+        color: #ec4899;
+    }
+
+    #whoneeds-loading-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, *, query: str, channel_name: str) -> None:
+        super().__init__()
+        self._query = query
+        self._channel_name = channel_name
+        self._started = monotonic()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-loading-dialog"):
+            yield Static(
+                Text.assemble(
+                    "Who needs ",
+                    (self._query, Style(color="#ec4899", bold=True)),
+                ),
+                id="whoneeds-loading-title",
+            )
+            yield LoadingIndicator(id="whoneeds-loading-indicator")
+            yield Static("", id="whoneeds-loading-elapsed")
+            yield Static(
+                f"Scanning the full {self._channel_name} repodata."
+                " This can take a minute.",
+                id="whoneeds-loading-help",
+            )
+
+    def on_mount(self) -> None:
+        self._started = monotonic()
+        self._render_elapsed()
+        self.set_interval(1.0, self._render_elapsed)
+
+    def _render_elapsed(self) -> None:
+        elapsed = monotonic() - self._started
+        self.query_one("#whoneeds-loading-elapsed", Static).update(
+            Text(f"Elapsed {elapsed:.0f}s", style="dim")
+        )
 
 
 class FileActionScreen(ModalScreen[FileActionOption | None]):
