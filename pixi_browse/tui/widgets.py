@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 from typing import Literal, cast
 
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
@@ -19,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, LoadingIndicator, OptionList, Static
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
@@ -1953,6 +1954,81 @@ class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
 
     async def action_dismiss(self, result: PackageName | Empty | None = None) -> None:
         self.dismiss(result)
+
+
+class WhoNeedsLoadingScreen(ModalScreen[None]):
+    """Modal that holds the user in place while a who-needs query runs.
+
+    The query scans the complete repodata of every selected platform, so it
+    takes long enough that handing the main screen back straight away looks
+    like nothing happened. This screen has no bindings on purpose: the scan
+    runs in Rust and cannot be cancelled halfway through.
+    """
+
+    DEFAULT_CSS = """
+    WhoNeedsLoadingScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #whoneeds-loading-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #whoneeds-loading-title {
+        text-style: bold;
+    }
+
+    #whoneeds-loading-indicator {
+        height: 1;
+        margin: 1 0;
+        color: #ec4899;
+    }
+
+    #whoneeds-loading-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, *, query: str, channel_name: str) -> None:
+        super().__init__()
+        self._query = query
+        self._channel_name = channel_name
+        self._started = monotonic()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="whoneeds-loading-dialog"):
+            yield Static(
+                Text.assemble(
+                    "Who needs ",
+                    (self._query, Style(color="#ec4899", bold=True)),
+                ),
+                id="whoneeds-loading-title",
+            )
+            yield LoadingIndicator(id="whoneeds-loading-indicator")
+            yield Static("", id="whoneeds-loading-elapsed")
+            yield Static(
+                f"Scanning the full {self._channel_name} repodata."
+                " This can take a minute.",
+                id="whoneeds-loading-help",
+            )
+
+    def on_mount(self) -> None:
+        self._started = monotonic()
+        self._render_elapsed()
+        self.set_interval(1.0, self._render_elapsed)
+
+    def _render_elapsed(self) -> None:
+        elapsed = monotonic() - self._started
+        self.query_one("#whoneeds-loading-elapsed", Static).update(
+            Text(f"Elapsed {elapsed:.0f}s", style="dim")
+        )
 
 
 class FileActionScreen(ModalScreen[FileActionOption | None]):

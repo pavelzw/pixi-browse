@@ -84,6 +84,7 @@ from .widgets import (
     MainPanel,
     MatchSpecScreen,
     SidebarPanel,
+    WhoNeedsLoadingScreen,
     WhoNeedsScreen,
 )
 
@@ -818,6 +819,12 @@ class CondaMetadataTui(App[None]):
             WhoNeedsScreen(initial_value),
             self._handle_whoneeds_result,
         )
+
+    def _close_whoneeds_loading_screen(self, screen: WhoNeedsLoadingScreen) -> None:
+        # Dismissing pops whatever sits on top of the stack, so only the screen
+        # that is actually showing may be dismissed.
+        if self.screen is screen:
+            screen.dismiss(None)
 
     def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
         self._selected_pane = pane
@@ -2046,9 +2053,16 @@ class CondaMetadataTui(App[None]):
         self._show_main_placeholder(
             f"# Who needs\n\nFinding packages that depend on `{escape(query)}`..."
         )
+        # The scan takes long enough that the user needs somewhere to wait; the
+        # modal stays up until the finished result is rendered underneath it.
+        loading_screen = WhoNeedsLoadingScreen(
+            query=query, channel_name=self._channel_name
+        )
+        self.push_screen(loading_screen)
         try:
             result = await self._query_whoneeds_records(target)
         except (GatewayError, RuntimeError) as exc:
+            self._close_whoneeds_loading_screen(loading_screen)
             self.log.error(
                 "who-needs: workflow failed "
                 f"elapsed={perf_counter() - workflow_started:.3f}s error={exc!s}"
@@ -2069,34 +2083,15 @@ class CondaMetadataTui(App[None]):
             f"elapsed={query_duration:.3f}s packages={len(result.package_names):,}"
         )
         package_list.disabled = False
-        await self._apply_whoneeds_result(target, query, result)
+        try:
+            await self._apply_whoneeds_result(target, query, result)
+        finally:
+            self._close_whoneeds_loading_screen(loading_screen)
         self.log.info(
             "who-needs: workflow finished "
             f"ui_elapsed={perf_counter() - workflow_started - query_duration:.3f}s "
             f"total_elapsed={perf_counter() - workflow_started:.3f}s"
         )
-
-    async def _apply_whoneeds_for_selection(self, selection: CompareSelection) -> None:
-        resolution_started = perf_counter()
-        record = await self._get_record_for_version_entry(
-            selection.package_name, selection.entry
-        )
-        if record is None:
-            self.notify(
-                "Could not find the selected package record.",
-                title="Who needs",
-                severity="error",
-            )
-            return
-        self.log.info(
-            "who-needs: selected record resolved "
-            f"elapsed={perf_counter() - resolution_started:.3f}s "
-            f"record={record.name.normalized!r} version={str(record.version)!r} "
-            f"build={record.build!r} subdir={record.subdir!r}"
-        )
-        target = record
-        query = f"{record.name.normalized} {record.version} {record.build}"
-        await self._apply_whoneeds_query(target, query)
 
     def _back_to_packages(self) -> None:
         self._mode = "packages"
@@ -2440,27 +2435,20 @@ class CondaMetadataTui(App[None]):
             exit_on_error=False,
         )
 
+    def _whoneeds_screen_initial_value(self) -> str:
+        # While a package is open its name is the obvious thing to ask about,
+        # so offer it for editing rather than running the query right away.
+        if self._mode == "versions" and self._selected_package is not None:
+            return self._selected_package
+        if isinstance(self._whoneeds_target, str):
+            return self._whoneeds_target
+        return self._whoneeds_query.split(" ", maxsplit=1)[0]
+
     def action_whoneeds_key_w(self) -> None:
         if self._channel_edit_mode or self._filter_mode:
             return
 
-        if self._mode == "versions" and self._main_panel_shows_version_details():
-            selection = self._current_compare_selection()
-            if selection is not None:
-                self.run_worker(
-                    self._apply_whoneeds_for_selection(selection),
-                    group="whoneeds-selection",
-                    exclusive=True,
-                    exit_on_error=False,
-                )
-                return
-
-        initial_value = (
-            self._whoneeds_target
-            if isinstance(self._whoneeds_target, str)
-            else self._whoneeds_query.split(" ", maxsplit=1)[0]
-        )
-        self._open_whoneeds_screen(initial_value)
+        self._open_whoneeds_screen(self._whoneeds_screen_initial_value())
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))

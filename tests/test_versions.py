@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App
 from textual.events import Paste
-from textual.widgets import Static
+from textual.widgets import LoadingIndicator, Static
 
 from pixi_browse import __version__
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry, VersionRow
@@ -67,6 +67,7 @@ from pixi_browse.tui import (
     MatchSpecScreen,
     SidebarPanel,
     VersionDetailsView,
+    WhoNeedsLoadingScreen,
     WhoNeedsScreen,
 )
 from pixi_browse.tui.state import AboutUrls
@@ -1866,83 +1867,193 @@ def test_action_whoneeds_key_w_pushes_whoneeds_screen(monkeypatch) -> None:
     assert callback == app._handle_whoneeds_result
 
 
-def test_action_whoneeds_key_w_uses_selected_detail_record(monkeypatch) -> None:
+def test_action_whoneeds_key_w_prefills_the_open_package_name(monkeypatch) -> None:
     app = CondaMetadataTui()
-    selection = CompareSelection(
-        "demo",
-        VersionEntry(
-            version=Version("1.2.3"),
-            build="py313h123_0",
-            build_number=0,
-            subdir="noarch",
-            file_name="demo-1.2.3-py313h123_0.conda",
-        ),
-    )
-    worker_calls: list[dict[str, object]] = []
+    pushed: list[tuple[WhoNeedsScreen, object | None]] = []
 
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
-    monkeypatch.setattr(app, "_current_compare_selection", lambda: selection)
     monkeypatch.setattr(
         app,
-        "_open_whoneeds_screen",
-        lambda value: (_ for _ in ()).throw(
-            AssertionError(f"unexpected name query: {value}")
-        ),
+        "push_screen",
+        lambda screen, callback=None: pushed.append((screen, callback)),
     )
 
-    def _fake_run_worker(coro: object, **kwargs: object) -> None:
-        worker_calls.append(kwargs)
+    def _fail_run_worker(coro: object, **_kwargs: object) -> None:
         coro.close()  # type: ignore[attr-defined]
+        raise AssertionError("who needs must not query without confirmation")
 
-    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
+    monkeypatch.setattr(app, "run_worker", _fail_run_worker)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
     app._mode = "versions"
+    app._selected_package = "demo"
 
     app.action_whoneeds_key_w()
 
-    assert worker_calls == [
-        {
-            "group": "whoneeds-selection",
-            "exclusive": True,
-            "exit_on_error": False,
-        }
-    ]
+    assert len(pushed) == 1
+    screen, callback = pushed[0]
+    assert isinstance(screen, WhoNeedsScreen)
+    assert screen._initial_value == "demo"
+    assert callback == app._handle_whoneeds_result
 
 
-def test_apply_whoneeds_for_selection_queries_concrete_package_record(
+def test_action_whoneeds_key_w_prefills_the_active_whoneeds_target(
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    record = _make_repo_data_record(name="python", version="3.13.1", build="h123_0")
-    selection = CompareSelection(
-        "python",
-        VersionEntry(
-            version=record.version,
-            build=record.build,
-            build_number=record.build_number,
-            subdir=record.subdir,
-            file_name=record.file_name,
-        ),
+    pushed: list[WhoNeedsScreen] = []
+
+    monkeypatch.setattr(
+        app,
+        "push_screen",
+        lambda screen, callback=None: pushed.append(screen),
     )
-    queries: list[tuple[str | PackageRecord, str]] = []
+    app._mode = "packages"
+    app._selected_package = "demo"
+    app._whoneeds_target = "python"
+    app._whoneeds_query = "python"
 
-    async def _fake_get_record(
-        package_name: str, entry: VersionEntry
-    ) -> RepoDataRecord | None:
-        assert package_name == selection.package_name
-        assert entry == selection.entry
-        return record
+    app.action_whoneeds_key_w()
 
-    async def _fake_apply_query(target: str | PackageRecord, query: str) -> None:
-        queries.append((target, query))
+    assert [screen._initial_value for screen in pushed] == ["python"]
 
-    monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
-    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
 
-    asyncio.run(app._apply_whoneeds_for_selection(selection))
+class _FakeSidebarList:
+    def __init__(self) -> None:
+        self.disabled = False
+        self.options: list[str] = []
+        self.highlighted: int | None = None
+        self.scroll_y = 0.0
+        self.focused = False
 
-    assert queries == [
-        (record, "python 3.13.1 h123_0"),
-    ]
+    def clear_options(self) -> None:
+        self.options.clear()
+
+    def add_option(self, option: str) -> None:
+        self.options.append(option)
+
+    def focus(self) -> None:
+        self.focused = True
+
+
+def _stub_whoneeds_workflow_ui(app: CondaMetadataTui, monkeypatch) -> _FakeSidebarList:
+    sidebar_list = _FakeSidebarList()
+
+    def _fake_query_one(selector: str, _widget_type: object = None) -> _FakeSidebarList:
+        assert selector == "#sidebar-list"
+        return sidebar_list
+
+    monkeypatch.setattr(app, "query_one", _fake_query_one)
+    monkeypatch.setattr(app, "_snapshot_channel_state", lambda: "snapshot")
+    monkeypatch.setattr(app, "_show_main_placeholder", lambda _content: None)
+    return sidebar_list
+
+
+def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    _stub_whoneeds_workflow_ui(app, monkeypatch)
+    events: list[str] = []
+    pushed: list[WhoNeedsLoadingScreen] = []
+    result = WhoNeedsQueryResult(package_names=[], records_by_package={})
+
+    def _fake_push_screen(screen: object, callback: object = None) -> None:
+        assert isinstance(screen, WhoNeedsLoadingScreen)
+        pushed.append(screen)
+        events.append("pushed")
+
+    async def _fake_query(_target: str | PackageRecord) -> WhoNeedsQueryResult:
+        events.append("queried")
+        return result
+
+    async def _fake_apply_result(
+        _target: str | PackageRecord, _query: str, _result: WhoNeedsQueryResult
+    ) -> None:
+        events.append("applied")
+
+    monkeypatch.setattr(app, "push_screen", _fake_push_screen)
+    monkeypatch.setattr(app, "_query_whoneeds_records", _fake_query)
+    monkeypatch.setattr(app, "_apply_whoneeds_result", _fake_apply_result)
+    monkeypatch.setattr(
+        app,
+        "_close_whoneeds_loading_screen",
+        lambda screen: events.append(f"closed:{screen is pushed[0]}"),
+    )
+
+    asyncio.run(app._apply_whoneeds_query("python", "python"))
+
+    assert events == ["pushed", "queried", "applied", "closed:True"]
+    assert pushed[0]._query == "python"
+
+
+def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure(
+    monkeypatch,
+) -> None:
+    app = CondaMetadataTui()
+    sidebar_list = _stub_whoneeds_workflow_ui(app, monkeypatch)
+    events: list[str] = []
+
+    async def _failing_query(_target: str | PackageRecord) -> WhoNeedsQueryResult:
+        raise RuntimeError("scan exploded")
+
+    monkeypatch.setattr(app, "push_screen", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app, "_query_whoneeds_records", _failing_query)
+    monkeypatch.setattr(app, "_restore_channel_state", lambda _snapshot: None)
+    monkeypatch.setattr(app, "_restore_ui_from_snapshot", lambda _snapshot: None)
+    monkeypatch.setattr(
+        app, "_close_whoneeds_loading_screen", lambda _screen: events.append("closed")
+    )
+    monkeypatch.setattr(
+        app, "notify", lambda message, **_kwargs: events.append(f"notified:{message}")
+    )
+
+    asyncio.run(app._apply_whoneeds_query("python", "python"))
+
+    assert events == ["closed", "notified:Failed to query who needs: scan exploded"]
+    assert sidebar_list.focused is True
+
+
+def test_close_whoneeds_loading_screen_leaves_other_screens_alone(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    screen = WhoNeedsLoadingScreen(query="python", channel_name="conda-forge")
+    dismissed: list[object] = []
+
+    monkeypatch.setattr(screen, "dismiss", lambda result=None: dismissed.append(result))
+    monkeypatch.setattr(
+        type(app), "screen", property(lambda _self: cast(object, "other screen"))
+    )
+
+    app._close_whoneeds_loading_screen(screen)
+
+    assert dismissed == []
+
+
+def test_whoneeds_loading_screen_shows_the_target_and_elapsed_time() -> None:
+    class _HostApp(App[None]):
+        pass
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            screen = WhoNeedsLoadingScreen(query="python", channel_name="conda-forge")
+            app.push_screen(screen)
+            await pilot.pause()
+
+            title = cast(
+                Text, screen.query_one("#whoneeds-loading-title", Static).content
+            )
+            elapsed = cast(
+                Text, screen.query_one("#whoneeds-loading-elapsed", Static).content
+            )
+            help_text = cast(
+                str, screen.query_one("#whoneeds-loading-help", Static).content
+            )
+
+            assert title.plain == "Who needs python"
+            assert elapsed.plain == "Elapsed 0s"
+            assert "conda-forge" in help_text
+            assert screen.query_one("#whoneeds-loading-indicator", LoadingIndicator)
+
+    asyncio.run(_run())
 
 
 def test_handle_matchspec_result_queues_matchspec_worker(monkeypatch) -> None:
