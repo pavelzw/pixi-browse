@@ -2257,6 +2257,48 @@ def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
     assert pushed[0]._query == "python"
 
 
+def test_matchspec_and_whoneeds_query_transitions_do_not_overlap(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    matchspec_started = asyncio.Event()
+    finish_matchspec = asyncio.Event()
+    whoneeds_started = asyncio.Event()
+    events: list[str] = []
+
+    async def _fake_matchspec_query(_matchspec: MatchSpec | None) -> None:
+        events.append("matchspec-started")
+        matchspec_started.set()
+        await finish_matchspec.wait()
+        events.append("matchspec-finished")
+
+    async def _fake_whoneeds_query(
+        _target: str | PackageRecord | None, _query: str
+    ) -> None:
+        events.append("whoneeds-started")
+        whoneeds_started.set()
+
+    monkeypatch.setattr(app, "_apply_matchspec_query_serialized", _fake_matchspec_query)
+    monkeypatch.setattr(app, "_apply_whoneeds_query_serialized", _fake_whoneeds_query)
+
+    async def _run_queries() -> None:
+        matchspec_task = asyncio.create_task(
+            app._apply_matchspec_query(MatchSpec("python"))
+        )
+        await matchspec_started.wait()
+
+        whoneeds_task = asyncio.create_task(
+            app._apply_whoneeds_query("python", "python")
+        )
+        await asyncio.sleep(0)
+        assert not whoneeds_started.is_set()
+
+        finish_matchspec.set()
+        await asyncio.gather(matchspec_task, whoneeds_task)
+
+    asyncio.run(_run_queries())
+
+    assert events == ["matchspec-started", "matchspec-finished", "whoneeds-started"]
+
+
 def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure(
     monkeypatch,
 ) -> None:

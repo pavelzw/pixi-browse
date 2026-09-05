@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import webbrowser
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -146,6 +147,7 @@ class CondaMetadataTui(App[None]):
         self._whoneeds_target: str | PackageRecord | None = None
         self._whoneeds_scanned_channel: str | None = None
         self._query_records_by_package: dict[str, list[RepoDataRecord]] = {}
+        self._query_selection_lock = asyncio.Lock()
         self._current_versions: list[VersionEntry] = []
         self._version_subdirs: list[str] = []
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
@@ -1982,6 +1984,12 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _apply_matchspec_query(self, matchspec: MatchSpec | None) -> None:
+        async with self._query_selection_lock:
+            await self._apply_matchspec_query_serialized(matchspec)
+
+    async def _apply_matchspec_query_serialized(
+        self, matchspec: MatchSpec | None
+    ) -> None:
         if matchspec is None:
             self._reset_query_selection()
             self._filter_packages()
@@ -2044,6 +2052,12 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _apply_whoneeds_query(
+        self, target: str | PackageRecord | None, query: str
+    ) -> None:
+        async with self._query_selection_lock:
+            await self._apply_whoneeds_query_serialized(target, query)
+
+    async def _apply_whoneeds_query_serialized(
         self, target: str | PackageRecord | None, query: str
     ) -> None:
         if target is None:
