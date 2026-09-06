@@ -65,6 +65,7 @@ from pixi_browse.repodata import (
     query_matchspec_records,
     query_package_records,
     query_whoneeds_records,
+    whoneeds_target_label,
 )
 from pixi_browse.search import fuzzy_score
 
@@ -143,7 +144,6 @@ class CondaMetadataTui(App[None]):
         self._visible_package_names: list[str] = []
         self._startup_matchspec = default_matchspec
         self._matchspec_query = ""
-        self._whoneeds_query = ""
         self._whoneeds_target: str | PackageRecord | None = None
         self._whoneeds_scanned_channel: str | None = None
         self._query_records_by_package: dict[str, list[RepoDataRecord]] = {}
@@ -447,7 +447,6 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = []
         self._visible_package_names = []
         self._matchspec_query = ""
-        self._whoneeds_query = ""
         self._whoneeds_target = None
         self._query_records_by_package = {}
         self._release_whoneeds_repodata()
@@ -455,7 +454,6 @@ class CondaMetadataTui(App[None]):
 
     def _reset_query_selection(self) -> None:
         self._matchspec_query = ""
-        self._whoneeds_query = ""
         self._whoneeds_target = None
         self._query_records_by_package = {}
         self._release_whoneeds_repodata()
@@ -502,9 +500,7 @@ class CondaMetadataTui(App[None]):
         if self._whoneeds_target is None:
             return
         result = await self._query_whoneeds_records(self._whoneeds_target)
-        await self._apply_whoneeds_result(
-            self._whoneeds_target, self._whoneeds_query, result
-        )
+        await self._apply_whoneeds_result(self._whoneeds_target, result)
 
     def _snapshot_channel_state(self) -> ChannelStateSnapshot:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -536,7 +532,6 @@ class CondaMetadataTui(App[None]):
             all_package_names=list(self._all_package_names),
             visible_package_names=list(self._visible_package_names),
             matchspec_query=self._matchspec_query,
-            whoneeds_query=self._whoneeds_query,
             whoneeds_target=self._whoneeds_target,
             query_records_by_package={
                 package_name: list(records)
@@ -581,7 +576,6 @@ class CondaMetadataTui(App[None]):
         self._all_package_names = snapshot.all_package_names
         self._visible_package_names = snapshot.visible_package_names
         self._matchspec_query = snapshot.matchspec_query
-        self._whoneeds_query = snapshot.whoneeds_query
         self._whoneeds_target = snapshot.whoneeds_target
         self._query_records_by_package = snapshot.query_records_by_package
         self._package_records_cache = snapshot.package_records_cache
@@ -1958,7 +1952,6 @@ class CondaMetadataTui(App[None]):
         self, query: str, result: MatchSpecQueryResult
     ) -> None:
         self._matchspec_query = query
-        self._whoneeds_query = ""
         self._whoneeds_target = None
         self._release_whoneeds_repodata()
         self._query_records_by_package = {
@@ -2025,11 +2018,9 @@ class CondaMetadataTui(App[None]):
     async def _apply_whoneeds_result(
         self,
         target: str | PackageRecord,
-        query: str,
         result: WhoNeedsQueryResult,
     ) -> None:
         self._matchspec_query = ""
-        self._whoneeds_query = query
         self._whoneeds_target = target
         self._query_records_by_package = {
             package_name: list(records)
@@ -2051,14 +2042,12 @@ class CondaMetadataTui(App[None]):
             await self._open_versions(result.package_names[0])
         self._focus_sidebar()
 
-    async def _apply_whoneeds_query(
-        self, target: str | PackageRecord | None, query: str
-    ) -> None:
+    async def _apply_whoneeds_query(self, target: str | PackageRecord | None) -> None:
         async with self._query_selection_lock:
-            await self._apply_whoneeds_query_serialized(target, query)
+            await self._apply_whoneeds_query_serialized(target)
 
     async def _apply_whoneeds_query_serialized(
-        self, target: str | PackageRecord | None, query: str
+        self, target: str | PackageRecord | None
     ) -> None:
         if target is None:
             self._reset_query_selection()
@@ -2067,6 +2056,7 @@ class CondaMetadataTui(App[None]):
             self._focus_sidebar()
             return
 
+        query = whoneeds_target_label(target)
         workflow_started = perf_counter()
         self.log.info(f"who-needs: workflow started query={query!r}")
         # The modal covers the whole app until the result is rendered underneath
@@ -2097,7 +2087,7 @@ class CondaMetadataTui(App[None]):
             f"elapsed={query_duration:.3f}s packages={len(result.package_names):,}"
         )
         try:
-            await self._apply_whoneeds_result(target, query, result)
+            await self._apply_whoneeds_result(target, result)
         finally:
             self._close_whoneeds_loading_screen(loading_screen)
         self.log.info(
@@ -2125,8 +2115,7 @@ class CondaMetadataTui(App[None]):
             f"build={record.build!r} subdir={record.subdir!r}"
         )
         target = record
-        query = f"{record.name.normalized} {record.version} {record.build}"
-        await self._apply_whoneeds_query(target, query)
+        await self._apply_whoneeds_query(target)
 
     def _back_to_packages(self) -> None:
         self._mode = "packages"
@@ -2461,12 +2450,10 @@ class CondaMetadataTui(App[None]):
 
         if isinstance(result, Empty):
             target: str | None = None
-            query = ""
         else:
             target = result.normalized
-            query = target
         self.run_worker(
-            self._apply_whoneeds_query(target, query),
+            self._apply_whoneeds_query(target),
             group="whoneeds-selection",
             exclusive=True,
             exit_on_error=False,
@@ -2502,7 +2489,9 @@ class CondaMetadataTui(App[None]):
             return self._selected_package
         if isinstance(self._whoneeds_target, str):
             return self._whoneeds_target
-        return self._whoneeds_query.split(" ", maxsplit=1)[0]
+        if self._whoneeds_target is not None:
+            return self._whoneeds_target.name.normalized
+        return ""
 
     def _whoneeds_key_context(self) -> str:
         """Describe the app state that decides what pressing ``w`` does.

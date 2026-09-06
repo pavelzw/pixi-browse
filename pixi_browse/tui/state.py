@@ -50,7 +50,6 @@ class ChannelStateSnapshot:
     all_package_names: list[str]
     visible_package_names: list[str]
     matchspec_query: str
-    whoneeds_query: str
     whoneeds_target: str | PackageRecord | None
     query_records_by_package: dict[str, list[RepoDataRecord]]
     package_records_cache: dict[str, list[RepoDataRecord]]

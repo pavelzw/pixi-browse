@@ -31,6 +31,12 @@ class WhoNeedsQueryResult:
     records_by_package: dict[str, list[RepoDataRecord]]
 
 
+def whoneeds_target_label(target: str | PackageRecord) -> str:
+    if isinstance(target, str):
+        return target
+    return f"{target.name.normalized} {target.version} {target.build}"
+
+
 def create_gateway(
     *, client: Client | None = None, sharded_enabled: bool = True
 ) -> Gateway:
@@ -174,11 +180,7 @@ async def query_whoneeds_records(
     sharded repodata disabled: against sharded repodata the scan fetches one
     shard per package name, while the full repodata is a single request.
     """
-    target_label = (
-        target
-        if isinstance(target, str)
-        else f"{target.name.normalized} {target.version} {target.build}"
-    )
+    target_label = whoneeds_target_label(target)
     platforms_label = ",".join(str(platform) for platform in platforms)
     log(
         "who-needs: starting gateway reverse query "

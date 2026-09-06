@@ -47,6 +47,7 @@ from pixi_browse.repodata import (
     MatchSpecQueryResult,
     WhoNeedsQueryResult,
     query_whoneeds_records,
+    whoneeds_target_label,
 )
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
@@ -305,6 +306,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
     assert by_record == expected
     assert targets[0] == "python"
     assert targets[1] is python
+    assert whoneeds_target_label(python) == "python 3.13.1 h1_0"
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
@@ -1986,7 +1988,7 @@ def test_apply_whoneeds_for_selection_queries_concrete_package_record(
             file_name=record.file_name,
         ),
     )
-    queries: list[tuple[str | PackageRecord, str]] = []
+    queries: list[str | PackageRecord] = []
 
     async def _fake_get_record(
         package_name: str, entry: VersionEntry
@@ -1995,17 +1997,15 @@ def test_apply_whoneeds_for_selection_queries_concrete_package_record(
         assert entry == selection.entry
         return record
 
-    async def _fake_apply_query(target: str | PackageRecord, query: str) -> None:
-        queries.append((target, query))
+    async def _fake_apply_query(target: str | PackageRecord) -> None:
+        queries.append(target)
 
     monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
     monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
 
     asyncio.run(app._apply_whoneeds_for_selection(selection))
 
-    assert queries == [
-        (record, "python 3.13.1 h123_0"),
-    ]
+    assert queries == [record]
 
 
 def _forbid_background_updates(app: CondaMetadataTui, monkeypatch) -> None:
@@ -2047,7 +2047,7 @@ def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
         return result
 
     async def _fake_apply_result(
-        _target: str | PackageRecord, _query: str, _result: WhoNeedsQueryResult
+        _target: str | PackageRecord, _result: WhoNeedsQueryResult
     ) -> None:
         events.append("applied")
 
@@ -2060,7 +2060,7 @@ def test_apply_whoneeds_query_keeps_the_loading_screen_until_results_are_shown(
         lambda screen: events.append(f"closed:{screen is pushed[0]}"),
     )
 
-    asyncio.run(app._apply_whoneeds_query("python", "python"))
+    asyncio.run(app._apply_whoneeds_query("python"))
 
     assert events == ["pushed", "queried", "applied", "closed:True"]
     assert pushed[0]._query == "python"
@@ -2079,9 +2079,7 @@ def test_matchspec_and_whoneeds_query_transitions_do_not_overlap(monkeypatch) ->
         await finish_matchspec.wait()
         events.append("matchspec-finished")
 
-    async def _fake_whoneeds_query(
-        _target: str | PackageRecord | None, _query: str
-    ) -> None:
+    async def _fake_whoneeds_query(_target: str | PackageRecord | None) -> None:
         events.append("whoneeds-started")
         whoneeds_started.set()
 
@@ -2094,9 +2092,7 @@ def test_matchspec_and_whoneeds_query_transitions_do_not_overlap(monkeypatch) ->
         )
         await matchspec_started.wait()
 
-        whoneeds_task = asyncio.create_task(
-            app._apply_whoneeds_query("python", "python")
-        )
+        whoneeds_task = asyncio.create_task(app._apply_whoneeds_query("python"))
         await asyncio.sleep(0)
         assert not whoneeds_started.is_set()
 
@@ -2127,7 +2123,7 @@ def test_apply_whoneeds_query_closes_the_loading_screen_before_reporting_failure
         app, "notify", lambda message, **_kwargs: events.append(f"notified:{message}")
     )
 
-    asyncio.run(app._apply_whoneeds_query("python", "python"))
+    asyncio.run(app._apply_whoneeds_query("python"))
 
     assert events == ["closed", "notified:Failed to query who needs: scan exploded"]
 
@@ -4627,7 +4623,6 @@ def test_apply_whoneeds_query_empty_restores_full_package_selection(
 ) -> None:
     app = CondaMetadataTui()
     app._channel_package_names = ["demo", "numpy"]
-    app._whoneeds_query = "python"
     app._whoneeds_target = "python"
     app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
     app._mode = "versions"
@@ -4640,9 +4635,8 @@ def test_apply_whoneeds_query_empty_restores_full_package_selection(
     monkeypatch.setattr(app, "_focus_sidebar", lambda: None)
     monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: _FakeFooter())
 
-    asyncio.run(app._apply_whoneeds_query(None, ""))
+    asyncio.run(app._apply_whoneeds_query(None))
 
-    assert app._whoneeds_query == ""
     assert app._whoneeds_target is None
     assert app._query_records_by_package == {}
     assert app._all_package_names == ["demo", "numpy"]
@@ -4679,7 +4673,6 @@ def test_apply_matchspec_result_releases_whoneeds_repodata(monkeypatch) -> None:
     gateway = _RecordingGateway()
     app._whoneeds_gateway = cast(Gateway, gateway)
     app._whoneeds_scanned_channel = "conda-forge"
-    app._whoneeds_query = "python"
     app._whoneeds_target = "python"
 
     monkeypatch.setattr(app, "_filter_packages", lambda: None)
@@ -4831,7 +4824,6 @@ def test_apply_whoneeds_result_opens_dependent_packages(monkeypatch) -> None:
     asyncio.run(
         app._apply_whoneeds_result(
             "python",
-            "python",
             WhoNeedsQueryResult(
                 package_names=["numpy"],
                 records_by_package={"numpy": [record]},
@@ -4840,7 +4832,6 @@ def test_apply_whoneeds_result_opens_dependent_packages(monkeypatch) -> None:
     )
 
     assert app._matchspec_query == ""
-    assert app._whoneeds_query == "python"
     assert app._whoneeds_target == "python"
     assert app._query_records_by_package == {"numpy": [record]}
     assert opened == ["numpy"]
@@ -4857,7 +4848,6 @@ def test_apply_platform_selection_reapplies_active_query(
     if query_kind == "matchspec":
         app._matchspec_query = "demo >=1"
     else:
-        app._whoneeds_query = "demo"
         app._whoneeds_target = "demo"
 
     class _FakeStatus:
