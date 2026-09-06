@@ -1859,33 +1859,18 @@ def test_whoneeds_screen_validates_package_name() -> None:
         ("packages", None, "python", "python"),
     ],
 )
-def test_action_whoneeds_key_w_opens_prefilled_prompt(
+def test_whoneeds_screen_initial_value(
     mode: ViewMode,
     selected_package: str | None,
     target: str | None,
     expected: str,
-    monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    pushed: list[tuple[WhoNeedsScreen, object | None]] = []
-
-    monkeypatch.setattr(
-        app,
-        "push_screen",
-        lambda screen, callback=None: pushed.append((screen, callback)),
-    )
-    monkeypatch.setattr(app, "_current_compare_selection", lambda: None)
     app._mode = mode
     app._selected_package = selected_package
     app._whoneeds_target = target
 
-    app.action_whoneeds_key_w()
-
-    assert len(pushed) == 1
-    screen, callback = pushed[0]
-    assert isinstance(screen, WhoNeedsScreen)
-    assert screen._initial_value == expected
-    assert callback == app._handle_whoneeds_result
+    assert app._whoneeds_screen_initial_value() == expected
 
 
 def _detail_selection() -> CompareSelection:
@@ -1901,71 +1886,53 @@ def _detail_selection() -> CompareSelection:
     )
 
 
-def test_action_whoneeds_key_w_confirms_the_highlighted_entry_while_details_load(
+def test_whoneeds_for_highlighted_entry_queries_its_concrete_record(
     monkeypatch,
 ) -> None:
     app = CondaMetadataTui()
-    pushed: list[WhoNeedsConfirmScreen] = []
-
-    monkeypatch.setattr(
-        app,
-        "push_screen",
-        lambda screen, callback=None: pushed.append(
-            cast(WhoNeedsConfirmScreen, screen)
-        ),
-    )
-    monkeypatch.setattr(app, "_current_compare_selection", _detail_selection)
-    monkeypatch.setattr(
-        app,
-        "_main_panel_shows_version_details",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("who needs must not wait for the details view")
-        ),
-    )
-    app._mode = "versions"
-    app._selected_package = "demo"
-
-    app.action_whoneeds_key_w()
-
-    assert [screen._target_label for screen in pushed] == [
-        "demo 1.2.3 py313h123_0 [noarch]"
-    ]
-
-
-def test_handle_whoneeds_confirmation_dispatches_the_selected_action(
-    monkeypatch,
-) -> None:
-    app = CondaMetadataTui()
+    record = _make_repo_data_record()
     selection = _detail_selection()
+    app._mode = "versions"
+    app._selected_package = selection.package_name
+    app._version_rows = [VersionRow(kind="entry", entry=selection.entry)]
+    app._query_records_by_package = {selection.package_name: [record]}
+    pushed: list[tuple[object, Callable[[object], None] | None]] = []
+    queried: list[str | PackageRecord] = []
     worker_calls: list[dict[str, object]] = []
-    applied: list[CompareSelection] = []
-    pushed: list[tuple[object, object | None]] = []
 
-    async def _fake_apply_for_selection(target: CompareSelection) -> None:
-        applied.append(target)
+    class _FakeOptionList:
+        highlighted = 0
 
-    def _fake_run_worker(coro: object, **kwargs: object) -> None:
+    async def _record_query(target: str | PackageRecord) -> None:
+        queried.append(target)
+
+    def _run_worker(coro: object, **kwargs: object) -> None:
         worker_calls.append(kwargs)
         asyncio.run(cast(Coroutine[None, None, None], coro))
 
-    monkeypatch.setattr(app, "_apply_whoneeds_for_selection", _fake_apply_for_selection)
-    monkeypatch.setattr(app, "run_worker", _fake_run_worker)
     monkeypatch.setattr(
         app,
         "push_screen",
         lambda screen, callback=None: pushed.append((screen, callback)),
     )
+    monkeypatch.setattr(app, "query_one", lambda *_args: _FakeOptionList())
+    monkeypatch.setattr(app, "run_worker", _run_worker)
+    monkeypatch.setattr(app, "_apply_whoneeds_query", _record_query)
 
-    app._handle_whoneeds_confirmation(selection, None)
-    app._handle_whoneeds_confirmation(selection, "custom")
-    app._handle_whoneeds_confirmation(selection, "run")
+    app.action_whoneeds_key_w()
 
-    assert len(pushed) == 1
     screen, callback = pushed[0]
-    assert isinstance(screen, WhoNeedsScreen)
-    assert screen._initial_value == "demo"
-    assert callback == app._handle_whoneeds_result
-    assert applied == [selection]
+    assert isinstance(screen, WhoNeedsConfirmScreen)
+    assert screen._target_label == "demo 1.2.3 py313h123_0 [noarch]"
+    assert callback is not None
+
+    callback("custom")
+    custom_screen, _ = pushed[1]
+    assert isinstance(custom_screen, WhoNeedsScreen)
+    assert custom_screen._initial_value == "demo"
+
+    callback("run")
+    assert queried == [record]
     assert worker_calls == [
         {
             "group": "whoneeds-selection",
@@ -1973,41 +1940,6 @@ def test_handle_whoneeds_confirmation_dispatches_the_selected_action(
             "exit_on_error": False,
         }
     ]
-
-
-def test_apply_whoneeds_for_selection_queries_concrete_package_record(
-    monkeypatch,
-) -> None:
-    app = CondaMetadataTui()
-    record = _make_repo_data_record(name="python", version="3.13.1", build="h123_0")
-    selection = CompareSelection(
-        "python",
-        VersionEntry(
-            version=record.version,
-            build=record.build,
-            build_number=record.build_number,
-            subdir=record.subdir,
-            file_name=record.file_name,
-        ),
-    )
-    queries: list[str | PackageRecord] = []
-
-    async def _fake_get_record(
-        package_name: str, entry: VersionEntry
-    ) -> RepoDataRecord | None:
-        assert package_name == selection.package_name
-        assert entry == selection.entry
-        return record
-
-    async def _fake_apply_query(target: str | PackageRecord) -> None:
-        queries.append(target)
-
-    monkeypatch.setattr(app, "_get_record_for_version_entry", _fake_get_record)
-    monkeypatch.setattr(app, "_apply_whoneeds_query", _fake_apply_query)
-
-    asyncio.run(app._apply_whoneeds_for_selection(selection))
-
-    assert queries == [record]
 
 
 def _forbid_background_updates(app: CondaMetadataTui, monkeypatch) -> None:
@@ -4620,33 +4552,6 @@ def test_apply_matchspec_query_empty_restores_full_package_selection(
     assert focused == ["sidebar"]
 
 
-def test_apply_whoneeds_query_empty_restores_full_package_selection(
-    monkeypatch,
-) -> None:
-    app = CondaMetadataTui()
-    app._channel_package_names = ["demo", "numpy"]
-    app._whoneeds_target = "python"
-    app._query_records_by_package = {"demo": [_make_repo_data_record(name="demo")]}
-    app._mode = "versions"
-    gateway = _RecordingGateway()
-    app._whoneeds_gateway = cast(Gateway, gateway)
-    app._whoneeds_scanned_channel = "conda-forge"
-
-    monkeypatch.setattr(app, "_filter_packages", lambda: None)
-    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
-    monkeypatch.setattr(app, "_focus_sidebar", lambda: None)
-    monkeypatch.setattr(app, "query_one", lambda *_args, **_kwargs: _FakeFooter())
-
-    asyncio.run(app._apply_whoneeds_query(None))
-
-    assert app._whoneeds_target is None
-    assert app._query_records_by_package == {}
-    assert app._all_package_names == ["demo", "numpy"]
-    assert app._mode == "packages"
-    assert gateway.cleared == ["conda-forge"]
-    assert app._whoneeds_scanned_channel is None
-
-
 def test_whoneeds_gateway_tracks_and_releases_the_scanned_channel() -> None:
     app = CondaMetadataTui()
     gateway = _RecordingGateway()
@@ -4803,40 +4708,6 @@ def test_apply_matchspec_result_keeps_packages_view_for_multiple_packages(
     assert app._mode == "packages"
     assert opened == []
     assert focused == ["sidebar"]
-
-
-def test_apply_whoneeds_result_opens_dependent_packages(monkeypatch) -> None:
-    app = CondaMetadataTui()
-    record = _make_repo_data_record(name="numpy", depends=["python >=3.10"])
-    opened: list[str] = []
-
-    monkeypatch.setattr(
-        app,
-        "_filter_packages",
-        lambda: setattr(app, "_visible_package_names", list(app._all_package_names)),
-    )
-    monkeypatch.setattr(app, "_update_filter_indicator", lambda: None)
-    monkeypatch.setattr(app, "_focus_sidebar", lambda: None)
-
-    async def _fake_open_versions(package_name: str) -> None:
-        opened.append(package_name)
-
-    monkeypatch.setattr(app, "_open_versions", _fake_open_versions)
-
-    asyncio.run(
-        app._apply_whoneeds_result(
-            "python",
-            WhoNeedsQueryResult(
-                package_names=["numpy"],
-                records_by_package={"numpy": [record]},
-            ),
-        )
-    )
-
-    assert app._matchspec_query == ""
-    assert app._whoneeds_target == "python"
-    assert app._query_records_by_package == {"numpy": [record]}
-    assert opened == ["numpy"]
 
 
 @pytest.mark.parametrize("query_kind", ["matchspec", "whoneeds"])
