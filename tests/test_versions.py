@@ -291,6 +291,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
             channel_name="conda-forge",
             platforms=[Platform("linux-64"), Platform("noarch")],
             target=target,
+            log=lambda _message: None,
         )
 
     by_name = asyncio.run(_query("python"))

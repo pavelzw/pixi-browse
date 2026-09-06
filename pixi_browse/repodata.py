@@ -165,7 +165,7 @@ async def query_whoneeds_records(
     channel_name: str,
     platforms: list[Platform],
     target: str | PackageRecord,
-    log: Callable[[str], None] | None = None,
+    log: Callable[[str], None],
 ) -> WhoNeedsQueryResult:
     """Return all channel records that depend on ``target``.
 
@@ -180,12 +180,11 @@ async def query_whoneeds_records(
         else f"{target.name.normalized} {target.version} {target.build}"
     )
     platforms_label = ",".join(str(platform) for platform in platforms)
-    if log is not None:
-        log(
-            "who-needs: starting gateway reverse query "
-            f"target={target_label!r} channel={channel_name!r} "
-            f"platforms={platforms_label!r}"
-        )
+    log(
+        "who-needs: starting gateway reverse query "
+        f"target={target_label!r} channel={channel_name!r} "
+        f"platforms={platforms_label!r}"
+    )
 
     query_started = perf_counter()
     dependents = await gateway.who_needs(
@@ -194,11 +193,10 @@ async def query_whoneeds_records(
         target=target,
     )
     query_duration = perf_counter() - query_started
-    if log is not None:
-        log(
-            "who-needs: gateway reverse query finished "
-            f"elapsed={query_duration:.3f}s matches={len(dependents):,}"
-        )
+    log(
+        "who-needs: gateway reverse query finished "
+        f"elapsed={query_duration:.3f}s matches={len(dependents):,}"
+    )
 
     grouping_started = perf_counter()
     grouped_records: dict[
@@ -212,13 +210,12 @@ async def query_whoneeds_records(
         )
     grouping_duration = perf_counter() - grouping_started
     dependent_record_count = sum(len(records) for records in grouped_records.values())
-    if log is not None:
-        log(
-            "who-needs: result grouping finished "
-            f"elapsed={grouping_duration:.3f}s "
-            f"unique_records={dependent_record_count:,} "
-            f"packages={len(grouped_records):,}"
-        )
+    log(
+        "who-needs: result grouping finished "
+        f"elapsed={grouping_duration:.3f}s "
+        f"unique_records={dependent_record_count:,} "
+        f"packages={len(grouped_records):,}"
+    )
 
     sorting_started = perf_counter()
     sorted_package_names = sorted(grouped_records)
@@ -233,9 +230,8 @@ async def query_whoneeds_records(
         },
     )
     sorting_duration = perf_counter() - sorting_started
-    if log is not None:
-        log(
-            "who-needs: result sorting finished "
-            f"elapsed={sorting_duration:.3f}s packages={len(sorted_package_names):,}"
-        )
+    log(
+        "who-needs: result sorting finished "
+        f"elapsed={sorting_duration:.3f}s packages={len(sorted_package_names):,}"
+    )
     return result
