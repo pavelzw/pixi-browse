@@ -101,6 +101,13 @@ async def fetch_package_names(
 def record_identity_key(
     record: RepoDataRecord,
 ) -> tuple[str, str, str, int, str, str]:
+    """Identify a record repeated across distinct who-needs dependency edges.
+
+    Rattler returns one ``Dependent`` per matching dependency field, so the
+    same record can occur more than once when it both depends on and constrains
+    the target, for example. Pixi Browse displays records rather than edges and
+    uses this key to collapse those occurrences.
+    """
     return (
         record.name.normalized,
         str(record.version),
@@ -118,18 +125,16 @@ async def query_package_records(
     platforms: list[Platform],
     package_name: str,
 ) -> list[RepoDataRecord]:
-    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
         sources=[channel_name],
         platforms=platforms,
         specs=[package_name],
         recursive=False,
     )
-    for source_records in by_source:
-        for record in source_records:
-            unique_records[record_identity_key(record)] = record
-
-    return sorted(unique_records.values(), reverse=True)
+    return sorted(
+        (record for source_records in by_source for record in source_records),
+        reverse=True,
+    )
 
 
 async def query_matchspec_records(
@@ -139,21 +144,17 @@ async def query_matchspec_records(
     platforms: list[Platform],
     matchspec: MatchSpec,
 ) -> MatchSpecQueryResult:
-    unique_records: dict[tuple[str, str, str, int, str, str], RepoDataRecord] = {}
     by_source = await gateway.query(
         sources=[channel_name],
         platforms=platforms,
         specs=[matchspec],
         recursive=False,
     )
+    grouped_records: dict[str, list[RepoDataRecord]] = {}
     for source_records in by_source:
         for record in source_records:
-            unique_records[record_identity_key(record)] = record
-
-    grouped_records: dict[str, list[RepoDataRecord]] = {}
-    for record in unique_records.values():
-        package_name = record.name.normalized
-        grouped_records.setdefault(package_name, []).append(record)
+            package_name = record.name.normalized
+            grouped_records.setdefault(package_name, []).append(record)
 
     sorted_package_names = sorted(grouped_records)
     return MatchSpecQueryResult(

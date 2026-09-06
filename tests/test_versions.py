@@ -260,7 +260,8 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
     python = _make_repo_data_record(name="python", version="3.13.1", build="h1_0")
     numpy = _make_repo_data_record(
         name="numpy",
-        depends=["python >=3.10", "python"],
+        depends=["python >=3.10"],
+        constrains=["python"],
     )
     legacy = _make_repo_data_record(name="legacy", depends=["python <3.10"])
     targets: list[str | PackageRecord] = []
@@ -281,7 +282,8 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
                 [
                     _Dependent(legacy, "python <3.10"),
                     _Dependent(numpy, "python >=3.10"),
-                    # Multiple matching edges must not duplicate a record.
+                    # Rattler emits the same record again for its matching
+                    # constrains edge; the UI must still show it only once.
                     _Dependent(numpy, "python"),
                 ],
             )
