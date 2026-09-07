@@ -324,7 +324,7 @@ def _metadata_rows_for_record(
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
-    repodata_patches: RepodataPatchDiff | None = None,
+    repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
 ) -> tuple[MetadataRow, ...]:
     metadata_rows: list[MetadataRow] = [
         ("Package", package_name),
@@ -398,9 +398,7 @@ def _metadata_rows_for_record(
     return tuple(metadata_rows)
 
 
-def format_repodata_patches_summary(patches: RepodataPatchDiff | None) -> str:
-    if patches is None:
-        return "unknown (info/index.json unavailable)"
+def format_repodata_patches_summary(patches: RepodataPatchDiff) -> str:
     if not patches.is_patched:
         return "none (repodata matches info/index.json)"
     count = patches.change_count
@@ -421,7 +419,7 @@ def build_version_artifact_data(
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
-    repodata_patches: RepodataPatchDiff | None = None,
+    repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=_metadata_rows_for_record(

@@ -477,13 +477,8 @@ def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> Non
 def test_metadata_rows_summarize_repodata_patch_state() -> None:
     record = _make_repo_data_record()
 
-    unknown = format_version_details_metadata_lines(
-        build_version_artifact_data("demo", record)
-    )
     unpatched = format_version_details_metadata_lines(
-        build_version_artifact_data(
-            "demo", record, repodata_patches=RepodataPatchDiff()
-        )
+        build_version_artifact_data("demo", record)
     )
     patched = format_version_details_metadata_lines(
         build_version_artifact_data(
@@ -497,7 +492,6 @@ def test_metadata_rows_summarize_repodata_patch_state() -> None:
         )
     )
 
-    assert "Repodata patches      unknown (info/index.json unavailable)" in unknown
     assert "Repodata patches      none (repodata matches info/index.json)" in unpatched
     assert "Repodata patches      1 change (see Repodata patches tab)" in patched
 
@@ -530,14 +524,11 @@ def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> N
     assert cast(Text, table.columns[2]._cells[1]).plain == "requests"
 
 
-def test_render_repodata_patches_body_explains_empty_and_unknown_states() -> None:
+def test_render_repodata_patches_body_explains_empty_state() -> None:
     unpatched = cast(Text, render_repodata_patches_body(RepodataPatchDiff()))
-    unknown = cast(Text, render_repodata_patches_body(None))
 
     assert unpatched.plain == "Repodata matches info/index.json. No patches applied."
-    assert "Could not read info/index.json" in unknown.plain
     assert unpatched.style == "dim"
-    assert unknown.style == "dim"
 
 
 def test_build_version_artifact_data_includes_package_paths() -> None:
@@ -836,43 +827,6 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
     )
     assert (
         "Repodata patches      2 changes (see Repodata patches tab)"
-        in format_version_details_metadata_lines(details)
-    )
-
-
-def test_load_version_artifact_data_tolerates_unavailable_index_json(
-    monkeypatch,
-) -> None:
-    loader = VersionDataLoader(client=cast(Client, object()))
-    record = _make_repo_data_record(name="demo")
-    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
-
-    async def _fake_get_package_paths(
-        _preview_key: tuple[str, str, str, int, str, str], _value: PackageArchive
-    ) -> list[PackageFile]:
-        return []
-
-    async def _fake_get_info_files(_value: PackageArchive) -> list[PackageFile]:
-        return []
-
-    async def _fake_get_index_json(_value: PackageArchive) -> IndexJson:
-        raise RuntimeError("index.json missing")
-
-    monkeypatch.setattr(
-        "pixi_browse.tui.version_loader.PackageArchive.from_url",
-        _fake_package_archive_from_url,
-    )
-    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
-    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
-    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
-
-    details = asyncio.run(
-        loader.load_version_artifact_data("demo", record, preview_key=preview_key)
-    )
-
-    assert details.repodata_patches is None
-    assert (
-        "Repodata patches      unknown (info/index.json unavailable)"
         in format_version_details_metadata_lines(details)
     )
 
@@ -2844,15 +2798,6 @@ def test_metadata_header_shows_patches_tab_only_when_record_is_patched() -> None
 
     view._details = _make_artifact_data()
     assert view.available_metadata_tabs() == ("metadata",)
-    assert view.metadata_tabs_available() is False
-    assert view._render_metadata_header().plain == "[1] Metadata"
-
-    view._details = VersionArtifactData(
-        metadata_rows=(),
-        dependencies=(),
-        constraints=(),
-        repodata_patches=RepodataPatchDiff(),
-    )
     assert view.metadata_tabs_available() is False
     assert view._render_metadata_header().plain == "[1] Metadata"
 

@@ -97,7 +97,7 @@ class VersionArtifactData:
     provenance_remote_url: str | None = None
     provenance_sha: str | None = None
     rattler_build_version: str | None = None
-    repodata_patches: RepodataPatchDiff | None = None
+    repodata_patches: RepodataPatchDiff = RepodataPatchDiff()
 
 
 @dataclass(frozen=True)

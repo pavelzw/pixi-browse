@@ -11,7 +11,6 @@ from rattler.repo_data import RepoDataRecord
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
-    RepodataPatchDiff,
     VersionArtifactData,
     VersionPreviewKey,
 )
@@ -250,14 +249,10 @@ class VersionDataLoader:
 
         # Repodata patches rewrite the channel's repodata without touching the
         # archive, so the gateway record and info/index.json diverge when a
-        # patch applies. If index.json cannot be read the patch state is unknown.
-        repodata_patches: RepodataPatchDiff | None = None
-        try:
-            repodata_patches = build_repodata_patch_diff(
-                record, await self.get_index_json(archive)
-            )
-        except Exception:
-            pass
+        # patch applies. Every conda package ships info/index.json.
+        repodata_patches = build_repodata_patch_diff(
+            record, await self.get_index_json(archive)
+        )
 
         artifact_data = build_version_artifact_data(
             package_name,

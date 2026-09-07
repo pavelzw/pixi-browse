@@ -148,16 +148,8 @@ def render_compare_table(
     return table
 
 
-def render_repodata_patches_body(
-    patches: RepodataPatchDiff | None,
-) -> RenderableType:
+def render_repodata_patches_body(patches: RepodataPatchDiff) -> RenderableType:
     """Render the unpatched (index.json) vs patched (repodata) diff table."""
-    if patches is None:
-        return Text(
-            "Could not read info/index.json from the package archive, "
-            "so repodata patches cannot be detected.",
-            style="dim",
-        )
     return render_compare_table(
         patches.rows,
         empty_message="Repodata matches info/index.json. No patches applied.",
@@ -373,11 +365,7 @@ class VersionDetailsView(Vertical):
 
     @staticmethod
     def _patches_tab_available(details: VersionArtifactData | None) -> bool:
-        return (
-            details is not None
-            and details.repodata_patches is not None
-            and details.repodata_patches.is_patched
-        )
+        return details is not None and details.repodata_patches.is_patched
 
     def available_metadata_tabs(self) -> tuple[MetadataTab, ...]:
         """The repodata patches tab only exists when the record was patched."""
@@ -728,7 +716,7 @@ class VersionDetailsView(Vertical):
         tabs = self.available_metadata_tabs()
         if len(tabs) == 1:
             return Text("Metadata")
-        assert self._details is not None and self._details.repodata_patches is not None
+        assert self._details is not None
         labels: dict[MetadataTab, str] = {
             "metadata": "Metadata",
             "patches": (
