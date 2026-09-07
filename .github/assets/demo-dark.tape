@@ -37,7 +37,7 @@ Sleep 1s
 Tab
 Sleep 2s
 # go down
-Down 20
+Down 7
 Sleep 2s
 # preview file
 Enter
@@ -46,6 +46,19 @@ Enter
 Sleep 3s
 Escape
 Sleep 1s
+
+# go to info view
+Type "]"
+Sleep 1s
+Down@250ms 3
+Sleep 1s
+Enter
+Sleep 1s
+Enter
+Sleep 3s
+Escape
+Sleep 1s
+
 # go to dependencies view
 Shift+Tab
 # cycle through dependencies/constraints/run exports
