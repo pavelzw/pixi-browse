@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from textual.pilot import Pilot
 
-from pixi_browse.tui import FileActionScreen
+from pixi_browse.tui import DetailSection, FileActionScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
@@ -219,3 +220,132 @@ def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
             assert app.return_code == 0
 
     asyncio.run(run())
+
+
+def test_compare_key_in_packages_view_is_ignored(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``C`` only stores artifacts in the versions view."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("C")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_left_bracket_wraps_dependency_tab(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the dependencies tab wraps around to the run exports."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("tab", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_left_bracket_wraps_file_tab(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the ``pkg/`` tab wraps around to ``info/``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("3", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    ("section_index", "column"),
+    [(1, 30), (2, 20)],
+    ids=["constraints", "info"],
+)
+def test_compare_screen_clicking_tab_label_switches_tab(
+    snap_compare: SnapCompare,
+    make_app: AppFactory,
+    section_index: int,
+    column: int,
+) -> None:
+    """Clicking the second tab label of a compare section switches its tab."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        section = list(pilot.app.screen.query(DetailSection))[section_index]
+        await pilot.click(section, offset=(column, 0))
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        ("3", "ctrl+d"),
+        ("3", "end", "k"),
+        ("3", "G", "g", "g", "j"),
+        ("3", "pagedown", "pageup", "home", "j"),
+    ],
+    ids=["ctrl+d", "end-k", "gg", "pagedown-pageup-home"],
+)
+def test_compare_screen_paging_keys_move_file_highlight(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """Paging and jump keys move the file highlight of the compare screen; a
+    trailing ``j`` shows the highlight did land on the first row."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press(*keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize("keys", [("G",), ("j", "j", "j")], ids=["G", "jjj"])
+def test_compare_screen_metadata_table_scrolls(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """The metadata table is taller than its section: ``j`` scrolls it and
+    ``G`` jumps to the end."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press(*keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_clicking_file_row_opens_file_actions(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Clicking a compare file row opens the file actions, like ``Enter``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        # Row 2 is lib/libz.so.1.3.2, which only the right build has.
+        await pilot.click("#compare-option-list-2", offset=(2, 2))
+        await wait_for_screen(pilot, FileActionScreen)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_file_actions_escape_returns_to_compare(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` on the file actions returns to the compare screen unchanged."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("3", "j", "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 
 import pytest
 from rattler.match_spec import MatchSpec
@@ -90,3 +92,15 @@ def test_cli_exits_for_invalid_matchspec() -> None:
 
     assert result.exit_code == 1
     assert result.output.strip()
+
+
+def test_module_entry_point_prints_version() -> None:
+    """``python -m pixi_browse`` runs the same Typer app as the console script."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pixi_browse", "--version"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == f"pixi-browse {__version__}"

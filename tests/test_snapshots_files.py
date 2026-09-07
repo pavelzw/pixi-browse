@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from textual.pilot import Pilot
 
 from pixi_browse.tui import FileActionScreen
@@ -145,5 +146,48 @@ def test_d_on_section_row_warns(
         await open_versions(pilot, package_index=1)
         await pilot.press("k", "d")
         await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [("G",), ("ctrl+d",), ("ctrl+d", "k"), ("end", "ctrl+u"), ("G", "g")],
+    ids=["G", "ctrl+d", "ctrl+d-k", "end-ctrl+u", "G-g"],
+)
+def test_preview_scroll_keys(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """The preview of ``pixi_browse/__main__.py`` is longer than the dialog:
+    ``G``/``end`` jump to the end, ``g`` back to the top, ``ctrl+d``/``ctrl+u``
+    page and ``k`` scrolls one line up."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        # The second pkg/ file is site-packages/pixi_browse/__main__.py.
+        await pilot.press("3", "j", "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+        await pilot.press(*keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_download_path_escape_cancels_download(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` on the destination prompt downloads nothing and returns to the
+    details."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("3", "]", "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
