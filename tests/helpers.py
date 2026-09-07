@@ -21,6 +21,7 @@ from textual.worker import Worker, WorkerState
 from pixi_browse.tui import CondaMetadataTui
 
 UPSTREAM_CHANNEL_URL = "https://conda.anaconda.org/conda-forge/"
+TERMINAL_SIZE = (120, 40)
 CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]
@@ -102,20 +103,23 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
     seen_workers: dict[int, Worker[object]] = {}
     while True:
         await pilot.pause()
-        seen_workers.update((id(worker), worker) for worker in app.workers)
-        await app.workers.wait_for_complete()
-        await pilot.pause()
+        workers = list(app.workers)
+        seen_workers.update((id(worker), worker) for worker in workers)
         sidebar = app.query_one("#sidebar-list", OptionList)
         status = app.query_one("#status", Static)
         if str(status.content).startswith("Failed to load"):
             raise AssertionError(f"app failed to load repodata: {status.content}")
-        if not sidebar.disabled and not list(app.workers):
+        # Poll instead of `workers.wait_for_complete()`: that raises
+        # WorkerCancelled for workers cancelled by exclusive groups or resets.
+        if not sidebar.disabled and all(worker.is_finished for worker in workers):
             break
         if time.monotonic() > deadline:
             raise TimeoutError(
                 f"app did not become idle within {timeout}s (status={status.content!r})"
             )
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.02)
+    # Flush UI updates posted by workers that finished just before the check.
+    await pilot.pause()
 
     # The app swallows worker errors (``exit_on_error=False``); surface them
     # here so a test fails with the real exception instead of a snapshot of a

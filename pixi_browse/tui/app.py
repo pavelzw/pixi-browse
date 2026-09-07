@@ -446,6 +446,14 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package = None
         self._previewed_version_key = None
         self._pending_preview_version_key = None
+        # Every caller replaces the selection the previews belong to (channel or
+        # platform switch, query change). A worker still loading the old
+        # selection must neither render nor fill the freshly cleared caches, and
+        # it must not block the next request for the same key.
+        self.workers.cancel_group(self, "package-preview")
+        self.workers.cancel_group(self, "version-preview")
+        self._package_preview_request = None
+        self._version_preview_request = None
 
     def _clear_version_state(self) -> None:
         self._current_versions.clear()

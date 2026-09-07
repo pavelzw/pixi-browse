@@ -14,11 +14,9 @@ from collections.abc import Callable
 
 from textual.pilot import Pilot
 
-from tests.helpers import AppFactory, type_text, wait_for_idle
+from tests.helpers import TERMINAL_SIZE, AppFactory, type_text, wait_for_idle
 
 SnapCompare = Callable[..., bool]
-
-TERMINAL_SIZE = (120, 40)
 
 
 async def open_versions(pilot: Pilot[None], package_index: int) -> None:

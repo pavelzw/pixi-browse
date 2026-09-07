@@ -4,6 +4,7 @@ import shutil
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
@@ -1281,7 +1282,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
             no_link: bool,
             path_type: str,
         ) -> None:
-            self.relative_path = relative_path
+            self.relative_path = PurePosixPath(relative_path)
             self.size_in_bytes = size_in_bytes
             self.sha256 = sha256
             self.no_link = no_link
