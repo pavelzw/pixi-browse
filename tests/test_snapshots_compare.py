@@ -28,6 +28,9 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
 def test_compare_key_stores_first_selection(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``C`` on an artifact stores it as compare A, notifies, and highlights the
+    compare hint in the footer."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("C")
@@ -39,6 +42,8 @@ def test_compare_key_stores_first_selection(
 def test_compare_key_rejects_the_same_artifact_twice(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``C`` twice on the same artifact warns that compare B must differ."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("C", "C")
@@ -50,6 +55,8 @@ def test_compare_key_rejects_the_same_artifact_twice(
 def test_compare_key_on_section_row_does_nothing(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``C`` on a platform section row stores nothing."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("k", "C")
@@ -61,6 +68,9 @@ def test_compare_key_on_section_row_does_nothing(
 def test_compare_screen_shows_metadata_diff(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """The compare screen lists metadata side by side with the older build on the
+    left."""
+
     assert snap_compare(
         make_app(), run_before=open_compare_screen, terminal_size=TERMINAL_SIZE
     )
@@ -69,6 +79,9 @@ def test_compare_screen_shows_metadata_diff(
 def test_compare_screen_tab_activates_dependencies(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Tab`` activates the dependency pane; ``]`` twice switches it to the run
+    exports."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("tab", "]", "]")
@@ -80,6 +93,8 @@ def test_compare_screen_tab_activates_dependencies(
 def test_compare_screen_shift_tab_activates_files(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Shift+Tab`` wraps to the file pane, where ``j`` moves the highlight."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("shift+tab", "j")
@@ -91,6 +106,9 @@ def test_compare_screen_shift_tab_activates_files(
 def test_compare_screen_swap_sides(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``x`` swaps left and right, including the title colors and the file
+    markers."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("x")
@@ -131,6 +149,9 @@ def test_compare_screen_enter_on_info_file_resolves_hashes(
 def test_compare_screen_enter_on_symlink_row_warns(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Enter`` on a symlink row explains that symlinks cannot be previewed or
+    downloaded."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("3", "enter")
@@ -143,6 +164,9 @@ def test_compare_screen_enter_on_symlink_row_warns(
 def test_compare_screen_enter_on_left_only_file_offers_left_actions(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Enter`` on a file only the left build has offers preview and download for
+    the left side only."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("3", "j", "enter")
@@ -155,6 +179,9 @@ def test_compare_screen_enter_on_left_only_file_offers_left_actions(
 def test_compare_screen_rejects_binary_preview(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Previewing a shared library shows the binary-file notice instead of its
+    contents."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("3", "j", "enter")
@@ -181,6 +208,8 @@ def test_compare_screen_escape_returns_to_versions(
 
 
 def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
+    """``q`` on the compare screen quits the whole app."""
+
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:

@@ -37,6 +37,8 @@ def test_key_focuses_main_panel_from_sidebar(
 def test_key_returns_focus_to_sidebar_from_main_panel(
     snap_compare: SnapCompare, make_app: AppFactory, key: str
 ) -> None:
+    """``Escape``, ``0`` and ``h`` move the selected pane back to the sidebar."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("l")
@@ -65,6 +67,8 @@ def test_j_moves_sidebar_highlight_and_previews_package(
 def test_jump_and_page_down_highlight_last_package(
     snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
 ) -> None:
+    """``G`` and ``Ctrl+d`` jump to the last package and preview it."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press(*keys)
@@ -77,6 +81,8 @@ def test_jump_and_page_down_highlight_last_package(
 def test_jump_and_page_up_return_to_first_package(
     snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
 ) -> None:
+    """``gg`` and ``Ctrl+u`` return from the last package to the first."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("G")
@@ -103,6 +109,8 @@ def test_single_g_does_not_jump(
 def test_clicking_main_panel_focuses_it(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Clicking into the details panel makes it the selected pane."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.click("#main-placeholder")
@@ -158,6 +166,8 @@ def test_escape_returns_from_versions_to_packages(
 def test_back_row_previews_the_package_again(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Highlighting ``< Back to packages`` shows the package preview again."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("g", "g")
@@ -169,6 +179,9 @@ def test_back_row_previews_the_package_again(
 def test_highlighting_platform_section_shows_placeholder(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Highlighting a platform section row shows the collapse/expand hint instead
+    of artifact details."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("k")
@@ -180,6 +193,9 @@ def test_highlighting_platform_section_shows_placeholder(
 def test_enter_on_platform_section_collapses_it(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Enter`` on a platform section collapses its artifacts and flips the
+    marker."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("k", "enter")
@@ -204,6 +220,9 @@ def test_enter_on_version_entry_focuses_main_panel(
 def test_clicking_version_entry_keeps_sidebar_focused(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Selecting an artifact with the mouse loads its details but keeps the
+    sidebar focused."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         # Row 3 is the second artifact (0.0.13) of the noarch section.
@@ -217,6 +236,9 @@ def test_clicking_version_entry_keeps_sidebar_focused(
 def test_numeric_shortcut_activates_section_and_focuses_main_panel(
     snap_compare: SnapCompare, make_app: AppFactory, key: str
 ) -> None:
+    """``1``, ``2`` and ``3`` activate the metadata, dependency and file section
+    and focus the details."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press(key)
@@ -228,6 +250,8 @@ def test_numeric_shortcut_activates_section_and_focuses_main_panel(
 def test_zero_returns_focus_to_sidebar_in_versions_view(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``0`` returns focus to the version list after a section shortcut."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "0")
@@ -239,6 +263,8 @@ def test_zero_returns_focus_to_sidebar_in_versions_view(
 def test_shift_tab_cycles_sections_backwards(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Shift+Tab`` from the metadata section wraps around to the file section."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("l", "shift+tab")
@@ -263,6 +289,8 @@ def test_tab_in_sidebar_does_not_move_focus(
 def test_bracket_in_sidebar_does_not_cycle_tabs(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``]`` and ``[`` are ignored while the sidebar is the selected pane."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("]", "[")
@@ -288,6 +316,9 @@ def test_bracket_switches_metadata_to_repodata_patches_tab(
 def test_metadata_tab_persists_across_artifacts(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """The repodata patches tab stays selected when another artifact is
+    highlighted."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("l", "]", "h", "j")
@@ -299,6 +330,8 @@ def test_metadata_tab_persists_across_artifacts(
 def test_bracket_switches_dependency_tab_to_constraints(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``]`` in the dependency section switches to the (empty) constraints tab."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "]")
@@ -310,6 +343,8 @@ def test_bracket_switches_dependency_tab_to_constraints(
 def test_left_bracket_wraps_dependency_tab_to_run_exports(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``[`` in the dependency section wraps around to the run exports tab."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("2", "[")
@@ -321,6 +356,8 @@ def test_left_bracket_wraps_dependency_tab_to_run_exports(
 def test_bracket_switches_file_tab_to_info(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``]`` in the file section switches from ``pkg/`` to the ``info/`` files."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]")
@@ -332,6 +369,9 @@ def test_bracket_switches_file_tab_to_info(
 def test_j_and_shift_g_move_highlight_in_file_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``j``, ``G`` and ``k`` move the highlight in the file list; it ends on the
+    second-to-last file."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "j", "j", "G", "k")
@@ -343,6 +383,9 @@ def test_j_and_shift_g_move_highlight_in_file_list(
 def test_clicking_metadata_body_activates_metadata_section(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Clicking the metadata text activates that section while the file section
+    was active."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3")

@@ -44,6 +44,8 @@ def test_enter_on_info_file_opens_file_actions(
 def test_clicking_file_opens_file_actions(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Clicking a file row opens the same file action screen as ``Enter``."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.click("#detail-option-list-2", offset=(2, 0))
@@ -70,6 +72,8 @@ def test_enter_on_symlink_does_nothing(
 def test_file_actions_escape_returns_to_details(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Escape`` closes the file action screen and leaves the file pane active."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
@@ -84,6 +88,8 @@ def test_file_actions_escape_returns_to_details(
 def test_preview_python_file_uses_syntax_highlighting(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Previewing a ``.py`` file renders it with Python syntax highlighting."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
@@ -100,6 +106,8 @@ def test_preview_python_file_uses_syntax_highlighting(
 def test_preview_escape_returns_to_details(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``Escape`` closes the preview and returns to the details view."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
@@ -116,6 +124,9 @@ def test_preview_escape_returns_to_details(
 def test_download_path_screen_rejects_empty_destination(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Submitting an empty destination in the download prompt shows an inline
+    error."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
@@ -133,6 +144,9 @@ def test_download_path_screen_rejects_empty_destination(
 def test_d_on_section_row_warns(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """``d`` on a platform section row warns that a specific artifact must be
+    selected."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("k", "d")
