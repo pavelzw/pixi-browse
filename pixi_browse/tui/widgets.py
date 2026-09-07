@@ -2627,10 +2627,12 @@ class FilePreviewScreen(ScrollableModalScreen):
 
 
 class FileDiffScreen(ScrollableModalScreen):
-    """Side-by-side diff of one file between the two compared artifacts.
+    """Diff of one file between the two compared artifacts.
 
     Rendered by the optional ``textual-diff-view`` package; only push this
-    screen when ``DIFF_VIEW_AVAILABLE`` is true.
+    screen when ``DIFF_VIEW_AVAILABLE`` is true. The diff view brings its own
+    heading (file path and change counts) and the compare screen's title stays
+    visible above the dialog, so nothing else is added around it.
     """
 
     DEFAULT_CSS = """
@@ -2639,26 +2641,11 @@ class FileDiffScreen(ScrollableModalScreen):
         background: $background 60%;
     }
 
-    #file-diff-dialog {
+    #file-diff-scroll {
         width: 95%;
         height: 90%;
         border: round #ec4899;
         background: $surface;
-        padding: 1 2;
-    }
-
-    #file-diff-title {
-        text-style: bold;
-    }
-
-    #file-diff-sides {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    #file-diff-scroll {
-        height: 1fr;
-        border: round #ec4899;
         padding: 0 1;
         scrollbar-size-vertical: 1;
     }
@@ -2670,44 +2657,30 @@ class FileDiffScreen(ScrollableModalScreen):
         self,
         file_path: str,
         *,
-        left_label: str,
-        right_label: str,
         left_text: str,
         right_text: str,
     ) -> None:
         super().__init__()
         self._file_path = file_path
-        self._left_label = left_label
-        self._right_label = right_label
         self._left_text = left_text
         self._right_text = right_text
-
-    def _sides_text(self) -> Text:
-        sides = Text()
-        sides.append(self._left_label, style="red")
-        sides.append(" vs ", style="white")
-        sides.append(self._right_label, style="green")
-        return sides
 
     def compose(self) -> ComposeResult:
         if not DIFF_VIEW_AVAILABLE:
             raise RuntimeError(DIFF_VIEW_INSTALL_HINT)
-        with Vertical(id="file-diff-dialog"):
-            yield Static(f"Diff: {self._file_path}", id="file-diff-title", markup=False)
-            yield Static(self._sides_text(), id="file-diff-sides", markup=False)
-            with VerticalScroll(id="file-diff-scroll"):
-                yield DiffView(
-                    self._file_path,
-                    self._file_path,
-                    self._left_text,
-                    self._right_text,
-                    # Split when the terminal is wide enough, unified otherwise.
-                    split=False,
-                    annotations=True,
-                    auto_split=True,
-                    wrap=True,
-                    id="file-diff-view",
-                )
+        with VerticalScroll(id="file-diff-scroll"):
+            yield DiffView(
+                self._file_path,
+                self._file_path,
+                self._left_text,
+                self._right_text,
+                annotations=True,
+                # Split when the terminal is wide enough, unified otherwise.
+                split=False,
+                auto_split=True,
+                wrap=True,
+                id="file-diff-view",
+            )
 
 
 class HelpScreen(ModalScreen[None]):

@@ -1840,11 +1840,7 @@ class CondaMetadataTui(App[None]):
             assert left_file.path == right_file.path
             self.push_screen(
                 FileDiffScreen(
-                    left_file.path,
-                    left_label=self._compare_selection_label(left_selection),
-                    right_label=self._compare_selection_label(right_selection),
-                    left_text=left_text,
-                    right_text=right_text,
+                    left_file.path, left_text=left_text, right_text=right_text
                 )
             )
         except Exception as exc:
