@@ -33,7 +33,7 @@ from rattler.repo_data import Gateway
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
-from tests.channel_artifacts import ensure_channel_artifacts, load_manifest
+from tests.channel_artifacts import ensure_channel_artifacts
 from tests.helpers import (
     UPSTREAM_CHANNEL_URL,
     AppFactory,
@@ -43,21 +43,15 @@ from tests.helpers import (
 
 
 @pytest.fixture(scope="session")
-def channel_artifacts_dir() -> Path:
-    """The downloaded, hash-verified artifacts (fetched on first use)."""
-    return ensure_channel_artifacts()
-
-
-@pytest.fixture(scope="session")
-def fixture_channel_dir(
-    tmp_path_factory: pytest.TempPathFactory, channel_artifacts_dir: Path
-) -> Path:
-    """A copy of the artifacts, indexed into a complete conda channel."""
+def fixture_channel_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A copy of the (downloaded, hash-verified) artifacts, indexed into a
+    complete conda channel."""
+    manifest = ensure_channel_artifacts()
     channel_dir = tmp_path_factory.mktemp("channel")
-    for artifact in load_manifest().artifacts:
-        destination = artifact.path(channel_dir)
+    for artifact in manifest.artifacts:
+        destination = channel_dir / artifact.subdir / artifact.file_name
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(artifact.path(channel_artifacts_dir), destination)
+        shutil.copyfile(artifact.local_path, destination)
     asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
     return channel_dir
 

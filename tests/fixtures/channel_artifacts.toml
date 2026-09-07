@@ -1,9 +1,8 @@
 # Real conda-forge artifacts that make up the offline test channel.
 #
 # The files are not committed. `tests/channel_artifacts.py` downloads them into
-# the git-ignored `tests/fixtures/channel/` directory (override with
-# PIXI_BROWSE_TEST_CHANNEL_DIR) on first use and verifies their SHA256, so the
-# suite is deterministic and works offline afterwards. The pytest session
+# the git-ignored `tests/fixtures/channel/` directory on first use and verifies
+# their SHA256, so the suite is deterministic and works offline afterwards. The pytest session
 # fixture in `tests/conftest.py` then indexes that directory with py-rattler and
 # serves it over a local HTTP server.
 #
