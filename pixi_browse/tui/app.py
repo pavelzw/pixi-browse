@@ -1960,10 +1960,7 @@ class CondaMetadataTui(App[None]):
             )
             return
         if not DIFF_VIEW_AVAILABLE:
-            # ``[diff]`` in the hint would otherwise be read as markup.
-            self.notify(
-                escape(DIFF_VIEW_INSTALL_HINT), title="Diff", severity="warning"
-            )
+            self.notify(DIFF_VIEW_INSTALL_HINT, title="Diff", severity="warning")
             return
 
         self._file_action_in_progress = True

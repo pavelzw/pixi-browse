@@ -56,8 +56,8 @@ pixi global install pixi-browse --with textual-diff-view
 uv tool install "pixi-browse[diff]"
 ```
 
-Without it, the `Diff left / right` action in the compare view explains how to
-install it.
+Without it, the `Diff left / right` action in the compare view asks for this
+package.
 
 ## Usage
 

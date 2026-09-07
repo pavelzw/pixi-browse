@@ -51,9 +51,8 @@ else:
 # How to get the optional diff view, shown when the ``Diff`` action is picked
 # without it.
 DIFF_VIEW_INSTALL_HINT = (
-    "Diffing files needs the optional textual-diff-view package: "
-    "`pixi global install pixi-browse --with textual-diff-view` or "
-    "`uv tool install 'pixi-browse[diff]'`."
+    "Diffing files needs the optional textual-diff-view package. "
+    "Install it to enable this action."
 )
 
 VERSION_DETAIL_SECTION_COUNT = 3
