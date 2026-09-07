@@ -19,6 +19,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
+- **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
 - **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
 - **Vim-style keybindings** for fast keyboard-driven navigation
