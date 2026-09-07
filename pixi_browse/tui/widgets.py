@@ -29,6 +29,7 @@ from pixi_browse.models import (
     CompareSelection,
     DependencyTab,
     FileTab,
+    MetadataTab,
     PackageFile,
     RepodataPatchDiff,
     VersionArtifactData,
@@ -40,8 +41,9 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 
-VERSION_DETAIL_SECTION_COUNT = 4
+VERSION_DETAIL_SECTION_COUNT = 3
 
+METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
     "constraints",
@@ -53,6 +55,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
 
@@ -176,6 +179,7 @@ class DetailSection(Vertical):
         index: int,
         *,
         on_activate: Callable[[int], None],
+        on_select_metadata_tab: Callable[[MetadataTab], None] | None = None,
         on_select_dependency_tab: Callable[[DependencyTab], None] | None = None,
         on_select_file_tab: Callable[[FileTab], None] | None = None,
         show_tabs: bool = False,
@@ -187,6 +191,7 @@ class DetailSection(Vertical):
         self._use_option_list = use_option_list
         self._id_prefix = id_prefix
         self._on_activate = on_activate
+        self._on_select_metadata_tab = on_select_metadata_tab
         self._on_select_dependency_tab = on_select_dependency_tab
         self._on_select_file_tab = on_select_file_tab
         del title, show_tabs
@@ -219,6 +224,11 @@ class DetailSection(Vertical):
             return
         self._on_activate(self._index)
         event.stop()
+
+    def action_select_metadata_tab(self, tab: MetadataTab) -> None:
+        if self._on_select_metadata_tab is None:
+            return
+        self._on_select_metadata_tab(tab)
 
     def action_select_dependency_tab(self, tab: DependencyTab) -> None:
         if self._on_select_dependency_tab is None:
@@ -279,6 +289,7 @@ class VersionDetailsView(Vertical):
         super().__init__(id="version-details-view", classes="detail-view")
         self._details: VersionArtifactData | None = None
         self._active_section = 0
+        self._metadata_tab_index = 0
         self._dependency_tab_index = 0
         self._dependency_entries: dict[
             DependencyTab, tuple[DependencyListEntry, ...]
@@ -300,6 +311,8 @@ class VersionDetailsView(Vertical):
             "Metadata",
             0,
             on_activate=self._activate_section_from_click,
+            on_select_metadata_tab=self._select_metadata_tab_from_click,
+            show_tabs=True,
         )
         yield DetailSection(
             "Dependencies",
@@ -316,14 +329,11 @@ class VersionDetailsView(Vertical):
             on_select_file_tab=self._select_file_tab_from_click,
             use_option_list=True,
         )
-        yield DetailSection(
-            "Repodata patches",
-            3,
-            on_activate=self._activate_section_from_click,
-        )
 
     def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
+        if not self._patches_tab_available(details):
+            self._metadata_tab_index = 0
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
         self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self.display = True
@@ -346,6 +356,9 @@ class VersionDetailsView(Vertical):
     def _activate_section_from_click(self, index: int) -> None:
         self.activate_section(index, focus_main_panel=True)
 
+    def _select_metadata_tab_from_click(self, tab: MetadataTab) -> None:
+        self.select_metadata_tab(tab, focus_main_panel=True)
+
     def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
         self.select_dependency_tab(tab, focus_main_panel=True)
 
@@ -357,6 +370,43 @@ class VersionDetailsView(Vertical):
             self._active_section + direction
         ) % VERSION_DETAIL_SECTION_COUNT
         self._apply_section_state()
+
+    @staticmethod
+    def _patches_tab_available(details: VersionArtifactData | None) -> bool:
+        return (
+            details is not None
+            and details.repodata_patches is not None
+            and details.repodata_patches.is_patched
+        )
+
+    def available_metadata_tabs(self) -> tuple[MetadataTab, ...]:
+        """The repodata patches tab only exists when the record was patched."""
+        if self._patches_tab_available(self._details):
+            return METADATA_TABS
+        return METADATA_TABS[:1]
+
+    def metadata_tabs_available(self) -> bool:
+        return len(self.available_metadata_tabs()) > 1
+
+    def cycle_metadata_tab(self, direction: int) -> None:
+        tabs = self.available_metadata_tabs()
+        self._metadata_tab_index = (self._metadata_tab_index + direction) % len(tabs)
+        self._refresh_metadata_section()
+
+    def set_metadata_tab(self, tab: MetadataTab) -> None:
+        tabs = self.available_metadata_tabs()
+        if tab not in tabs:
+            return
+        self._metadata_tab_index = tabs.index(tab)
+        self._refresh_metadata_section()
+
+    def select_metadata_tab(
+        self, tab: MetadataTab, *, focus_main_panel: bool = False
+    ) -> None:
+        self.set_active_section(0)
+        self.set_metadata_tab(tab)
+        if focus_main_panel:
+            self.app.query_one("#main-panel", MainPanel).focus()
 
     def cycle_dependency_tab(self, direction: int) -> None:
         self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
@@ -430,6 +480,9 @@ class VersionDetailsView(Vertical):
             return max(1, option_list.size.height)
         return self._section(self._active_section).page_step()
 
+    def metadata_section_is_active(self) -> bool:
+        return self._active_section == 0
+
     def dependency_section_is_active(self) -> bool:
         return self._active_section == 1
 
@@ -491,6 +544,10 @@ class VersionDetailsView(Vertical):
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
 
+    def _active_metadata_tab(self) -> MetadataTab:
+        tabs = self.available_metadata_tabs()
+        return tabs[min(self._metadata_tab_index, len(tabs) - 1)]
+
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
 
@@ -502,44 +559,36 @@ class VersionDetailsView(Vertical):
             section.set_active(index == self._active_section)
         if self._details is None:
             return
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(0).update_header(self._render_metadata_header())
         self._section(1).update_header(self._render_dependency_header())
         self._section(2).update_header(self._render_file_header())
-        self._section(3).update_header(self._render_repodata_patches_header())
 
     def _refresh_sections(self) -> None:
         if self._details is None:
             return
 
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body(
-            "\n".join(format_version_details_metadata_lines(self._details))
-        )
+        self._refresh_metadata_section()
 
         self._refresh_dependency_section()
 
         self._refresh_file_section()
 
-        self._refresh_repodata_patches_section()
-
         self._apply_section_state()
 
-    def _refresh_repodata_patches_section(self) -> None:
+    def _refresh_metadata_section(self) -> None:
         if self._details is None:
             return
 
-        patches_section = self._section(3)
-        patches_section.update_header(self._render_repodata_patches_header())
-        patches_section.update_body(
-            render_repodata_patches_body(self._details.repodata_patches)
+        metadata_section = self._section(0)
+        metadata_section.update_header(self._render_metadata_header())
+        if self._active_metadata_tab() == "patches":
+            metadata_section.update_body(
+                render_repodata_patches_body(self._details.repodata_patches)
+            )
+            return
+        metadata_section.update_body(
+            "\n".join(format_version_details_metadata_lines(self._details))
         )
-
-    def _render_repodata_patches_header(self) -> Text:
-        if self._details is None:
-            return self._render_section_header(3, "Repodata patches")
-        patches = self._details.repodata_patches
-        count = "?" if patches is None else str(patches.change_count)
-        return self._render_section_header(3, f"Repodata patches ({count})")
 
     def _refresh_dependency_section(self) -> None:
         if self._details is None:
@@ -675,6 +724,31 @@ class VersionDetailsView(Vertical):
             "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
+    def _render_metadata_tabs(self) -> Text:
+        tabs = self.available_metadata_tabs()
+        if len(tabs) == 1:
+            return Text("Metadata")
+        assert self._details is not None and self._details.repodata_patches is not None
+        labels: dict[MetadataTab, str] = {
+            "metadata": "Metadata",
+            "patches": (
+                f"Repodata patches ({self._details.repodata_patches.change_count})"
+            ),
+        }
+        tab_text = Text()
+        for index, tab in enumerate(tabs):
+            if index:
+                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
+            tab_text.append_text(
+                self._render_clickable_metadata_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_metadata_tab(),
+                    pane_active=self._pane_selected and self._active_section == 0,
+                )
+            )
+        return tab_text
+
     def _render_dependency_tabs(self) -> Text:
         if self._details is None:
             labels = {
@@ -735,6 +809,13 @@ class VersionDetailsView(Vertical):
         )
         return Text(f"[{index + 1}] {label}", style=style)
 
+    def _render_metadata_header(self) -> Text:
+        if not self.metadata_tabs_available():
+            return self._render_section_header(0, "Metadata")
+        header = self._render_section_header(0, "")
+        header.append_text(self._render_metadata_tabs())
+        return header
+
     def _render_dependency_header(self) -> Text:
         header = self._render_section_header(1, "")
         header.append_text(self._render_dependency_tabs())
@@ -744,6 +825,23 @@ class VersionDetailsView(Vertical):
         header = self._render_section_header(2, "")
         header.append_text(self._render_file_tabs())
         return header
+
+    @staticmethod
+    def _render_clickable_metadata_tab(
+        tab: MetadataTab, label: str, *, active: bool, pane_active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(
+            Style(meta={"@click": (DETAIL_SELECT_METADATA_TAB_ACTION, (tab,))})
+        )
+        return text
 
     @staticmethod
     def _render_clickable_dependency_tab(
@@ -872,6 +970,11 @@ class MainPanel(Vertical):
             index
         )
 
+    def cycle_metadata_tab(self, direction: int) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).cycle_metadata_tab(
+            direction
+        )
+
     def cycle_dependency_tab(self, direction: int) -> None:
         self.query_one(
             "#version-details-view", VersionDetailsView
@@ -881,6 +984,11 @@ class MainPanel(Vertical):
         self.query_one("#version-details-view", VersionDetailsView).cycle_file_tab(
             direction
         )
+
+    def metadata_tabs_active(self) -> bool:
+        """True when the metadata section is active and has a patches tab."""
+        view = self.query_one("#version-details-view", VersionDetailsView)
+        return view.metadata_section_is_active() and view.metadata_tabs_available()
 
     def dependency_section_is_active(self) -> bool:
         return self.query_one(
@@ -931,6 +1039,11 @@ class MainPanel(Vertical):
         return self.query_one(
             "#version-details-view", VersionDetailsView
         ).file_sha256_at(index)
+
+    def set_metadata_tab(self, tab: MetadataTab) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).set_metadata_tab(
+            tab
+        )
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -1016,8 +1129,16 @@ class MainPanel(Vertical):
                 self.cycle_active_section(-1)
                 event.stop()
                 return
-            if character in {"1", "2", "3", "4"}:
+            if character in {"1", "2", "3"}:
                 self.set_active_section(int(character) - 1)
+                event.stop()
+                return
+            if character == "[" and self.metadata_tabs_active():
+                self.cycle_metadata_tab(-1)
+                event.stop()
+                return
+            if character == "]" and self.metadata_tabs_active():
+                self.cycle_metadata_tab(1)
                 event.stop()
                 return
             if character == "[" and dependency_section_is_active:

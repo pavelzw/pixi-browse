@@ -54,6 +54,7 @@ from pixi_browse.repodata import (
 )
 from pixi_browse.tui import (
     ACTIVE_SECTION_TITLE_STYLE,
+    ACTIVE_TAB_STYLE,
     EMPTY_MATCHSPEC_RESULT,
     EMPTY_WHONEEDS_RESULT,
     INACTIVE_SECTION_TITLE_STYLE,
@@ -498,7 +499,7 @@ def test_metadata_rows_summarize_repodata_patch_state() -> None:
 
     assert "Repodata patches      unknown (info/index.json unavailable)" in unknown
     assert "Repodata patches      none (repodata matches info/index.json)" in unpatched
-    assert "Repodata patches      1 change (see section 4)" in patched
+    assert "Repodata patches      1 change (see Repodata patches tab)" in patched
 
 
 def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> None:
@@ -834,7 +835,7 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
         ),
     )
     assert (
-        "Repodata patches      2 changes (see section 4)"
+        "Repodata patches      2 changes (see Repodata patches tab)"
         in format_version_details_metadata_lines(details)
     )
 
@@ -2034,11 +2035,11 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "?                 Show this help" in help_text
     assert "j / k             Move selection or scroll" in help_text
     assert "h / l             Focus left / right pane" in help_text
-    assert "1 / 2 / 3 / 4     Focus metadata, deps, files, or patches" in help_text
+    assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
     assert "Tab / Shift+Tab" in help_text
     assert "Cycle focused section" in help_text
     assert "x                 Swap compare left / right" in help_text
-    assert "[ / ]             Cycle dependency tabs" in help_text
+    assert "[ / ]             Cycle section tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
     assert "m                 Query MatchSpec" in help_text
     assert "w                 Query reverse dependencies" in help_text
@@ -2683,28 +2684,6 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     assert event.stopped is True
 
 
-def test_on_key_four_focuses_repodata_patches_section(monkeypatch) -> None:
-    app = CondaMetadataTui()
-    app._mode = "versions"
-    focused: list[str] = []
-    selected_sections: list[int] = []
-
-    monkeypatch.setattr(
-        app, "_set_active_main_section", lambda value: selected_sections.append(value)
-    )
-    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
-    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
-    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
-
-    event = _FakeKeyEvent("4", "4")
-    app.on_key(event)  # type: ignore[arg-type]
-
-    assert selected_sections == [3]
-    assert focused == ["main"]
-    assert event.stopped is True
-
-
 def test_on_key_zero_focuses_sidebar_in_versions_mode(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -2845,43 +2824,144 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
     assert all(isinstance(section, DetailSection) for section in sections)
 
 
-def test_version_details_view_composes_repodata_patches_section() -> None:
-    view = VersionDetailsView()
-    sections = list(view.compose())
+def _patched_artifact_data(change_count: int = 2) -> VersionArtifactData:
+    rows = tuple(
+        CompareRow(label="depends", left="", right=f"dep{index}", changed=True)
+        for index in range(change_count)
+    )
+    return VersionArtifactData(
+        metadata_rows=(("Meta", "meta"),),
+        dependencies=(),
+        constraints=(),
+        repodata_patches=RepodataPatchDiff(dependencies=rows),
+    )
 
-    assert len(sections) == 4
-    assert all(isinstance(section, DetailSection) for section in sections)
 
-
-def test_repodata_patches_header_shows_change_count() -> None:
+def test_metadata_header_shows_patches_tab_only_when_record_is_patched() -> None:
     view = VersionDetailsView()
     view._pane_selected = True
-    view._active_section = 3
+    view._active_section = 0
 
-    assert view._render_repodata_patches_header().plain == "[4] Repodata patches"
-
-    view._details = VersionArtifactData(
-        metadata_rows=(),
-        dependencies=(),
-        constraints=(),
-        repodata_patches=None,
-    )
-    unknown_header = view._render_repodata_patches_header()
-    assert unknown_header.plain == "[4] Repodata patches (?)"
-    assert unknown_header.style == ACTIVE_SECTION_TITLE_STYLE
+    view._details = _make_artifact_data()
+    assert view.available_metadata_tabs() == ("metadata",)
+    assert view.metadata_tabs_available() is False
+    assert view._render_metadata_header().plain == "[1] Metadata"
 
     view._details = VersionArtifactData(
         metadata_rows=(),
         dependencies=(),
         constraints=(),
-        repodata_patches=RepodataPatchDiff(
-            dependencies=(
-                CompareRow(label="depends", left="", right="requests", changed=True),
-                CompareRow(label="depends", left="scipy", right="", changed=True),
-            )
-        ),
+        repodata_patches=RepodataPatchDiff(),
     )
-    assert view._render_repodata_patches_header().plain == "[4] Repodata patches (2)"
+    assert view.metadata_tabs_available() is False
+    assert view._render_metadata_header().plain == "[1] Metadata"
+
+    view._details = _patched_artifact_data(2)
+    header = view._render_metadata_header()
+    assert view.available_metadata_tabs() == ("metadata", "patches")
+    assert header.plain == "[1] Metadata - Repodata patches (2)"
+    assert any(
+        span.style == ACTIVE_TAB_STYLE
+        and header.plain[span.start : span.end] == "Metadata"
+        for span in header.spans
+        if isinstance(span.style, Style)
+    )
+    assert any(
+        isinstance(span.style, Style)
+        and span.style.meta.get("@click") == ("select_metadata_tab", ("patches",))
+        for span in header.spans
+    )
+
+
+def test_metadata_tab_index_resets_when_details_have_no_patches(monkeypatch) -> None:
+    view = VersionDetailsView()
+    refreshed: list[str] = []
+    monkeypatch.setattr(view, "_refresh_sections", lambda: refreshed.append("all"))
+
+    view.set_details(_patched_artifact_data())
+    view._metadata_tab_index = 1
+    assert view._active_metadata_tab() == "patches"
+
+    view.set_details(_make_artifact_data())
+
+    assert view._metadata_tab_index == 0
+    assert view._active_metadata_tab() == "metadata"
+    assert refreshed == ["all", "all"]
+
+
+def test_cycle_metadata_tab_wraps_between_metadata_and_patches(monkeypatch) -> None:
+    view = VersionDetailsView()
+    view._details = _patched_artifact_data()
+    refreshed: list[str] = []
+    monkeypatch.setattr(
+        view, "_refresh_metadata_section", lambda: refreshed.append("metadata")
+    )
+
+    view.cycle_metadata_tab(1)
+    assert view._active_metadata_tab() == "patches"
+    view.cycle_metadata_tab(1)
+    assert view._active_metadata_tab() == "metadata"
+    view.cycle_metadata_tab(-1)
+    assert view._active_metadata_tab() == "patches"
+
+    view.set_metadata_tab("metadata")
+    assert view._active_metadata_tab() == "metadata"
+    assert refreshed == ["metadata"] * 4
+
+
+def test_set_metadata_tab_ignores_patches_tab_without_patches(monkeypatch) -> None:
+    view = VersionDetailsView()
+    view._details = _make_artifact_data()
+    monkeypatch.setattr(
+        view,
+        "_refresh_metadata_section",
+        lambda: pytest.fail("no refresh expected for an unavailable tab"),
+    )
+
+    view.set_metadata_tab("patches")
+
+    assert view._active_metadata_tab() == "metadata"
+
+
+def test_on_key_bracket_shortcut_cycles_metadata_tab(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    app._selected_pane = "main"
+    focused: list[str] = []
+    tab_directions: list[int] = []
+
+    class _FakeMainPanel:
+        def dependency_section_is_active(self) -> bool:
+            return False
+
+        def file_section_is_active(self) -> bool:
+            return False
+
+        def metadata_tabs_active(self) -> bool:
+            return True
+
+    monkeypatch.setattr(
+        app,
+        "_cycle_main_metadata_tab",
+        lambda value: tab_directions.append(value),
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: True)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+    monkeypatch.setattr(
+        app,
+        "query_one",
+        lambda selector, _widget_type=None: _FakeMainPanel(),
+    )
+
+    for character, expected in (("]", 1), ("[", -1)):
+        event = _FakeKeyEvent(character, character)
+        app.on_key(event)  # type: ignore[arg-type]
+        assert event.stopped is True
+        assert tab_directions[-1] == expected
+
+    assert focused == ["main", "main"]
 
 
 def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
@@ -3353,6 +3433,9 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
             return False
 
         def file_section_is_active(self) -> bool:
+            return False
+
+        def metadata_tabs_active(self) -> bool:
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)

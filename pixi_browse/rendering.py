@@ -404,7 +404,7 @@ def format_repodata_patches_summary(patches: RepodataPatchDiff | None) -> str:
     if not patches.is_patched:
         return "none (repodata matches info/index.json)"
     count = patches.change_count
-    return f"{count} change{'s' if count != 1 else ''} (see section 4)"
+    return f"{count} change{'s' if count != 1 else ''} (see Repodata patches tab)"
 
 
 def build_version_artifact_data(

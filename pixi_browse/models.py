@@ -9,6 +9,7 @@ from rattler.version import Version
 ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
+MetadataTab = Literal["metadata", "patches"]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
