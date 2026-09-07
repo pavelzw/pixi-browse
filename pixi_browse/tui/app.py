@@ -2876,7 +2876,7 @@ class CondaMetadataTui(App[None]):
             self._mode == "versions"
             and event.character in {"[", "]"}
             and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).metadata_tabs_active()
+            and self.query_one("#main-panel", MainPanel).metadata_section_is_active()
         ):
             self._cycle_main_metadata_tab(-1 if event.character == "[" else 1)
             self._focus_main_panel()

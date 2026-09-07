@@ -152,7 +152,7 @@ def render_repodata_patches_body(patches: RepodataPatchDiff) -> RenderableType:
     """Render the unpatched (index.json) vs patched (repodata) diff table."""
     return render_compare_table(
         patches.rows,
-        empty_message="Repodata matches info/index.json. No patches applied.",
+        empty_message="No repodata patches.",
         show_label_column=True,
         label_title="Field",
         left_title="Unpatched (index.json)",
@@ -324,8 +324,6 @@ class VersionDetailsView(Vertical):
 
     def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
-        if not self._patches_tab_available(details):
-            self._metadata_tab_index = 0
         self._dependency_highlighted = {tab: 0 for tab in DEPENDENCY_TABS}
         self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self.display = True
@@ -363,29 +361,14 @@ class VersionDetailsView(Vertical):
         ) % VERSION_DETAIL_SECTION_COUNT
         self._apply_section_state()
 
-    @staticmethod
-    def _patches_tab_available(details: VersionArtifactData | None) -> bool:
-        return details is not None and details.repodata_patches.is_patched
-
-    def available_metadata_tabs(self) -> tuple[MetadataTab, ...]:
-        """The repodata patches tab only exists when the record was patched."""
-        if self._patches_tab_available(self._details):
-            return METADATA_TABS
-        return METADATA_TABS[:1]
-
-    def metadata_tabs_available(self) -> bool:
-        return len(self.available_metadata_tabs()) > 1
-
     def cycle_metadata_tab(self, direction: int) -> None:
-        tabs = self.available_metadata_tabs()
-        self._metadata_tab_index = (self._metadata_tab_index + direction) % len(tabs)
+        self._metadata_tab_index = (self._metadata_tab_index + direction) % len(
+            METADATA_TABS
+        )
         self._refresh_metadata_section()
 
     def set_metadata_tab(self, tab: MetadataTab) -> None:
-        tabs = self.available_metadata_tabs()
-        if tab not in tabs:
-            return
-        self._metadata_tab_index = tabs.index(tab)
+        self._metadata_tab_index = METADATA_TABS.index(tab)
         self._refresh_metadata_section()
 
     def select_metadata_tab(
@@ -533,8 +516,7 @@ class VersionDetailsView(Vertical):
         return list(self.query(DetailSection))[index]
 
     def _active_metadata_tab(self) -> MetadataTab:
-        tabs = self.available_metadata_tabs()
-        return tabs[min(self._metadata_tab_index, len(tabs) - 1)]
+        return METADATA_TABS[self._metadata_tab_index]
 
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
@@ -713,18 +695,18 @@ class VersionDetailsView(Vertical):
         ).highlighted = highlighted
 
     def _render_metadata_tabs(self) -> Text:
-        tabs = self.available_metadata_tabs()
-        if len(tabs) == 1:
-            return Text("Metadata")
-        assert self._details is not None
-        labels: dict[MetadataTab, str] = {
-            "metadata": "Metadata",
-            "patches": (
-                f"Repodata patches ({self._details.repodata_patches.change_count})"
-            ),
-        }
+        labels: dict[MetadataTab, str]
+        if self._details is None:
+            labels = {"metadata": "Metadata", "patches": "Repodata patches"}
+        else:
+            labels = {
+                "metadata": "Metadata",
+                "patches": (
+                    f"Repodata patches ({self._details.repodata_patches.change_count})"
+                ),
+            }
         tab_text = Text()
-        for index, tab in enumerate(tabs):
+        for index, tab in enumerate(METADATA_TABS):
             if index:
                 tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
             tab_text.append_text(
@@ -798,8 +780,6 @@ class VersionDetailsView(Vertical):
         return Text(f"[{index + 1}] {label}", style=style)
 
     def _render_metadata_header(self) -> Text:
-        if not self.metadata_tabs_available():
-            return self._render_section_header(0, "Metadata")
         header = self._render_section_header(0, "")
         header.append_text(self._render_metadata_tabs())
         return header
@@ -973,10 +953,10 @@ class MainPanel(Vertical):
             direction
         )
 
-    def metadata_tabs_active(self) -> bool:
-        """True when the metadata section is active and has a patches tab."""
-        view = self.query_one("#version-details-view", VersionDetailsView)
-        return view.metadata_section_is_active() and view.metadata_tabs_available()
+    def metadata_section_is_active(self) -> bool:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).metadata_section_is_active()
 
     def dependency_section_is_active(self) -> bool:
         return self.query_one(
@@ -1121,11 +1101,11 @@ class MainPanel(Vertical):
                 self.set_active_section(int(character) - 1)
                 event.stop()
                 return
-            if character == "[" and self.metadata_tabs_active():
+            if character == "[" and self.metadata_section_is_active():
                 self.cycle_metadata_tab(-1)
                 event.stop()
                 return
-            if character == "]" and self.metadata_tabs_active():
+            if character == "]" and self.metadata_section_is_active():
                 self.cycle_metadata_tab(1)
                 event.stop()
                 return

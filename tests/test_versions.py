@@ -505,7 +505,7 @@ def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> N
 def test_render_repodata_patches_body_explains_empty_state() -> None:
     unpatched = cast(Text, render_repodata_patches_body(RepodataPatchDiff()))
 
-    assert unpatched.plain == "Repodata matches info/index.json. No patches applied."
+    assert unpatched.plain == "No repodata patches."
     assert unpatched.style == "dim"
 
 
@@ -2769,19 +2769,18 @@ def _patched_artifact_data(change_count: int = 2) -> VersionArtifactData:
     )
 
 
-def test_metadata_header_shows_patches_tab_only_when_record_is_patched() -> None:
+def test_metadata_header_always_shows_patches_tab_with_count() -> None:
     view = VersionDetailsView()
     view._pane_selected = True
     view._active_section = 0
 
+    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches"
+
     view._details = _make_artifact_data()
-    assert view.available_metadata_tabs() == ("metadata",)
-    assert view.metadata_tabs_available() is False
-    assert view._render_metadata_header().plain == "[1] Metadata"
+    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches (0)"
 
     view._details = _patched_artifact_data(2)
     header = view._render_metadata_header()
-    assert view.available_metadata_tabs() == ("metadata", "patches")
     assert header.plain == "[1] Metadata - Repodata patches (2)"
     assert any(
         span.style == ACTIVE_TAB_STYLE
@@ -2796,25 +2795,9 @@ def test_metadata_header_shows_patches_tab_only_when_record_is_patched() -> None
     )
 
 
-def test_metadata_tab_index_resets_when_details_have_no_patches(monkeypatch) -> None:
-    view = VersionDetailsView()
-    refreshed: list[str] = []
-    monkeypatch.setattr(view, "_refresh_sections", lambda: refreshed.append("all"))
-
-    view.set_details(_patched_artifact_data())
-    view._metadata_tab_index = 1
-    assert view._active_metadata_tab() == "patches"
-
-    view.set_details(_make_artifact_data())
-
-    assert view._metadata_tab_index == 0
-    assert view._active_metadata_tab() == "metadata"
-    assert refreshed == ["all", "all"]
-
-
 def test_cycle_metadata_tab_wraps_between_metadata_and_patches(monkeypatch) -> None:
     view = VersionDetailsView()
-    view._details = _patched_artifact_data()
+    view._details = _make_artifact_data()
     refreshed: list[str] = []
     monkeypatch.setattr(
         view, "_refresh_metadata_section", lambda: refreshed.append("metadata")
@@ -2832,18 +2815,15 @@ def test_cycle_metadata_tab_wraps_between_metadata_and_patches(monkeypatch) -> N
     assert refreshed == ["metadata"] * 4
 
 
-def test_set_metadata_tab_ignores_patches_tab_without_patches(monkeypatch) -> None:
+def test_metadata_tab_persists_across_artifacts(monkeypatch) -> None:
     view = VersionDetailsView()
-    view._details = _make_artifact_data()
-    monkeypatch.setattr(
-        view,
-        "_refresh_metadata_section",
-        lambda: pytest.fail("no refresh expected for an unavailable tab"),
-    )
+    monkeypatch.setattr(view, "_refresh_sections", lambda: None)
 
-    view.set_metadata_tab("patches")
+    view.set_details(_patched_artifact_data())
+    view._metadata_tab_index = 1
+    view.set_details(_make_artifact_data())
 
-    assert view._active_metadata_tab() == "metadata"
+    assert view._active_metadata_tab() == "patches"
 
 
 def test_on_key_bracket_shortcut_cycles_metadata_tab(monkeypatch) -> None:
@@ -2860,7 +2840,7 @@ def test_on_key_bracket_shortcut_cycles_metadata_tab(monkeypatch) -> None:
         def file_section_is_active(self) -> bool:
             return False
 
-        def metadata_tabs_active(self) -> bool:
+        def metadata_section_is_active(self) -> bool:
             return True
 
     monkeypatch.setattr(
@@ -3358,7 +3338,7 @@ def test_on_key_bracket_shortcut_is_ignored_when_dependency_pane_is_inactive(
         def file_section_is_active(self) -> bool:
             return False
 
-        def metadata_tabs_active(self) -> bool:
+        def metadata_section_is_active(self) -> bool:
             return False
 
     monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
