@@ -477,6 +477,8 @@ def build_repodata_patch_diff(
         ("features", index_json.features, record.features),
         ("track_features", index_json.track_features, record.track_features),
         ("timestamp", index_json.timestamp, record.timestamp),
+        # TODO: compare `noarch` once py-rattler exposes it on `IndexJson`,
+        # see https://github.com/pavelzw/pixi-browse/issues/93
     )
     metadata_rows: list[CompareRow] = []
     for label, unpatched, patched in scalar_fields:
