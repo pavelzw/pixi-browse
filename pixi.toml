@@ -31,6 +31,8 @@ typer = ">=0.27.2,<0.28"
 # it is only an extra and not a run dependency of pixi-browse itself.
 [package.extra-dependencies.diff]
 textual-diff-view = ">=0.1.5,<0.2"
+[package.run-constraints]
+textual-diff-view = ">=0.1.5,<0.2"
 [dependencies]
 pixi-browse = { path = ".", extras = ["diff"] }
 textual-dev = "*"
