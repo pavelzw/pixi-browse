@@ -26,7 +26,7 @@ hatchling = "*"
 textual = ">=8.2.7,<9"
 pyyaml = ">=6.0.3,<7"
 py-rattler = ">=0.25.0,<0.26"
-typer = ">=0.26.5,<0.27"
+typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.
 [package.extra-dependencies.diff]
