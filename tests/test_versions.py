@@ -474,28 +474,6 @@ def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> Non
     )
 
 
-def test_metadata_rows_summarize_repodata_patch_state() -> None:
-    record = _make_repo_data_record()
-
-    unpatched = format_version_details_metadata_lines(
-        build_version_artifact_data("demo", record)
-    )
-    patched = format_version_details_metadata_lines(
-        build_version_artifact_data(
-            "demo",
-            record,
-            repodata_patches=RepodataPatchDiff(
-                metadata=(
-                    CompareRow(label="license", left="BSD", right="MIT", changed=True),
-                )
-            ),
-        )
-    )
-
-    assert "Repodata patches      none (repodata matches info/index.json)" in unpatched
-    assert "Repodata patches      1 change (see Repodata patches tab)" in patched
-
-
 def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> None:
     table = cast(
         Table,
@@ -825,9 +803,9 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
             ),
         ),
     )
-    assert (
-        "Repodata patches      2 changes (see Repodata patches tab)"
-        in format_version_details_metadata_lines(details)
+    assert not any(
+        line.startswith("Repodata patches")
+        for line in format_version_details_metadata_lines(details)
     )
 
 

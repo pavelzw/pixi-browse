@@ -324,7 +324,6 @@ def _metadata_rows_for_record(
     provenance_remote_url: str | None = None,
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
-    repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
 ) -> tuple[MetadataRow, ...]:
     metadata_rows: list[MetadataRow] = [
         ("Package", package_name),
@@ -392,17 +391,7 @@ def _metadata_rows_for_record(
         metadata_rows.append(
             ("Built with", f"rattler-build {escape(rattler_build_version)}")
         )
-    metadata_rows.append(
-        ("Repodata patches", format_repodata_patches_summary(repodata_patches))
-    )
     return tuple(metadata_rows)
-
-
-def format_repodata_patches_summary(patches: RepodataPatchDiff) -> str:
-    if not patches.is_patched:
-        return "none (repodata matches info/index.json)"
-    count = patches.change_count
-    return f"{count} change{'s' if count != 1 else ''} (see Repodata patches tab)"
 
 
 def build_version_artifact_data(
@@ -432,7 +421,6 @@ def build_version_artifact_data(
             provenance_remote_url=provenance_remote_url,
             provenance_sha=provenance_sha,
             rattler_build_version=rattler_build_version,
-            repodata_patches=repodata_patches,
         ),
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
