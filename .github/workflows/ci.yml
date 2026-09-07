@@ -58,4 +58,5 @@ jobs:
         with:
           name: snapshot-report-${{ matrix.os }}-${{ matrix.environment }}
           path: snapshot_report.html
+          archive: false
           if-no-files-found: ignore
