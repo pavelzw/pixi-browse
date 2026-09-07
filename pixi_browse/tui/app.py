@@ -1559,7 +1559,7 @@ class CondaMetadataTui(App[None]):
             return FilePreviewContent(
                 text=(
                     "File too large to preview in-app "
-                    f"({size_in_bytes:,} bytes).\n\n"
+                    f"({format_human_byte_size(size_in_bytes)}).\n\n"
                     "Use Download as file instead."
                 )
             )
@@ -1778,27 +1778,26 @@ class CondaMetadataTui(App[None]):
         """The text of one side of a file diff, or ``None`` after notifying why
         it cannot be diffed."""
         file_path = package_file.path
+
+        def notify_too_large(size_in_bytes: int) -> None:
+            self.notify(
+                f"{side} file {file_path} is too large to diff in-app "
+                f"({format_human_byte_size(size_in_bytes)}).",
+                title="Diff",
+                severity="warning",
+            )
+
         if (
             package_file.size_in_bytes is not None
             and package_file.size_in_bytes > _PREVIEW_MAX_BYTES
         ):
-            self.notify(
-                f"{side} file {file_path} is too large to diff in-app "
-                f"({package_file.size_in_bytes:,} bytes).",
-                title="Diff",
-                severity="warning",
-            )
+            notify_too_large(package_file.size_in_bytes)
             return None
         package_bytes = await self._fetch_package_file_bytes(
             selection.package_name, selection.entry, file_path
         )
         if len(package_bytes) > _PREVIEW_MAX_BYTES:
-            self.notify(
-                f"{side} file {file_path} is too large to diff in-app "
-                f"({len(package_bytes):,} bytes).",
-                title="Diff",
-                severity="warning",
-            )
+            notify_too_large(len(package_bytes))
             return None
         text = self._decode_text_file(package_bytes)
         if text is None:
