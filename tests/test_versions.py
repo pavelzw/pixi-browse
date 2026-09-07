@@ -124,6 +124,19 @@ async def _fake_package_archive_from_url(_client: Client, _url: str) -> PackageA
     return cast(PackageArchive, object())
 
 
+class _IndexJsonArchive:
+    """`PackageArchive` stand-in that only serves ``info/index.json``."""
+
+    def __init__(self, index_json: IndexJson, calls: list[str] | None = None) -> None:
+        self._index_json = index_json
+        self._calls = calls
+
+    async def index_json(self) -> IndexJson:
+        if self._calls is not None:
+            self._calls.append("index_json")
+        return self._index_json
+
+
 def _make_artifact_data(
     *,
     metadata_rows: tuple[tuple[str, str], ...] = (("Meta", "meta"),),
@@ -669,8 +682,8 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     loader = VersionDataLoader(client=cast(Client, object()))
     record = _make_repo_data_record(name="demo")
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
-    archive = cast(PackageArchive, object())
     calls: list[str] = []
+    archive = cast(PackageArchive, _IndexJsonArchive(_make_index_json(record), calls))
 
     async def _fake_from_url(_client: Client, _url: str) -> PackageArchive:
         calls.append("from_url")
@@ -700,11 +713,6 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         calls.append("stream_info")
         return [PackageFile("info/index.json", 42)]
 
-    async def _fake_get_index_json(value: PackageArchive) -> IndexJson:
-        assert value is archive
-        calls.append("index_json")
-        return _make_index_json(record)
-
     monkeypatch.setattr(
         "pixi_browse.tui.version_loader.PackageArchive.from_url",
         _fake_from_url,
@@ -713,7 +721,6 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
-    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
 
     details = asyncio.run(
         loader.load_version_details("demo", record, preview_key=preview_key)
@@ -747,7 +754,16 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
         license="MIT",
     )
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
-    archive = cast(PackageArchive, object())
+    archive = cast(
+        PackageArchive,
+        _IndexJsonArchive(
+            _make_index_json(
+                record,
+                depends=["python >=3.13", "numpy >=1.26"],
+                license="BSD-3-Clause",
+            )
+        ),
+    )
 
     async def _fake_from_url(_client: Client, _url: str) -> PackageArchive:
         return archive
@@ -768,14 +784,6 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
     async def _fake_get_run_exports(_value: PackageArchive) -> RunExportsJson | None:
         return None
 
-    async def _fake_get_index_json(value: PackageArchive) -> IndexJson:
-        assert value is archive
-        return _make_index_json(
-            record,
-            depends=["python >=3.13", "numpy >=1.26"],
-            license="BSD-3-Clause",
-        )
-
     monkeypatch.setattr(
         "pixi_browse.tui.version_loader.PackageArchive.from_url",
         _fake_from_url,
@@ -784,7 +792,6 @@ def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> Non
     monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
-    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
 
     details = asyncio.run(
         loader.load_version_artifact_data("demo", record, preview_key=preview_key)

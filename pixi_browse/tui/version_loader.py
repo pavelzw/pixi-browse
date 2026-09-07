@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import yaml
 from rattler.networking import Client
-from rattler.package import IndexJson, PathType, RunExportsJson
+from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
@@ -203,9 +203,6 @@ class VersionDataLoader:
     async def get_run_exports(self, archive: PackageArchive) -> RunExportsJson | None:
         return await archive.run_exports_json()
 
-    async def get_index_json(self, archive: PackageArchive) -> IndexJson:
-        return await archive.index_json()
-
     async def load_version_details(
         self,
         package_name: str,
@@ -250,9 +247,7 @@ class VersionDataLoader:
         # Repodata patches rewrite the channel's repodata without touching the
         # archive, so the gateway record and info/index.json diverge when a
         # patch applies. Every conda package ships info/index.json.
-        repodata_patches = build_repodata_patch_diff(
-            record, await self.get_index_json(archive)
-        )
+        repodata_patches = build_repodata_patch_diff(record, await archive.index_json())
 
         artifact_data = build_version_artifact_data(
             package_name,
