@@ -41,6 +41,20 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 
+try:
+    from textual_diff_view import DiffView
+except ImportError:  # pragma: no cover - depends on the optional ``diff`` extra
+    DIFF_VIEW_AVAILABLE = False
+else:
+    DIFF_VIEW_AVAILABLE = True
+
+# How to get the optional diff view, shown when the ``Diff`` action is picked
+# without it.
+DIFF_VIEW_INSTALL_HINT = (
+    "Diffing files needs the optional textual-diff-view package. "
+    "Install it to enable this action."
+)
+
 VERSION_DETAIL_SECTION_COUNT = 3
 
 METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
@@ -89,7 +103,7 @@ EMPTY_MATCHSPEC_RESULT = Empty()
 EMPTY_WHONEEDS_RESULT = Empty()
 
 
-FileAction = Literal["download", "preview"]
+FileAction = Literal["download", "preview", "diff"]
 FileActionSource = Literal["default", "left", "right"]
 WhoNeedsConfirmChoice = Literal["run", "custom"]
 
@@ -2491,7 +2505,63 @@ class DownloadPathScreen(ModalScreen[str | None]):
         self.dismiss(result)
 
 
-class FilePreviewScreen(ModalScreen[None]):
+class ScrollableModalScreen(ModalScreen[None]):
+    """A modal whose body is a ``VerticalScroll`` driven by vim-style keys.
+
+    Subclasses set ``SCROLL_ID`` to the id of their scroll container.
+    """
+
+    SCROLL_ID = ""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+        Binding("up,k", "scroll_up", show=False),
+        Binding("down,j", "scroll_down", show=False),
+        Binding("pageup,ctrl+u", "page_up", show=False),
+        Binding("pagedown,ctrl+d", "page_down", show=False),
+        Binding("home", "scroll_home", show=False),
+        Binding("end", "scroll_end", show=False),
+        Binding("g", "scroll_home", show=False),
+        Binding("G", "scroll_end", show=False),
+    ]
+
+    def on_mount(self) -> None:
+        self._scroll().focus()
+
+    def _scroll(self) -> VerticalScroll:
+        return self.query_one(f"#{self.SCROLL_ID}", VerticalScroll)
+
+    def action_scroll_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=max(0, scroll.scroll_y - 1), animate=False)
+
+    def action_scroll_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + 1, animate=False)
+
+    def action_page_up(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(
+            y=max(0, scroll.scroll_y - max(1, scroll.size.height)), animate=False
+        )
+
+    def action_page_down(self) -> None:
+        scroll = self._scroll()
+        scroll.scroll_to(y=scroll.scroll_y + max(1, scroll.size.height), animate=False)
+
+    def action_scroll_home(self) -> None:
+        self._scroll().scroll_home(animate=False, immediate=True, x_axis=False)
+
+    def action_scroll_end(self) -> None:
+        self._scroll().scroll_end(animate=False)
+
+    async def action_dismiss(self, result: None = None) -> None:
+        del result
+        self.dismiss(None)
+
+
+class FilePreviewScreen(ScrollableModalScreen):
     DEFAULT_CSS = """
     FilePreviewScreen {
         align: center middle;
@@ -2524,18 +2594,7 @@ class FilePreviewScreen(ModalScreen[None]):
     }
     """
 
-    BINDINGS = [
-        Binding("escape", "dismiss", show=False),
-        Binding("q", "dismiss", show=False),
-        Binding("up,k", "scroll_up", show=False),
-        Binding("down,j", "scroll_down", show=False),
-        Binding("pageup,ctrl+u", "page_up", show=False),
-        Binding("pagedown,ctrl+d", "page_down", show=False),
-        Binding("home", "scroll_home", show=False),
-        Binding("end", "scroll_end", show=False),
-        Binding("g", "scroll_home", show=False),
-        Binding("G", "scroll_end", show=False),
-    ]
+    SCROLL_ID = "file-preview-scroll"
 
     def __init__(
         self, title: str, content: str, *, syntax_lexer: str | None = None
@@ -2566,39 +2625,62 @@ class FilePreviewScreen(ModalScreen[None]):
                     self._content_renderable(), id="file-preview-body", markup=False
                 )
 
-    def on_mount(self) -> None:
-        self.query_one("#file-preview-scroll", VerticalScroll).focus()
 
-    def _scroll(self) -> VerticalScroll:
-        return self.query_one("#file-preview-scroll", VerticalScroll)
+class FileDiffScreen(ScrollableModalScreen):
+    """Diff of one file between the two compared artifacts.
 
-    def action_scroll_up(self) -> None:
-        scroll = self._scroll()
-        scroll.scroll_to(y=max(0, scroll.scroll_y - 1), animate=False)
+    Rendered by the optional ``textual-diff-view`` package; only push this
+    screen when ``DIFF_VIEW_AVAILABLE`` is true. The diff view brings its own
+    heading (file path and change counts) and the compare screen's title stays
+    visible above the dialog, so nothing else is added around it.
+    """
 
-    def action_scroll_down(self) -> None:
-        scroll = self._scroll()
-        scroll.scroll_to(y=scroll.scroll_y + 1, animate=False)
+    DEFAULT_CSS = """
+    FileDiffScreen {
+        align: center middle;
+        background: $background 60%;
+    }
 
-    def action_page_up(self) -> None:
-        scroll = self._scroll()
-        scroll.scroll_to(
-            y=max(0, scroll.scroll_y - max(1, scroll.size.height)), animate=False
-        )
+    #file-diff-scroll {
+        width: 95%;
+        height: 90%;
+        border: round #ec4899;
+        background: $surface;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
+    }
+    """
 
-    def action_page_down(self) -> None:
-        scroll = self._scroll()
-        scroll.scroll_to(y=scroll.scroll_y + max(1, scroll.size.height), animate=False)
+    SCROLL_ID = "file-diff-scroll"
 
-    def action_scroll_home(self) -> None:
-        self._scroll().scroll_home(animate=False, immediate=True, x_axis=False)
+    def __init__(
+        self,
+        file_path: str,
+        *,
+        left_text: str,
+        right_text: str,
+    ) -> None:
+        super().__init__()
+        self._file_path = file_path
+        self._left_text = left_text
+        self._right_text = right_text
 
-    def action_scroll_end(self) -> None:
-        self._scroll().scroll_end(animate=False)
-
-    async def action_dismiss(self, result: None = None) -> None:
-        del result
-        self.dismiss(None)
+    def compose(self) -> ComposeResult:
+        if not DIFF_VIEW_AVAILABLE:
+            raise RuntimeError(DIFF_VIEW_INSTALL_HINT)
+        with VerticalScroll(id="file-diff-scroll"):
+            yield DiffView(
+                self._file_path,
+                self._file_path,
+                self._left_text,
+                self._right_text,
+                annotations=True,
+                # Split when the terminal is wide enough, unified otherwise.
+                split=False,
+                auto_split=True,
+                wrap=True,
+                id="file-diff-view",
+            )
 
 
 class HelpScreen(ModalScreen[None]):

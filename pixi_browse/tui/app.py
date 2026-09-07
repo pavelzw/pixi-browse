@@ -30,6 +30,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Paste, Resize
+from textual.screen import Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -76,6 +77,8 @@ from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     DEPENDENCY_TABS,
+    DIFF_VIEW_AVAILABLE,
+    DIFF_VIEW_INSTALL_HINT,
     FILE_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
     METADATA_TABS,
@@ -84,6 +87,7 @@ from .widgets import (
     Empty,
     FileActionOption,
     FileActionScreen,
+    FileDiffScreen,
     FilePreviewContent,
     FilePreviewScreen,
     HelpScreen,
@@ -1461,6 +1465,16 @@ class CondaMetadataTui(App[None]):
         row: CompareFileRow,
     ) -> tuple[FileActionOption, ...]:
         actions: list[FileActionOption] = []
+        if (
+            row.changed
+            and row.left_file is not None
+            and row.right_file is not None
+            and not row.left_file.is_symlink
+            and not row.right_file.is_symlink
+        ):
+            # Always offered; without the optional textual-diff-view package
+            # picking it explains how to install it.
+            actions.append(FileActionOption(action="diff", label="Diff left / right"))
         if row.left_file is not None and not row.left_file.is_symlink:
             actions.extend(
                 (
@@ -1522,7 +1536,18 @@ class CondaMetadataTui(App[None]):
         return await fetch_raw_package_file_from_url(self._client, url, file_path)
 
     @staticmethod
+    def _decode_text_file(package_bytes: bytes) -> str | None:
+        """The file as text, or ``None`` when it is binary."""
+        if b"\0" in package_bytes:
+            return None
+        try:
+            return package_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+
+    @classmethod
     def _preview_content(
+        cls,
         file_path: str,
         package_bytes: bytes | None,
         *,
@@ -1535,23 +1560,14 @@ class CondaMetadataTui(App[None]):
             return FilePreviewContent(
                 text=(
                     "File too large to preview in-app "
-                    f"({size_in_bytes:,} bytes).\n\n"
+                    f"({format_human_byte_size(size_in_bytes)}).\n\n"
                     "Use Download as file instead."
                 )
             )
 
         assert package_bytes is not None
-        if b"\0" in package_bytes:
-            return FilePreviewContent(
-                text=(
-                    "Binary file preview is not supported.\n\n"
-                    "Use Download as file instead."
-                )
-            )
-
-        try:
-            content = package_bytes.decode("utf-8")
-        except UnicodeDecodeError:
+        content = cls._decode_text_file(package_bytes)
+        if content is None:
             return FilePreviewContent(
                 text=(
                     "Binary file preview is not supported.\n\n"
@@ -1648,7 +1664,11 @@ class CondaMetadataTui(App[None]):
         sha256: bytes | None = None,
         *,
         title_prefix: str | None = None,
+        origin_screen: Screen[None] | None = None,
     ) -> None:
+        """Preview a package file; when ``origin_screen`` is given, the preview
+        is dropped if that screen is no longer active by the time the file has
+        been fetched."""
         try:
             preview_title = self._preview_title(file_path, size_in_bytes=size_in_bytes)
             if title_prefix is not None:
@@ -1670,6 +1690,8 @@ class CondaMetadataTui(App[None]):
             package_bytes = await self._fetch_package_file_bytes(
                 package_name, entry, file_path
             )
+            if origin_screen is not None and self.screen is not origin_screen:
+                return
             preview_title = self._preview_title(file_path, package_bytes)
             if title_prefix is not None:
                 preview_title = f"{title_prefix}: {preview_title}"
@@ -1757,6 +1779,79 @@ class CondaMetadataTui(App[None]):
             self._file_action_in_progress = False
             raise
 
+    async def _fetch_diff_side_text(
+        self, selection: CompareSelection, package_file: PackageFile, side: str
+    ) -> str | None:
+        """The text of one side of a file diff, or ``None`` after notifying why
+        it cannot be diffed."""
+        file_path = package_file.path
+
+        def notify_too_large(size_in_bytes: int) -> None:
+            self.notify(
+                f"{side} file {file_path} is too large to diff in-app "
+                f"({format_human_byte_size(size_in_bytes)}).",
+                title="Diff",
+                severity="warning",
+            )
+
+        if (
+            package_file.size_in_bytes is not None
+            and package_file.size_in_bytes > _PREVIEW_MAX_BYTES
+        ):
+            notify_too_large(package_file.size_in_bytes)
+            return None
+        package_bytes = await self._fetch_package_file_bytes(
+            selection.package_name, selection.entry, file_path
+        )
+        if len(package_bytes) > _PREVIEW_MAX_BYTES:
+            notify_too_large(len(package_bytes))
+            return None
+        text = self._decode_text_file(package_bytes)
+        if text is None:
+            self.notify(
+                f"{side} file {file_path} is binary and cannot be diffed.",
+                title="Diff",
+                severity="warning",
+            )
+        return text
+
+    def _compare_screen_is_active(self, compare_screen: CompareScreen) -> bool:
+        return self._compare_screen_open and self.screen is compare_screen
+
+    async def _diff_compare_files(
+        self,
+        compare_screen: CompareScreen,
+        left_selection: CompareSelection,
+        left_file: PackageFile,
+        right_selection: CompareSelection,
+        right_file: PackageFile,
+    ) -> None:
+        try:
+            left_text, right_text = await asyncio.gather(
+                self._fetch_diff_side_text(left_selection, left_file, "Left"),
+                self._fetch_diff_side_text(right_selection, right_file, "Right"),
+            )
+            if left_text is None or right_text is None:
+                return
+            # The compare screen may have been dismissed while fetching.
+            if not self._compare_screen_is_active(compare_screen):
+                return
+            # Compare rows pair files by path.
+            assert left_file.path == right_file.path
+            self.push_screen(
+                FileDiffScreen(
+                    left_file.path, left_text=left_text, right_text=right_text
+                )
+            )
+        except Exception as exc:
+            self.notify(
+                f"Failed to diff {left_file.path}: {exc!s}",
+                title="Diff",
+                severity="error",
+            )
+        finally:
+            self._file_action_in_progress = False
+
     async def _run_compare_file_action(
         self,
         selection: CompareSelection,
@@ -1765,6 +1860,7 @@ class CondaMetadataTui(App[None]):
         *,
         title_prefix: str,
         destination_path: str | None = None,
+        origin_screen: CompareScreen | None = None,
     ) -> None:
         try:
             if action.action == "download":
@@ -1783,6 +1879,7 @@ class CondaMetadataTui(App[None]):
                     package_file.size_in_bytes,
                     package_file.sha256,
                     title_prefix=title_prefix,
+                    origin_screen=origin_screen,
                 )
                 return
         finally:
@@ -1799,6 +1896,10 @@ class CondaMetadataTui(App[None]):
             return
 
         compare_screen = cast(CompareScreen, self.screen)
+        if action.action == "diff":
+            self._start_compare_file_diff(compare_screen, row)
+            return
+
         if action.source == "left":
             selection = compare_screen.selection_for_source("left")
             package_file = row.left_file
@@ -1845,6 +1946,39 @@ class CondaMetadataTui(App[None]):
                     package_file,
                     action,
                     title_prefix=title_prefix,
+                    origin_screen=compare_screen,
+                ),
+                group="file-action",
+                exclusive=True,
+                exit_on_error=False,
+            )
+        except Exception:
+            self._file_action_in_progress = False
+            raise
+
+    def _start_compare_file_diff(
+        self, compare_screen: CompareScreen, row: CompareFileRow
+    ) -> None:
+        if row.left_file is None or row.right_file is None:
+            self.notify(
+                "Both sides need a file to diff.",
+                title="Diff",
+                severity="warning",
+            )
+            return
+        if not DIFF_VIEW_AVAILABLE:
+            self.notify(DIFF_VIEW_INSTALL_HINT, title="Diff", severity="warning")
+            return
+
+        self._file_action_in_progress = True
+        try:
+            self.run_worker(
+                self._diff_compare_files(
+                    compare_screen,
+                    compare_screen.selection_for_source("left"),
+                    row.left_file,
+                    compare_screen.selection_for_source("right"),
+                    row.right_file,
                 ),
                 group="file-action",
                 exclusive=True,

@@ -17,10 +17,14 @@ requires-python = ">=3.13"
 readme = "README.md"
 dependencies = [
   "textual >=8.2.7,<9",
-  "py-rattler >=0.24.0,<0.25",
-  "typer >=0.26.5,<0.27",
+  "py-rattler >=0.25.0,<0.26",
+  "typer >=0.27.2,<0.28",
   "pyyaml >=6.0.3,<7",
 ]
+
+[project.optional-dependencies]
+# Side-by-side file diffs in the compare view (AGPL-3.0 licensed).
+diff = ["textual-diff-view >=0.1.5,<0.2"]
 
 [project.urls]
 repository = "https://github.com/pavelzw/pixi-browse"
