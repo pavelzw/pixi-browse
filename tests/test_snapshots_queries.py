@@ -9,9 +9,9 @@ from textual.events import Paste
 from textual.pilot import Pilot
 
 from tests.helpers import (
+    BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
-    SIX_ONLY_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
@@ -544,9 +544,12 @@ def test_empty_channel_is_rejected(
 def test_switching_channel_lists_its_packages(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Typing ``bioconda`` loads that channel's packages and previews the
+    first one."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await switch_channel(pilot, SIX_ONLY_CHANNEL)
+        await switch_channel(pilot, BIOCONDA_CHANNEL)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -557,7 +560,7 @@ def test_switching_channel_clears_active_matchspec(
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await run_matchspec_query(pilot, "*zlib")
-        await switch_channel(pilot, SIX_ONLY_CHANNEL)
+        await switch_channel(pilot, BIOCONDA_CHANNEL)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 

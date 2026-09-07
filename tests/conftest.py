@@ -12,9 +12,10 @@ started with its production defaults (``conda-forge``) and exercises the exact
 gateway, repodata, package-streaming and rendering code paths it uses for
 users, without network access and with deterministic data.
 
-Two more channels live next to it on the same server so channel switching can
-be exercised for real: ``six-only`` (a subset of the artifacts) and ``missing``
-(no repodata at all, so loading it fails).
+The manifest lists artifacts of more than one channel (``bioconda`` next to
+``conda-forge``), each served under its own name, so channel switching runs
+for real. ``missing`` is mirrored too but has no repodata at all, so loading
+it fails.
 """
 
 from __future__ import annotations
@@ -37,12 +38,11 @@ from rattler.repo_data import Gateway
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
-from tests.channel_artifacts import ensure_channel_artifacts
+from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
 from tests.helpers import (
     ANACONDA_CHANNELS_URL,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
-    SIX_ONLY_CHANNEL,
     AppFactory,
     GatewayFactory,
     RangeRequestHandler,
@@ -50,22 +50,21 @@ from tests.helpers import (
 
 
 @pytest.fixture(scope="session")
-def fixture_channels_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The (downloaded, hash-verified) artifacts indexed into complete conda
-    channels, one directory per channel name."""
-    manifest = ensure_channel_artifacts()
+def channel_manifest() -> ChannelManifest:
+    """The manifest of test artifacts, downloaded and hash-verified."""
+    return ensure_channel_artifacts()
+
+
+@pytest.fixture(scope="session")
+def fixture_channels_dir(
+    channel_manifest: ChannelManifest, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """The manifest artifacts indexed into complete conda channels, one
+    directory per channel name."""
     channels_dir = tmp_path_factory.mktemp("channels")
-    channels = {
-        MAIN_CHANNEL: list(manifest.artifacts),
-        SIX_ONLY_CHANNEL: [
-            artifact
-            for artifact in manifest.artifacts
-            if artifact.file_name.startswith("six-")
-        ],
-    }
-    for channel_name, artifacts in channels.items():
+    for channel_name in channel_manifest.channels:
         channel_dir = channels_dir / channel_name
-        for artifact in artifacts:
+        for artifact in channel_manifest.artifacts_of(channel_name):
             destination = channel_dir / artifact.subdir / artifact.file_name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact.local_path, destination)
@@ -88,23 +87,19 @@ def channel_server(fixture_channels_dir: Path) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def rattler_client(channel_server: str) -> Client:
-    """A rattler client that serves the test channels from the local server."""
+def rattler_client(channel_manifest: ChannelManifest, channel_server: str) -> Client:
+    """A rattler client that serves the test channels from the local server
+    under the URLs the app resolves their names to."""
+    mirrors = {
+        f"{channel_url}/": [f"{channel_server}{channel_name}/"]
+        for channel_name, channel_url in channel_manifest.channels.items()
+    }
+    mirrors[f"{ANACONDA_CHANNELS_URL}{MISSING_CHANNEL}/"] = [
+        f"{channel_server}{MISSING_CHANNEL}/"
+    ]
+    assert f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/" in mirrors
     return Client(
-        middlewares=[
-            MirrorMiddleware(
-                {
-                    f"{ANACONDA_CHANNELS_URL}{channel_name}/": [
-                        f"{channel_server}{channel_name}/"
-                    ]
-                    for channel_name in (
-                        MAIN_CHANNEL,
-                        SIX_ONLY_CHANNEL,
-                        MISSING_CHANNEL,
-                    )
-                }
-            )
-        ],
+        middlewares=[MirrorMiddleware(mirrors)],
         user_agent="pixi-browse-tests",
     )
 

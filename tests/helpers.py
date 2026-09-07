@@ -21,12 +21,12 @@ from textual.worker import Worker, WorkerState
 from pixi_browse.tui import CondaMetadataTui
 
 ANACONDA_CHANNELS_URL = "https://conda.anaconda.org/"
-# The channel the app loads by default; all fixture artifacts.
+# The channel the app loads by default.
 MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
-# Only the ``six`` artifacts, for channel switching.
-SIX_ONLY_CHANNEL = "six-only"
-# Served, but without any repodata: loading it fails.
+# A second real channel from the manifest, for channel switching.
+BIOCONDA_CHANNEL = "bioconda"
+# Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
 CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
