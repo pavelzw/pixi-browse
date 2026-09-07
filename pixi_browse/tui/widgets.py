@@ -29,7 +29,9 @@ from pixi_browse.models import (
     CompareSelection,
     DependencyTab,
     FileTab,
+    MetadataTab,
     PackageFile,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -39,6 +41,9 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 
+VERSION_DETAIL_SECTION_COUNT = 3
+
+METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
     "constraints",
@@ -50,6 +55,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
 
@@ -101,6 +107,59 @@ class FilePreviewContent:
     lexer: str | None = None
 
 
+def compare_row_styles(row: CompareRow) -> tuple[str, str]:
+    if row.changed:
+        return "red", "green"
+    return "white", "white"
+
+
+def render_compare_table(
+    rows: tuple[CompareRow, ...],
+    *,
+    empty_message: str,
+    show_label_column: bool,
+    label_title: str = "",
+    left_title: str = "Left",
+    right_title: str = "Right",
+) -> RenderableType:
+    if not rows:
+        return Text(empty_message, style="dim")
+
+    table = Table(
+        box=box.SIMPLE,
+        expand=True,
+        show_edge=False,
+        pad_edge=False,
+        collapse_padding=True,
+    )
+    if show_label_column:
+        table.add_column(label_title, style="bold", ratio=1)
+    table.add_column(left_title, ratio=2)
+    table.add_column(right_title, ratio=2)
+
+    for row in rows:
+        left_style, right_style = compare_row_styles(row)
+        cells: list[RenderableType] = []
+        if show_label_column:
+            cells.append(row.label)
+        cells.append(Text(row.left, style=left_style))
+        cells.append(Text(row.right, style=right_style))
+        table.add_row(*cells)
+    return table
+
+
+def render_repodata_patches_body(patches: RepodataPatchDiff) -> RenderableType:
+    """Render the unpatched (index.json) vs patched (repodata) diff table."""
+    return render_compare_table(
+        patches.rows,
+        empty_message="No repodata patches.",
+        show_label_column=True,
+        label_title="Field",
+        left_title="Unpatched (index.json)",
+        right_title="Patched (repodata)",
+    )
+
+
 class DetailOptionList(OptionList):
     can_focus = False
 
@@ -112,6 +171,7 @@ class DetailSection(Vertical):
         index: int,
         *,
         on_activate: Callable[[int], None],
+        on_select_metadata_tab: Callable[[MetadataTab], None] | None = None,
         on_select_dependency_tab: Callable[[DependencyTab], None] | None = None,
         on_select_file_tab: Callable[[FileTab], None] | None = None,
         show_tabs: bool = False,
@@ -123,6 +183,7 @@ class DetailSection(Vertical):
         self._use_option_list = use_option_list
         self._id_prefix = id_prefix
         self._on_activate = on_activate
+        self._on_select_metadata_tab = on_select_metadata_tab
         self._on_select_dependency_tab = on_select_dependency_tab
         self._on_select_file_tab = on_select_file_tab
         del title, show_tabs
@@ -155,6 +216,11 @@ class DetailSection(Vertical):
             return
         self._on_activate(self._index)
         event.stop()
+
+    def action_select_metadata_tab(self, tab: MetadataTab) -> None:
+        if self._on_select_metadata_tab is None:
+            return
+        self._on_select_metadata_tab(tab)
 
     def action_select_dependency_tab(self, tab: DependencyTab) -> None:
         if self._on_select_dependency_tab is None:
@@ -215,6 +281,7 @@ class VersionDetailsView(Vertical):
         super().__init__(id="version-details-view", classes="detail-view")
         self._details: VersionArtifactData | None = None
         self._active_section = 0
+        self._metadata_tab_index = 0
         self._dependency_tab_index = 0
         self._dependency_entries: dict[
             DependencyTab, tuple[DependencyListEntry, ...]
@@ -236,6 +303,8 @@ class VersionDetailsView(Vertical):
             "Metadata",
             0,
             on_activate=self._activate_section_from_click,
+            on_select_metadata_tab=self._select_metadata_tab_from_click,
+            show_tabs=True,
         )
         yield DetailSection(
             "Dependencies",
@@ -261,7 +330,7 @@ class VersionDetailsView(Vertical):
         self._refresh_sections()
 
     def set_active_section(self, index: int) -> None:
-        self._active_section = max(0, min(index, 2))
+        self._active_section = max(0, min(index, VERSION_DETAIL_SECTION_COUNT - 1))
         self._apply_section_state()
 
     def set_pane_selected(self, selected: bool) -> None:
@@ -277,6 +346,9 @@ class VersionDetailsView(Vertical):
     def _activate_section_from_click(self, index: int) -> None:
         self.activate_section(index, focus_main_panel=True)
 
+    def _select_metadata_tab_from_click(self, tab: MetadataTab) -> None:
+        self.select_metadata_tab(tab, focus_main_panel=True)
+
     def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
         self.select_dependency_tab(tab, focus_main_panel=True)
 
@@ -284,8 +356,28 @@ class VersionDetailsView(Vertical):
         self.select_file_tab(tab, focus_main_panel=True)
 
     def cycle_active_section(self, direction: int) -> None:
-        self._active_section = (self._active_section + direction) % 3
+        self._active_section = (
+            self._active_section + direction
+        ) % VERSION_DETAIL_SECTION_COUNT
         self._apply_section_state()
+
+    def cycle_metadata_tab(self, direction: int) -> None:
+        self._metadata_tab_index = (self._metadata_tab_index + direction) % len(
+            METADATA_TABS
+        )
+        self._refresh_metadata_section()
+
+    def set_metadata_tab(self, tab: MetadataTab) -> None:
+        self._metadata_tab_index = METADATA_TABS.index(tab)
+        self._refresh_metadata_section()
+
+    def select_metadata_tab(
+        self, tab: MetadataTab, *, focus_main_panel: bool = False
+    ) -> None:
+        self.set_active_section(0)
+        self.set_metadata_tab(tab)
+        if focus_main_panel:
+            self.app.query_one("#main-panel", MainPanel).focus()
 
     def cycle_dependency_tab(self, direction: int) -> None:
         self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
@@ -359,6 +451,9 @@ class VersionDetailsView(Vertical):
             return max(1, option_list.size.height)
         return self._section(self._active_section).page_step()
 
+    def metadata_section_is_active(self) -> bool:
+        return self._active_section == 0
+
     def dependency_section_is_active(self) -> bool:
         return self._active_section == 1
 
@@ -420,6 +515,9 @@ class VersionDetailsView(Vertical):
     def _section(self, index: int) -> DetailSection:
         return list(self.query(DetailSection))[index]
 
+    def _active_metadata_tab(self) -> MetadataTab:
+        return METADATA_TABS[self._metadata_tab_index]
+
     def _active_dependency_tab(self) -> DependencyTab:
         return DEPENDENCY_TABS[self._dependency_tab_index]
 
@@ -431,7 +529,7 @@ class VersionDetailsView(Vertical):
             section.set_active(index == self._active_section)
         if self._details is None:
             return
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
+        self._section(0).update_header(self._render_metadata_header())
         self._section(1).update_header(self._render_dependency_header())
         self._section(2).update_header(self._render_file_header())
 
@@ -439,16 +537,28 @@ class VersionDetailsView(Vertical):
         if self._details is None:
             return
 
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body(
-            "\n".join(format_version_details_metadata_lines(self._details))
-        )
+        self._refresh_metadata_section()
 
         self._refresh_dependency_section()
 
         self._refresh_file_section()
 
         self._apply_section_state()
+
+    def _refresh_metadata_section(self) -> None:
+        if self._details is None:
+            return
+
+        metadata_section = self._section(0)
+        metadata_section.update_header(self._render_metadata_header())
+        if self._active_metadata_tab() == "patches":
+            metadata_section.update_body(
+                render_repodata_patches_body(self._details.repodata_patches)
+            )
+            return
+        metadata_section.update_body(
+            "\n".join(format_version_details_metadata_lines(self._details))
+        )
 
     def _refresh_dependency_section(self) -> None:
         if self._details is None:
@@ -584,6 +694,31 @@ class VersionDetailsView(Vertical):
             "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
+    def _render_metadata_tabs(self) -> Text:
+        labels: dict[MetadataTab, str]
+        if self._details is None:
+            labels = {"metadata": "Metadata", "patches": "Repodata patches"}
+        else:
+            labels = {
+                "metadata": "Metadata",
+                "patches": (
+                    f"Repodata patches ({self._details.repodata_patches.change_count})"
+                ),
+            }
+        tab_text = Text()
+        for index, tab in enumerate(METADATA_TABS):
+            if index:
+                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
+            tab_text.append_text(
+                self._render_clickable_metadata_tab(
+                    tab,
+                    labels[tab],
+                    active=tab == self._active_metadata_tab(),
+                    pane_active=self._pane_selected and self._active_section == 0,
+                )
+            )
+        return tab_text
+
     def _render_dependency_tabs(self) -> Text:
         if self._details is None:
             labels = {
@@ -644,6 +779,11 @@ class VersionDetailsView(Vertical):
         )
         return Text(f"[{index + 1}] {label}", style=style)
 
+    def _render_metadata_header(self) -> Text:
+        header = self._render_section_header(0, "")
+        header.append_text(self._render_metadata_tabs())
+        return header
+
     def _render_dependency_header(self) -> Text:
         header = self._render_section_header(1, "")
         header.append_text(self._render_dependency_tabs())
@@ -653,6 +793,23 @@ class VersionDetailsView(Vertical):
         header = self._render_section_header(2, "")
         header.append_text(self._render_file_tabs())
         return header
+
+    @staticmethod
+    def _render_clickable_metadata_tab(
+        tab: MetadataTab, label: str, *, active: bool, pane_active: bool
+    ) -> Text:
+        text = Text(label)
+        text.stylize(
+            ACTIVE_TAB_STYLE
+            if active and pane_active
+            else INACTIVE_SELECTED_TAB_STYLE
+            if active
+            else INACTIVE_TAB_STYLE
+        )
+        text.stylize(
+            Style(meta={"@click": (DETAIL_SELECT_METADATA_TAB_ACTION, (tab,))})
+        )
+        return text
 
     @staticmethod
     def _render_clickable_dependency_tab(
@@ -781,6 +938,11 @@ class MainPanel(Vertical):
             index
         )
 
+    def cycle_metadata_tab(self, direction: int) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).cycle_metadata_tab(
+            direction
+        )
+
     def cycle_dependency_tab(self, direction: int) -> None:
         self.query_one(
             "#version-details-view", VersionDetailsView
@@ -790,6 +952,11 @@ class MainPanel(Vertical):
         self.query_one("#version-details-view", VersionDetailsView).cycle_file_tab(
             direction
         )
+
+    def metadata_section_is_active(self) -> bool:
+        return self.query_one(
+            "#version-details-view", VersionDetailsView
+        ).metadata_section_is_active()
 
     def dependency_section_is_active(self) -> bool:
         return self.query_one(
@@ -840,6 +1007,11 @@ class MainPanel(Vertical):
         return self.query_one(
             "#version-details-view", VersionDetailsView
         ).file_sha256_at(index)
+
+    def set_metadata_tab(self, tab: MetadataTab) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).set_metadata_tab(
+            tab
+        )
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
@@ -927,6 +1099,14 @@ class MainPanel(Vertical):
                 return
             if character in {"1", "2", "3"}:
                 self.set_active_section(int(character) - 1)
+                event.stop()
+                return
+            if character == "[" and self.metadata_section_is_active():
+                self.cycle_metadata_tab(-1)
+                event.stop()
+                return
+            if character == "]" and self.metadata_section_is_active():
+                self.cycle_metadata_tab(1)
                 event.stop()
                 return
             if character == "[" and dependency_section_is_active:
@@ -1279,9 +1459,7 @@ class CompareDetailsView(Vertical):
 
     @staticmethod
     def _row_style(row: CompareRow) -> tuple[str, str]:
-        if row.changed:
-            return "red", "green"
-        return "white", "white"
+        return compare_row_styles(row)
 
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
@@ -1449,30 +1627,12 @@ class CompareDetailsView(Vertical):
         show_label_column: bool,
         label_title: str = "",
     ) -> RenderableType:
-        if not rows:
-            return Text(empty_message, style="dim")
-
-        table = Table(
-            box=box.SIMPLE,
-            expand=True,
-            show_edge=False,
-            pad_edge=False,
-            collapse_padding=True,
+        return render_compare_table(
+            rows,
+            empty_message=empty_message,
+            show_label_column=show_label_column,
+            label_title=label_title,
         )
-        if show_label_column:
-            table.add_column(label_title, style="bold", ratio=1)
-        table.add_column("Left", ratio=2)
-        table.add_column("Right", ratio=2)
-
-        for row in rows:
-            left_style, right_style = self._row_style(row)
-            cells: list[RenderableType] = []
-            if show_label_column:
-                cells.append(row.label)
-            cells.append(Text(row.left, style=left_style))
-            cells.append(Text(row.right, style=right_style))
-            table.add_row(*cells)
-        return table
 
     def on_key(self, event: Key) -> None:
         page_height = self.active_page_step()

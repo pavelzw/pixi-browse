@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
-from rattler.package import RunExportsJson
+from rattler.package import IndexJson, RunExportsJson
 from rattler.repo_data import RepoDataRecord
 from rich.markup import escape
 
@@ -18,6 +19,7 @@ from pixi_browse.models import (
     CompareSelection,
     MetadataRow,
     PackageFile,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -406,6 +408,7 @@ def build_version_artifact_data(
     provenance_sha: str | None = None,
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
+    repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=_metadata_rows_for_record(
@@ -432,6 +435,88 @@ def build_version_artifact_data(
         provenance_remote_url=provenance_remote_url,
         provenance_sha=provenance_sha,
         rattler_build_version=rattler_build_version,
+        repodata_patches=repodata_patches,
+    )
+
+
+def _repodata_field_text(value: object) -> str:
+    """Render an ``index.json``/repodata field for a plain-text diff cell."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def build_repodata_patch_diff(
+    record: RepoDataRecord, index_json: IndexJson
+) -> RepodataPatchDiff:
+    """Diff the archive's ``info/index.json`` against the channel's repodata record.
+
+    ``record`` comes from the gateway and therefore already has the channel's
+    repodata patches applied. ``index_json`` is read from the package archive
+    and is what the package was built with. Every field that differs is a
+    repodata patch. Field labels follow the ``index.json`` key names.
+
+    ``arch`` and ``platform`` are deliberately not compared: the indexer drops
+    them from repodata because they are implied by ``subdir``, so they differ
+    for every package without any patch being involved.
+
+    ``license_family`` is not compared either: conda-forge's repodata patches
+    fill it in for every record that lacks it, which is every rattler-build
+    package, so it would flag nearly all recent artifacts as patched. See
+    https://github.com/conda-forge/conda-forge-repodata-patches-feedstock/blob/98e5f9bcb6a31f56d168a7e343c7ad70c784e194/recipe/gen_patch_json.py#L600-L603
+    """
+    scalar_fields: tuple[tuple[str, object, object], ...] = (
+        ("version", index_json.version, record.version),
+        ("build", index_json.build, record.build),
+        ("build_number", index_json.build_number, record.build_number),
+        ("license", index_json.license, record.license),
+        ("features", index_json.features, record.features),
+        ("track_features", index_json.track_features, record.track_features),
+        ("timestamp", index_json.timestamp, record.timestamp),
+        # TODO: compare `noarch` once py-rattler exposes it on `IndexJson`,
+        # see https://github.com/pavelzw/pixi-browse/issues/93
+    )
+    metadata_rows: list[CompareRow] = []
+    for label, unpatched, patched in scalar_fields:
+        left = _repodata_field_text(unpatched)
+        right = _repodata_field_text(patched)
+        if left != right:
+            metadata_rows.append(
+                CompareRow(label=label, left=left, right=right, changed=True)
+            )
+    # The indexer always fills in `subdir`; older packages lack it in index.json.
+    if index_json.subdir is not None and index_json.subdir != record.subdir:
+        metadata_rows.append(
+            CompareRow(
+                label="subdir",
+                left=index_json.subdir,
+                right=record.subdir,
+                changed=True,
+            )
+        )
+
+    dependencies = tuple(
+        CompareRow(label="depends", left=row.left, right=row.right, changed=True)
+        for row in _diff_dependency_group(
+            index_json.depends, record.depends, run_export=False
+        )
+        if row.changed
+    )
+    constraints = tuple(
+        CompareRow(label="constrains", left=row.left, right=row.right, changed=True)
+        for row in _diff_dependency_group(
+            index_json.constrains, record.constrains, run_export=False
+        )
+        if row.changed
+    )
+    return RepodataPatchDiff(
+        metadata=tuple(metadata_rows),
+        dependencies=dependencies,
+        constraints=constraints,
     )
 
 

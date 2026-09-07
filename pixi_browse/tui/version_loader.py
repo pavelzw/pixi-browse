@@ -14,7 +14,10 @@ from pixi_browse.models import (
     VersionArtifactData,
     VersionPreviewKey,
 )
-from pixi_browse.rendering import build_version_artifact_data
+from pixi_browse.rendering import (
+    build_repodata_patch_diff,
+    build_version_artifact_data,
+)
 
 from .state import AboutUrls
 
@@ -241,6 +244,11 @@ class VersionDataLoader:
         except Exception:
             pass
 
+        # Repodata patches rewrite the channel's repodata without touching the
+        # archive, so the gateway record and info/index.json diverge when a
+        # patch applies. Every conda package ships info/index.json.
+        repodata_patches = build_repodata_patch_diff(record, await archive.index_json())
+
         artifact_data = build_version_artifact_data(
             package_name,
             record,
@@ -254,6 +262,7 @@ class VersionDataLoader:
             provenance_sha=about_urls.provenance_sha,
             rattler_build_version=about_urls.rattler_build_version,
             run_exports=run_exports,
+            repodata_patches=repodata_patches,
         )
         self.artifact_data_cache[preview_key] = artifact_data
         return artifact_data
