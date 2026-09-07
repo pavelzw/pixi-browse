@@ -30,6 +30,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Paste, Resize
+from textual.screen import Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -1663,7 +1664,11 @@ class CondaMetadataTui(App[None]):
         sha256: bytes | None = None,
         *,
         title_prefix: str | None = None,
+        origin_screen: Screen[None] | None = None,
     ) -> None:
+        """Preview a package file; when ``origin_screen`` is given, the preview
+        is dropped if that screen is no longer active by the time the file has
+        been fetched."""
         try:
             preview_title = self._preview_title(file_path, size_in_bytes=size_in_bytes)
             if title_prefix is not None:
@@ -1685,6 +1690,8 @@ class CondaMetadataTui(App[None]):
             package_bytes = await self._fetch_package_file_bytes(
                 package_name, entry, file_path
             )
+            if origin_screen is not None and self.screen is not origin_screen:
+                return
             preview_title = self._preview_title(file_path, package_bytes)
             if title_prefix is not None:
                 preview_title = f"{title_prefix}: {preview_title}"
@@ -1808,8 +1815,12 @@ class CondaMetadataTui(App[None]):
             )
         return text
 
+    def _compare_screen_is_active(self, compare_screen: CompareScreen) -> bool:
+        return self._compare_screen_open and self.screen is compare_screen
+
     async def _diff_compare_files(
         self,
+        compare_screen: CompareScreen,
         left_selection: CompareSelection,
         left_file: PackageFile,
         right_selection: CompareSelection,
@@ -1821,6 +1832,9 @@ class CondaMetadataTui(App[None]):
                 self._fetch_diff_side_text(right_selection, right_file, "Right"),
             )
             if left_text is None or right_text is None:
+                return
+            # The compare screen may have been dismissed while fetching.
+            if not self._compare_screen_is_active(compare_screen):
                 return
             # Compare rows pair files by path.
             assert left_file.path == right_file.path
@@ -1850,6 +1864,7 @@ class CondaMetadataTui(App[None]):
         *,
         title_prefix: str,
         destination_path: str | None = None,
+        origin_screen: CompareScreen | None = None,
     ) -> None:
         try:
             if action.action == "download":
@@ -1868,6 +1883,7 @@ class CondaMetadataTui(App[None]):
                     package_file.size_in_bytes,
                     package_file.sha256,
                     title_prefix=title_prefix,
+                    origin_screen=origin_screen,
                 )
                 return
         finally:
@@ -1934,6 +1950,7 @@ class CondaMetadataTui(App[None]):
                     package_file,
                     action,
                     title_prefix=title_prefix,
+                    origin_screen=compare_screen,
                 ),
                 group="file-action",
                 exclusive=True,
@@ -1961,6 +1978,7 @@ class CondaMetadataTui(App[None]):
         try:
             self.run_worker(
                 self._diff_compare_files(
+                    compare_screen,
                     compare_screen.selection_for_source("left"),
                     row.left_file,
                     compare_screen.selection_for_source("right"),
