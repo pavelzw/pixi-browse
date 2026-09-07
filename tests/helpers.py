@@ -10,7 +10,6 @@ import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
-from pathlib import Path
 from typing import BinaryIO
 
 from rattler.platform import Platform
@@ -21,8 +20,6 @@ from textual.worker import Worker, WorkerState
 
 from pixi_browse.tui import CondaMetadataTui
 
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
-CHANNEL_SOURCE_DIR = FIXTURES_DIR / "channel"
 UPSTREAM_CHANNEL_URL = "https://conda.anaconda.org/conda-forge/"
 CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
 

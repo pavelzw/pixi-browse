@@ -1,9 +1,11 @@
 """Shared fixtures: a real, offline conda channel served over HTTP.
 
-The channel in ``tests/fixtures/channel`` consists of real conda-forge
-artifacts (see ``artifacts.toml`` there). At session start it is indexed with
-py-rattler and served by a small HTTP server that supports range requests, the
-same way a real channel mirror would. A rattler ``Client`` with a
+The channel consists of real conda-forge artifacts listed in
+``tests/fixtures/channel_artifacts.toml``; ``tests/channel_artifacts.py``
+downloads them into a git-ignored directory on first use and verifies their
+hashes. At session start the directory is indexed with py-rattler and served by
+a small HTTP server that supports range requests, the same way a real channel
+mirror would. A rattler ``Client`` with a
 ``MirrorMiddleware`` then transparently redirects every request for
 ``https://conda.anaconda.org/conda-forge/`` to that server, so the app can be
 started with its production defaults (``conda-forge``) and exercises the exact
@@ -31,8 +33,8 @@ from rattler.repo_data import Gateway
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
+from tests.channel_artifacts import ensure_channel_artifacts, load_manifest
 from tests.helpers import (
-    CHANNEL_SOURCE_DIR,
     UPSTREAM_CHANNEL_URL,
     AppFactory,
     GatewayFactory,
@@ -41,12 +43,21 @@ from tests.helpers import (
 
 
 @pytest.fixture(scope="session")
-def fixture_channel_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A copy of the fixture artifacts, indexed into a complete conda channel."""
+def channel_artifacts_dir() -> Path:
+    """The downloaded, hash-verified artifacts (fetched on first use)."""
+    return ensure_channel_artifacts()
+
+
+@pytest.fixture(scope="session")
+def fixture_channel_dir(
+    tmp_path_factory: pytest.TempPathFactory, channel_artifacts_dir: Path
+) -> Path:
+    """A copy of the artifacts, indexed into a complete conda channel."""
     channel_dir = tmp_path_factory.mktemp("channel")
-    for subdir in sorted(CHANNEL_SOURCE_DIR.iterdir()):
-        if subdir.is_dir():
-            shutil.copytree(subdir, channel_dir / subdir.name)
+    for artifact in load_manifest().artifacts:
+        destination = artifact.path(channel_dir)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(artifact.path(channel_artifacts_dir), destination)
     asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
     return channel_dir
 

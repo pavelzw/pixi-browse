@@ -119,7 +119,10 @@ pixi run test
 ```
 
 The tests run the app against a small offline conda channel made of real
-conda-forge artifacts (`tests/fixtures/channel`). TUI screens are checked with
+conda-forge artifacts listed in `tests/fixtures/channel_artifacts.toml`. They are
+downloaded into the git-ignored `tests/fixtures/channel/` directory on first use
+(or ahead of time with `pixi run fetch-test-channel`) and verified by SHA256, so
+later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot);
 after an intentional UI change, review `snapshot_report.html` and accept the new
 screenshots with:

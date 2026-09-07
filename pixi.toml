@@ -48,8 +48,9 @@ test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
 # Accept changed TUI snapshots after reviewing snapshot_report.html.
 snapshot-update = "pytest tests/test_snapshots.py --snapshot-update"
-# (Re)download the real conda-forge artifacts of the offline test channel.
-fetch-test-channel = "python tests/fixtures/fetch_channel_artifacts.py"
+# Pre-download the real conda-forge artifacts of the offline test channel
+# (the test session does this on demand as well).
+fetch-test-channel = "python -m tests.channel_artifacts"
 
 [feature.build.dependencies]
 python = "*"

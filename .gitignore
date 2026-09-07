@@ -383,3 +383,5 @@ $RECYCLE.BIN/
 .pixi
 .claude
 snapshot_report.html
+# Downloaded test channel artifacts, see tests/fixtures/channel_artifacts.toml
+tests/fixtures/channel/

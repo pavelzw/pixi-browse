@@ -8,8 +8,6 @@ packages, served by the local channel from ``conftest.py``.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import tomllib
 
 import pytest
 from rattler.match_spec import MatchSpec
@@ -30,17 +28,7 @@ from pixi_browse.repodata import (
     query_whoneeds_records,
 )
 from pixi_browse.tui.version_loader import VersionDataLoader
-from tests.helpers import CHANNEL_PLATFORMS, CHANNEL_SOURCE_DIR, GatewayFactory
-
-
-def test_fixture_artifacts_match_manifest() -> None:
-    """Guard against silently modified fixture data."""
-    manifest = tomllib.loads(
-        (CHANNEL_SOURCE_DIR / "artifacts.toml").read_text(encoding="utf-8")
-    )
-    for entry in manifest["artifacts"]:
-        path = CHANNEL_SOURCE_DIR / str(entry["subdir"]) / str(entry["file_name"])
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"], path
+from tests.helpers import CHANNEL_PLATFORMS, GatewayFactory
 
 
 def test_discover_available_platforms_finds_indexed_subdirs(
@@ -182,7 +170,7 @@ def test_load_version_artifact_data_reads_real_archives(
     """Metadata, run exports and file lists come straight out of the archive,
     for both ``.conda`` and legacy ``.tar.bz2`` packages."""
 
-    async def load() -> tuple[list[str], list[str], list[str], list[str]]:
+    async def load() -> tuple[list[str], list[str], list[str], list[str], list[str]]:
         records = await query_package_records(
             gateway=make_gateway(),
             channel_name="conda-forge",
@@ -212,13 +200,20 @@ def test_load_version_artifact_data_reads_real_archives(
             list(details.dependencies),
             list(format_version_details_run_exports(details.run_exports)),
             files + [file.path for file in details.info_files],
+            [
+                f"{row.label}: {row.left!r} -> {row.right!r}"
+                for row in details.repodata_patches.rows
+            ],
         )
 
-    metadata, dependencies, run_exports, files = asyncio.run(load())
+    metadata, dependencies, run_exports, files, repodata_patches = asyncio.run(load())
 
     assert {
         "metadata": metadata,
         "dependencies": dependencies,
         "run_exports": run_exports,
         "files": files,
+        # The fixture repodata is generated from the packages' own index.json,
+        # so anything reported here is a false positive of the patch detection.
+        "repodata_patches": repodata_patches,
     } == snapshot
