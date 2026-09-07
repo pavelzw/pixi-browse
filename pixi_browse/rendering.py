@@ -476,7 +476,7 @@ def build_repodata_patch_diff(
     https://github.com/conda-forge/conda-forge-repodata-patches-feedstock/blob/98e5f9bcb6a31f56d168a7e343c7ad70c784e194/recipe/gen_patch_json.py#L600-L603
 
     ``purls`` and ``repodata_revision`` are available on ``IndexJson`` but not on
-    py-rattler's ``PackageRecord``, so they cannot be compared yet.
+    py-rattler's ``PackageRecord``, so they cannot be compared.
     """
     scalar_fields: tuple[tuple[str, object, object], ...] = (
         ("version", index_json.version, record.version),
