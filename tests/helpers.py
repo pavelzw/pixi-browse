@@ -10,11 +10,12 @@ import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from textual.pilot import Pilot
+from textual.screen import Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker, WorkerState
 
@@ -144,6 +145,32 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
             "app workers failed: "
             + "; ".join(f"{worker.group}: {worker.error!r}" for worker in failed)
         )
+
+
+async def wait_for_screen(
+    # ``Screen`` is invariant in its result type, so only ``Any`` accepts every
+    # modal of the app here.
+    pilot: Pilot[None],
+    screen_type: type[Screen[Any]],
+    *,
+    timeout: float = 5.0,
+) -> None:
+    """Wait until a screen of ``screen_type`` is on top of the screen stack.
+
+    The app opens some modals via ``call_after_refresh`` (the file action
+    screen, the MatchSpec prompt for a selected dependency), so a test that
+    presses the key has to wait for the deferred push instead of assuming it
+    already happened.
+    """
+    deadline = time.monotonic() + timeout
+    while not isinstance(pilot.app.screen, screen_type):
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"{screen_type.__name__} did not open within {timeout}s "
+                f"(top screen: {type(pilot.app.screen).__name__})"
+            )
+        await pilot.pause()
+    await pilot.pause()
 
 
 async def open_versions(pilot: Pilot[None], package_index: int) -> None:

@@ -8,6 +8,7 @@ from rattler.platform import Platform
 from textual.events import Paste
 from textual.pilot import Pilot
 
+from pixi_browse.tui import MatchSpecScreen
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
@@ -18,6 +19,7 @@ from tests.helpers import (
     open_versions,
     type_text,
     wait_for_idle,
+    wait_for_screen,
 )
 
 
@@ -258,8 +260,7 @@ def test_enter_on_dependency_opens_matchspec_screen(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, MatchSpecScreen)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -273,8 +274,7 @@ def test_dependency_matchspec_query_opens_dependency_versions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=3)
         await pilot.press("2", "G", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, MatchSpecScreen)
         await pilot.press("enter")
         await wait_for_idle(pilot)
 

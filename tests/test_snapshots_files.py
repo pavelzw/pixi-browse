@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from textual.pilot import Pilot
 
+from pixi_browse.tui import FileActionScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
     open_versions,
     wait_for_idle,
+    wait_for_screen,
 )
 
 
@@ -21,8 +23,7 @@ def test_enter_on_package_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -35,8 +36,7 @@ def test_enter_on_info_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -49,8 +49,7 @@ def test_clicking_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.click("#detail-option-list-2", offset=(2, 0))
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -64,7 +63,6 @@ def test_enter_on_symlink_does_nothing(
         await open_versions(pilot, package_index=0)
         await pilot.press("3", "enter")
         await pilot.pause()
-        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -77,8 +75,7 @@ def test_file_actions_escape_returns_to_details(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
         await pilot.press("escape")
         await pilot.pause()
 
@@ -93,8 +90,7 @@ def test_preview_python_file_uses_syntax_highlighting(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
         await pilot.press("enter")
         await wait_for_idle(pilot)
         await pilot.press("j", "j", "j")
@@ -111,8 +107,7 @@ def test_preview_escape_returns_to_details(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
         await pilot.press("enter")
         await wait_for_idle(pilot)
         await pilot.press("escape")
@@ -130,8 +125,7 @@ def test_download_path_screen_rejects_empty_destination(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
         # "Download as file": the default destination is selected on focus.
         await pilot.press("down", "enter")
         await pilot.pause()

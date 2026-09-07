@@ -15,7 +15,7 @@ import pytest
 from rattler.networking import Client
 from rattler.package_streaming import fetch_raw_package_file_from_url
 
-from pixi_browse.tui import CondaMetadataTui
+from pixi_browse.tui import CondaMetadataTui, FileActionScreen
 from tests.channel_artifacts import load_manifest
 from tests.helpers import (
     TERMINAL_SIZE,
@@ -25,6 +25,7 @@ from tests.helpers import (
     open_versions,
     type_text,
     wait_for_idle,
+    wait_for_screen,
 )
 
 PIXI_BROWSE_FILE_NAME = "pixi-browse-0.0.14-pyhc364b38_0.conda"
@@ -74,8 +75,7 @@ def test_file_action_downloads_file_to_chosen_destination(
             await open_versions(pilot, package_index=1)
             # info/ tab, first file is about.json; "Download as file".
             await pilot.press("3", "]", "enter")
-            await pilot.pause()
-            await pilot.pause()
+            await wait_for_screen(pilot, FileActionScreen)
             await pilot.press("down", "enter")
             await pilot.pause()
             # The default destination is selected, so typing replaces it.

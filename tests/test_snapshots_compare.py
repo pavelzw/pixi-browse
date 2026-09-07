@@ -6,12 +6,14 @@ import asyncio
 
 from textual.pilot import Pilot
 
+from pixi_browse.tui import FileActionScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
     open_versions,
     wait_for_idle,
+    wait_for_screen,
 )
 
 
@@ -156,7 +158,6 @@ def test_compare_screen_enter_on_symlink_row_warns(
         await open_compare_screen(pilot)
         await pilot.press("3", "enter")
         await pilot.pause()
-        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -170,8 +171,7 @@ def test_compare_screen_enter_on_left_only_file_offers_left_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("3", "j", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -185,8 +185,7 @@ def test_compare_screen_rejects_binary_preview(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
         await pilot.press("3", "j", "enter")
-        await pilot.pause()
-        await pilot.pause()
+        await wait_for_screen(pilot, FileActionScreen)
         # "Preview left" of the shared library.
         await pilot.press("enter")
         await wait_for_idle(pilot)
