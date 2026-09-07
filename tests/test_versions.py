@@ -4,7 +4,7 @@ import shutil
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
@@ -183,6 +183,8 @@ def _make_repo_data_record(
     legacy_bz2_size: int | None = None,
     depends: list[str] | None = None,
     constrains: list[str] | None = None,
+    extra_depends: dict[str, list[str]] | None = None,
+    flags: list[str] | None = None,
     url: str | None = None,
 ) -> RepoDataRecord:
     resolved_file_name = file_name or f"{name}-{version}-{build}.conda"
@@ -198,6 +200,8 @@ def _make_repo_data_record(
             noarch=noarch,
             depends=depends,
             constrains=constrains,
+            extra_depends=extra_depends,
+            flags=flags,
             sha256=sha256,
             md5=md5,
             size=size,
@@ -369,6 +373,10 @@ def _make_index_json(
     license_family: str | None = None,
     track_features: list[str] | None = None,
     subdir: str | None = "keep",
+    noarch: NoArchLiteral | Literal["keep"] = "keep",
+    python_site_packages_path: str | None | Literal["keep"] = "keep",
+    flags: list[str] | None = None,
+    extra_depends: dict[str, list[str]] | None = None,
 ) -> IndexJson:
     """Build an ``info/index.json`` that matches ``record`` unless overridden."""
     data: dict[str, object] = {
@@ -378,6 +386,10 @@ def _make_index_json(
         "build_number": record.build_number,
         "depends": record.depends if depends is None else depends,
         "constrains": record.constrains if constrains is None else constrains,
+        "extra_depends": (
+            record.extra_depends if extra_depends is None else extra_depends
+        ),
+        "flags": record.flags if flags is None else flags,
         "license": record.license if license is None else license,
         "track_features": (
             record.track_features if track_features is None else track_features
@@ -385,6 +397,20 @@ def _make_index_json(
         "arch": record.arch,
         "platform": record.platform,
     }
+    if noarch == "keep":
+        if record.noarch.python:
+            data["noarch"] = "python"
+        elif record.noarch.generic:
+            data["noarch"] = "generic"
+    elif noarch is not None:
+        data["noarch"] = noarch
+    resolved_site_packages_path = (
+        record.python_site_packages_path
+        if python_site_packages_path == "keep"
+        else python_site_packages_path
+    )
+    if resolved_site_packages_path is not None:
+        data["python_site_packages_path"] = resolved_site_packages_path
     resolved_license_family = (
         record.license_family if license_family is None else license_family
     )
@@ -496,6 +522,95 @@ def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> Non
         record, _make_index_json(record, subdir="noarch")
     ).metadata == (
         CompareRow(label="subdir", left="noarch", right="linux-64", changed=True),
+    )
+
+
+def test_build_repodata_patch_diff_reports_patched_noarch() -> None:
+    """Regression test for https://github.com/pavelzw/pixi-browse/issues/93."""
+    record = _make_repo_data_record(subdir="noarch", noarch="python")
+
+    assert build_repodata_patch_diff(record, _make_index_json(record)) == (
+        RepodataPatchDiff()
+    )
+    assert build_repodata_patch_diff(
+        record, _make_index_json(record, noarch=None)
+    ).metadata == (CompareRow(label="noarch", left="", right="python", changed=True),)
+    assert build_repodata_patch_diff(
+        record, _make_index_json(record, noarch="generic")
+    ).metadata == (
+        CompareRow(label="noarch", left="generic", right="python", changed=True),
+    )
+
+
+def test_build_repodata_patch_diff_reports_patched_python_site_packages_path() -> None:
+    record = _make_repo_data_record(
+        name="python",
+        python_site_packages_path="lib/python3.13t/site-packages",
+    )
+
+    assert build_repodata_patch_diff(record, _make_index_json(record)) == (
+        RepodataPatchDiff()
+    )
+    assert build_repodata_patch_diff(
+        record, _make_index_json(record, python_site_packages_path=None)
+    ).metadata == (
+        CompareRow(
+            label="python_site_packages_path",
+            left="",
+            right="lib/python3.13t/site-packages",
+            changed=True,
+        ),
+    )
+
+
+def test_build_repodata_patch_diff_reports_patched_flags() -> None:
+    record = _make_repo_data_record(flags=["optional"])
+
+    assert build_repodata_patch_diff(record, _make_index_json(record)) == (
+        RepodataPatchDiff()
+    )
+    assert build_repodata_patch_diff(
+        record, _make_index_json(record, flags=[])
+    ).metadata == (CompareRow(label="flags", left="", right="optional", changed=True),)
+
+
+def test_build_repodata_patch_diff_reports_patched_extra_depends() -> None:
+    record = _make_repo_data_record(
+        extra_depends={
+            "scientific": ["numpy >=1.26,<2", "scipy"],
+            "security": ["cryptography >=42"],
+        },
+    )
+
+    assert build_repodata_patch_diff(record, _make_index_json(record)) == (
+        RepodataPatchDiff()
+    )
+    diff = build_repodata_patch_diff(
+        record,
+        _make_index_json(
+            record,
+            extra_depends={"scientific": ["numpy >=1.26"], "docs": ["sphinx"]},
+        ),
+    )
+
+    assert diff.metadata == ()
+    assert diff.dependencies == (
+        CompareRow(label="extra_depends[docs]", left="sphinx", right="", changed=True),
+        CompareRow(
+            label="extra_depends[scientific]",
+            left="numpy >=1.26",
+            right="numpy >=1.26,<2",
+            changed=True,
+        ),
+        CompareRow(
+            label="extra_depends[scientific]", left="", right="scipy", changed=True
+        ),
+        CompareRow(
+            label="extra_depends[security]",
+            left="",
+            right="cryptography >=42",
+            changed=True,
+        ),
     )
 
 
