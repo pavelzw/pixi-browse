@@ -31,6 +31,7 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Paste, Resize
 from textual.widgets import OptionList, Static
+from textual.worker import Worker
 
 from pixi_browse import __version__
 from pixi_browse.models import (
@@ -160,9 +161,18 @@ class CondaMetadataTui(App[None]):
         self._version_artifact_data_cache = self._version_loader.artifact_data_cache
         self._previewed_version_key: VersionPreviewKey | None = None
         self._pending_preview_version_key: VersionPreviewKey | None = None
+        # The preview currently being loaded, so repeated requests for the same
+        # preview (e.g. from `_load_packages` and the OptionList highlight
+        # event that follows it) do not cancel an in-flight gateway request.
+        # Cancelling one request fails every other request rattler coalesced
+        # onto it and would leave the panel stuck on "Loading repodata...".
+        self._version_preview_request: tuple[VersionPreviewKey, Worker[None]] | None = (
+            None
+        )
         self._selected_package: str | None = None
         self._previewed_package: str | None = None
         self._pending_preview_package: str | None = None
+        self._package_preview_request: tuple[str, Worker[None]] | None = None
         self._filter_mode = False
         self._channel_edit_mode = False
         self._channel_draft = self._channel_name
@@ -1242,12 +1252,15 @@ class CondaMetadataTui(App[None]):
             self._previewed_version_key = preview_key
             return
 
+        if self._preview_request_in_flight(self._version_preview_request, preview_key):
+            return
+
         self._show_main_placeholder(
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
             "Loading repodata for selected version..."
         )
         self._reset_main_panel_scroll()
-        self.run_worker(
+        worker = self.run_worker(
             self._load_and_render_selected_version_preview(
                 package_name, entry, preview_key
             ),
@@ -1255,6 +1268,16 @@ class CondaMetadataTui(App[None]):
             exclusive=True,
             exit_on_error=False,
         )
+        self._version_preview_request = (preview_key, worker)
+
+    @staticmethod
+    def _preview_request_in_flight[KeyT](
+        request: tuple[KeyT, Worker[None]] | None, key: KeyT
+    ) -> bool:
+        if request is None:
+            return False
+        requested_key, worker = request
+        return requested_key == key and worker.is_running and not worker.is_cancelled
 
     async def _download_selected_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -1917,13 +1940,17 @@ class CondaMetadataTui(App[None]):
             self._update_main_panel_for_package(package_name, cached)
             return
 
+        if self._preview_request_in_flight(self._package_preview_request, package_name):
+            return
+
         self._show_main_placeholder(f"# {package_name}\n\nLoading repodata...")
-        self.run_worker(
+        worker = self.run_worker(
             self._load_and_render_package_preview(package_name),
             group="package-preview",
             exclusive=True,
             exit_on_error=False,
         )
+        self._package_preview_request = (package_name, worker)
 
     def _filter_packages(self) -> None:
         if not self._filter_mode or not self._search_query:
