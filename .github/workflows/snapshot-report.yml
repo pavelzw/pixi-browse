@@ -41,4 +41,4 @@ jobs:
         with:
           header: snapshot-report
           message: |
-            [Download the snapshot report](${{ steps.upload-snapshot-report.outputs.artifact-url }})
+            [View snapshot report](${{ steps.upload-snapshot-report.outputs.artifact-url }})
