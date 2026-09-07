@@ -20,6 +20,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
 - **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
+- **Compare artifacts** — metadata, dependencies, and file lists of two builds side by side, with optional file diffs
 - **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
 - **Vim-style keybindings** for fast keyboard-driven navigation
@@ -41,6 +42,22 @@ uv tool install pixi-browse
 # or use without installation
 uvx pixi-browse
 ```
+
+### Optional: file diffs
+
+Comparing two artifacts (`C`) can show a side-by-side diff of a file that
+differs between them. This uses
+[textual-diff-view](https://github.com/batrachianai/textual-diff-view), which is
+AGPL-3.0 licensed and therefore not installed by default:
+
+```bash
+pixi global install pixi-browse --with textual-diff-view
+# or from PyPI
+uv tool install "pixi-browse[diff]"
+```
+
+Without it, the `Diff left / right` action in the compare view explains how to
+install it.
 
 ## Usage
 

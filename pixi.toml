@@ -32,6 +32,11 @@ pixi-browse = { path = "." }
 textual-dev = "*"
 py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
 
+[feature.diff.dependencies]
+# Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
+# it is not a run dependency of pixi-browse itself.
+textual-diff-view = ">=0.1.5,<0.2"
+
 [feature.test.dependencies]
 pytest = "*"
 pytest-cov = "*"
@@ -81,6 +86,6 @@ python = "3.13.*"
 python = "3.14.*"
 
 [environments]
-default = ["test", "build", "lint"]
-py313 = ["py313", "test"]
-py314 = ["py314", "test"]
+default = ["test", "build", "lint", "diff"]
+py313 = ["py313", "test", "diff"]
+py314 = ["py314", "test", "diff"]

@@ -22,6 +22,10 @@ dependencies = [
   "pyyaml >=6.0.3,<7",
 ]
 
+[project.optional-dependencies]
+# Side-by-side file diffs in the compare view (AGPL-3.0 licensed).
+diff = ["textual-diff-view >=0.1.5,<0.2"]
+
 [project.urls]
 repository = "https://github.com/pavelzw/pixi-browse"
 
