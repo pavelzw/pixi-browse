@@ -126,12 +126,6 @@ class CondaMetadataTui(App[None]):
         client: Client | None = None,
         cache_dir: Path | None = None,
     ) -> None:
-        """Create the TUI.
-
-        ``client`` and ``cache_dir`` exist so tests can point the app at a
-        local channel (via mirror middleware) and an isolated repodata cache
-        instead of the user's real network and cache directory.
-        """
         super().__init__()
         channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
