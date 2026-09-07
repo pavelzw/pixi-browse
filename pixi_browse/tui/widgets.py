@@ -30,6 +30,7 @@ from pixi_browse.models import (
     DependencyTab,
     FileTab,
     PackageFile,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionCompareData,
 )
@@ -38,6 +39,8 @@ from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
 )
+
+VERSION_DETAIL_SECTION_COUNT = 4
 
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -99,6 +102,67 @@ class FileActionOption:
 class FilePreviewContent:
     text: str
     lexer: str | None = None
+
+
+def compare_row_styles(row: CompareRow) -> tuple[str, str]:
+    if row.changed:
+        return "red", "green"
+    return "white", "white"
+
+
+def render_compare_table(
+    rows: tuple[CompareRow, ...],
+    *,
+    empty_message: str,
+    show_label_column: bool,
+    label_title: str = "",
+    left_title: str = "Left",
+    right_title: str = "Right",
+) -> RenderableType:
+    if not rows:
+        return Text(empty_message, style="dim")
+
+    table = Table(
+        box=box.SIMPLE,
+        expand=True,
+        show_edge=False,
+        pad_edge=False,
+        collapse_padding=True,
+    )
+    if show_label_column:
+        table.add_column(label_title, style="bold", ratio=1)
+    table.add_column(left_title, ratio=2)
+    table.add_column(right_title, ratio=2)
+
+    for row in rows:
+        left_style, right_style = compare_row_styles(row)
+        cells: list[RenderableType] = []
+        if show_label_column:
+            cells.append(row.label)
+        cells.append(Text(row.left, style=left_style))
+        cells.append(Text(row.right, style=right_style))
+        table.add_row(*cells)
+    return table
+
+
+def render_repodata_patches_body(
+    patches: RepodataPatchDiff | None,
+) -> RenderableType:
+    """Render the unpatched (index.json) vs patched (repodata) diff table."""
+    if patches is None:
+        return Text(
+            "Could not read info/index.json from the package archive, "
+            "so repodata patches cannot be detected.",
+            style="dim",
+        )
+    return render_compare_table(
+        patches.rows,
+        empty_message="Repodata matches info/index.json. No patches applied.",
+        show_label_column=True,
+        label_title="Field",
+        left_title="Unpatched (index.json)",
+        right_title="Patched (repodata)",
+    )
 
 
 class DetailOptionList(OptionList):
@@ -252,6 +316,11 @@ class VersionDetailsView(Vertical):
             on_select_file_tab=self._select_file_tab_from_click,
             use_option_list=True,
         )
+        yield DetailSection(
+            "Repodata patches",
+            3,
+            on_activate=self._activate_section_from_click,
+        )
 
     def set_details(self, details: VersionArtifactData) -> None:
         self._details = details
@@ -261,7 +330,7 @@ class VersionDetailsView(Vertical):
         self._refresh_sections()
 
     def set_active_section(self, index: int) -> None:
-        self._active_section = max(0, min(index, 2))
+        self._active_section = max(0, min(index, VERSION_DETAIL_SECTION_COUNT - 1))
         self._apply_section_state()
 
     def set_pane_selected(self, selected: bool) -> None:
@@ -284,7 +353,9 @@ class VersionDetailsView(Vertical):
         self.select_file_tab(tab, focus_main_panel=True)
 
     def cycle_active_section(self, direction: int) -> None:
-        self._active_section = (self._active_section + direction) % 3
+        self._active_section = (
+            self._active_section + direction
+        ) % VERSION_DETAIL_SECTION_COUNT
         self._apply_section_state()
 
     def cycle_dependency_tab(self, direction: int) -> None:
@@ -434,6 +505,7 @@ class VersionDetailsView(Vertical):
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
         self._section(1).update_header(self._render_dependency_header())
         self._section(2).update_header(self._render_file_header())
+        self._section(3).update_header(self._render_repodata_patches_header())
 
     def _refresh_sections(self) -> None:
         if self._details is None:
@@ -448,7 +520,26 @@ class VersionDetailsView(Vertical):
 
         self._refresh_file_section()
 
+        self._refresh_repodata_patches_section()
+
         self._apply_section_state()
+
+    def _refresh_repodata_patches_section(self) -> None:
+        if self._details is None:
+            return
+
+        patches_section = self._section(3)
+        patches_section.update_header(self._render_repodata_patches_header())
+        patches_section.update_body(
+            render_repodata_patches_body(self._details.repodata_patches)
+        )
+
+    def _render_repodata_patches_header(self) -> Text:
+        if self._details is None:
+            return self._render_section_header(3, "Repodata patches")
+        patches = self._details.repodata_patches
+        count = "?" if patches is None else str(patches.change_count)
+        return self._render_section_header(3, f"Repodata patches ({count})")
 
     def _refresh_dependency_section(self) -> None:
         if self._details is None:
@@ -925,7 +1016,7 @@ class MainPanel(Vertical):
                 self.cycle_active_section(-1)
                 event.stop()
                 return
-            if character in {"1", "2", "3"}:
+            if character in {"1", "2", "3", "4"}:
                 self.set_active_section(int(character) - 1)
                 event.stop()
                 return
@@ -1279,9 +1370,7 @@ class CompareDetailsView(Vertical):
 
     @staticmethod
     def _row_style(row: CompareRow) -> tuple[str, str]:
-        if row.changed:
-            return "red", "green"
-        return "white", "white"
+        return compare_row_styles(row)
 
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
@@ -1449,30 +1538,12 @@ class CompareDetailsView(Vertical):
         show_label_column: bool,
         label_title: str = "",
     ) -> RenderableType:
-        if not rows:
-            return Text(empty_message, style="dim")
-
-        table = Table(
-            box=box.SIMPLE,
-            expand=True,
-            show_edge=False,
-            pad_edge=False,
-            collapse_padding=True,
+        return render_compare_table(
+            rows,
+            empty_message=empty_message,
+            show_label_column=show_label_column,
+            label_title=label_title,
         )
-        if show_label_column:
-            table.add_column(label_title, style="bold", ratio=1)
-        table.add_column("Left", ratio=2)
-        table.add_column("Right", ratio=2)
-
-        for row in rows:
-            left_style, right_style = self._row_style(row)
-            cells: list[RenderableType] = []
-            if show_label_column:
-                cells.append(row.label)
-            cells.append(Text(row.left, style=left_style))
-            cells.append(Text(row.right, style=right_style))
-            table.add_row(*cells)
-        return table
 
     def on_key(self, event: Key) -> None:
         page_height = self.active_page_step()

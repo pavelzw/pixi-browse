@@ -4,17 +4,21 @@ from dataclasses import replace
 
 import yaml
 from rattler.networking import Client
-from rattler.package import PathType, RunExportsJson
+from rattler.package import IndexJson, PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionPreviewKey,
 )
-from pixi_browse.rendering import build_version_artifact_data
+from pixi_browse.rendering import (
+    build_repodata_patch_diff,
+    build_version_artifact_data,
+)
 
 from .state import AboutUrls
 
@@ -200,6 +204,9 @@ class VersionDataLoader:
     async def get_run_exports(self, archive: PackageArchive) -> RunExportsJson | None:
         return await archive.run_exports_json()
 
+    async def get_index_json(self, archive: PackageArchive) -> IndexJson:
+        return await archive.index_json()
+
     async def load_version_details(
         self,
         package_name: str,
@@ -241,6 +248,17 @@ class VersionDataLoader:
         except Exception:
             pass
 
+        # Repodata patches rewrite the channel's repodata without touching the
+        # archive, so the gateway record and info/index.json diverge when a
+        # patch applies. If index.json cannot be read the patch state is unknown.
+        repodata_patches: RepodataPatchDiff | None = None
+        try:
+            repodata_patches = build_repodata_patch_diff(
+                record, await self.get_index_json(archive)
+            )
+        except Exception:
+            pass
+
         artifact_data = build_version_artifact_data(
             package_name,
             record,
@@ -254,6 +272,7 @@ class VersionDataLoader:
             provenance_sha=about_urls.provenance_sha,
             rattler_build_version=about_urls.rattler_build_version,
             run_exports=run_exports,
+            repodata_patches=repodata_patches,
         )
         self.artifact_data_cache[preview_key] = artifact_data
         return artifact_data

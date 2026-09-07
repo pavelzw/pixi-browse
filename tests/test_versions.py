@@ -1,4 +1,5 @@
 import asyncio
+import json
 import shutil
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ from typing import cast
 import pytest
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
-from rattler.package import NoArchLiteral, PackageName, RunExportsJson
+from rattler.package import IndexJson, NoArchLiteral, PackageName, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
@@ -28,11 +29,13 @@ from pixi_browse.models import (
     CompareRow,
     CompareSelection,
     PackageFile,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionCompareData,
     ViewMode,
 )
 from pixi_browse.rendering import (
+    build_repodata_patch_diff,
     build_version_artifact_data,
     build_version_compare_data,
     format_clickable_github_handle,
@@ -75,7 +78,11 @@ from pixi_browse.tui import (
 )
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
-from pixi_browse.tui.widgets import DetailOptionList, FileActionOption
+from pixi_browse.tui.widgets import (
+    DetailOptionList,
+    FileActionOption,
+    render_repodata_patches_body,
+)
 
 
 @dataclass(frozen=True)
@@ -339,6 +346,175 @@ def test_build_version_entries_preserves_artifacts_per_build() -> None:
     }
 
 
+def _make_index_json(
+    record: RepoDataRecord,
+    *,
+    depends: list[str] | None = None,
+    constrains: list[str] | None = None,
+    license: str | None = None,
+    license_family: str | None = None,
+    track_features: list[str] | None = None,
+    subdir: str | None = "keep",
+) -> IndexJson:
+    """Build an ``info/index.json`` that matches ``record`` unless overridden."""
+    data: dict[str, object] = {
+        "name": record.name.source,
+        "version": str(record.version),
+        "build": record.build,
+        "build_number": record.build_number,
+        "depends": record.depends if depends is None else depends,
+        "constrains": record.constrains if constrains is None else constrains,
+        "license": record.license if license is None else license,
+        "license_family": (
+            record.license_family if license_family is None else license_family
+        ),
+        "track_features": (
+            record.track_features if track_features is None else track_features
+        ),
+        "arch": record.arch,
+        "platform": record.platform,
+    }
+    if subdir == "keep":
+        data["subdir"] = record.subdir
+    elif subdir is not None:
+        data["subdir"] = subdir
+    if record.timestamp is not None:
+        data["timestamp"] = int(record.timestamp.timestamp() * 1000)
+    return IndexJson.from_str(json.dumps(data))
+
+
+def test_build_repodata_patch_diff_is_empty_when_repodata_matches_index_json() -> None:
+    record = _make_repo_data_record(
+        depends=["python >=3.13", "numpy"],
+        constrains=["libdemo >=1"],
+        track_features=["demo_feature"],
+    )
+
+    diff = build_repodata_patch_diff(record, _make_index_json(record))
+
+    assert diff == RepodataPatchDiff()
+    assert diff.is_patched is False
+    assert diff.change_count == 0
+
+
+def test_build_repodata_patch_diff_reports_patched_fields() -> None:
+    record = _make_repo_data_record(
+        depends=["python >=3.13", "numpy >=1.26,<2", "requests"],
+        constrains=["libdemo >=1,<2"],
+        license="MIT",
+        track_features=["demo_feature"],
+    )
+    index_json = _make_index_json(
+        record,
+        depends=["python >=3.13", "numpy >=1.26", "scipy"],
+        constrains=[],
+        license="BSD-3-Clause",
+        track_features=[],
+    )
+
+    diff = build_repodata_patch_diff(record, index_json)
+
+    assert diff.metadata == (
+        CompareRow(label="license", left="BSD-3-Clause", right="MIT", changed=True),
+        CompareRow(label="track_features", left="", right="demo_feature", changed=True),
+    )
+    assert diff.dependencies == (
+        CompareRow(
+            label="depends",
+            left="numpy >=1.26",
+            right="numpy >=1.26,<2",
+            changed=True,
+        ),
+        CompareRow(label="depends", left="scipy", right="", changed=True),
+        CompareRow(label="depends", left="", right="requests", changed=True),
+    )
+    assert diff.constraints == (
+        CompareRow(label="constrains", left="", right="libdemo >=1,<2", changed=True),
+    )
+    assert diff.is_patched is True
+    assert diff.change_count == 6
+    assert diff.rows == (*diff.metadata, *diff.dependencies, *diff.constraints)
+
+
+def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> None:
+    record = _make_repo_data_record(subdir="linux-64")
+
+    assert build_repodata_patch_diff(record, _make_index_json(record, subdir=None)) == (
+        RepodataPatchDiff()
+    )
+    assert build_repodata_patch_diff(
+        record, _make_index_json(record, subdir="noarch")
+    ).metadata == (
+        CompareRow(label="subdir", left="noarch", right="linux-64", changed=True),
+    )
+
+
+def test_metadata_rows_summarize_repodata_patch_state() -> None:
+    record = _make_repo_data_record()
+
+    unknown = format_version_details_metadata_lines(
+        build_version_artifact_data("demo", record)
+    )
+    unpatched = format_version_details_metadata_lines(
+        build_version_artifact_data(
+            "demo", record, repodata_patches=RepodataPatchDiff()
+        )
+    )
+    patched = format_version_details_metadata_lines(
+        build_version_artifact_data(
+            "demo",
+            record,
+            repodata_patches=RepodataPatchDiff(
+                metadata=(
+                    CompareRow(label="license", left="BSD", right="MIT", changed=True),
+                )
+            ),
+        )
+    )
+
+    assert "Repodata patches      unknown (info/index.json unavailable)" in unknown
+    assert "Repodata patches      none (repodata matches info/index.json)" in unpatched
+    assert "Repodata patches      1 change (see section 4)" in patched
+
+
+def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> None:
+    table = cast(
+        Table,
+        render_repodata_patches_body(
+            RepodataPatchDiff(
+                metadata=(
+                    CompareRow(label="license", left="BSD", right="MIT", changed=True),
+                ),
+                dependencies=(
+                    CompareRow(
+                        label="depends", left="", right="requests", changed=True
+                    ),
+                ),
+            )
+        ),
+    )
+
+    assert table.columns[0].header == "Field"
+    assert table.columns[1].header == "Unpatched (index.json)"
+    assert table.columns[2].header == "Patched (repodata)"
+    assert table.columns[0]._cells == ["license", "depends"]
+    assert cast(Text, table.columns[1]._cells[0]).plain == "BSD"
+    assert cast(Text, table.columns[1]._cells[0]).style == "red"
+    assert cast(Text, table.columns[2]._cells[0]).plain == "MIT"
+    assert cast(Text, table.columns[2]._cells[0]).style == "green"
+    assert cast(Text, table.columns[2]._cells[1]).plain == "requests"
+
+
+def test_render_repodata_patches_body_explains_empty_and_unknown_states() -> None:
+    unpatched = cast(Text, render_repodata_patches_body(RepodataPatchDiff()))
+    unknown = cast(Text, render_repodata_patches_body(None))
+
+    assert unpatched.plain == "Repodata matches info/index.json. No patches applied."
+    assert "Could not read info/index.json" in unknown.plain
+    assert unpatched.style == "dim"
+    assert unknown.style == "dim"
+
+
 def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
@@ -530,6 +706,11 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         calls.append("stream_info")
         return [PackageFile("info/index.json", 42)]
 
+    async def _fake_get_index_json(value: PackageArchive) -> IndexJson:
+        assert value is archive
+        calls.append("index_json")
+        return _make_index_json(record)
+
     monkeypatch.setattr(
         "pixi_browse.tui.version_loader.PackageArchive.from_url",
         _fake_from_url,
@@ -538,6 +719,7 @@ def test_load_version_details_tolerates_unavailable_about_urls(
     monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
     monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
     monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
+    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
 
     details = asyncio.run(
         loader.load_version_details("demo", record, preview_key=preview_key)
@@ -551,6 +733,7 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         for line in format_version_details_metadata_lines(details)
     )
     assert details.info_files == (PackageFile("info/index.json", 42),)
+    assert details.repodata_patches == RepodataPatchDiff()
     assert cached_archive is archive
     assert calls == [
         "from_url",
@@ -558,7 +741,115 @@ def test_load_version_details_tolerates_unavailable_about_urls(
         "stream_info",
         "about_json",
         "run_exports_json",
+        "index_json",
     ]
+
+
+def test_load_version_artifact_data_reports_repodata_patches(monkeypatch) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(
+        name="demo",
+        depends=["python >=3.13", "numpy >=1.26,<2"],
+        license="MIT",
+    )
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+    archive = cast(PackageArchive, object())
+
+    async def _fake_from_url(_client: Client, _url: str) -> PackageArchive:
+        return archive
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _value: PackageArchive
+    ) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_info_files(_value: PackageArchive) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_about_urls(
+        _preview_key: tuple[str, str, str, int, str, str], _value: PackageArchive
+    ) -> AboutUrls:
+        return AboutUrls()
+
+    async def _fake_get_run_exports(_value: PackageArchive) -> RunExportsJson | None:
+        return None
+
+    async def _fake_get_index_json(value: PackageArchive) -> IndexJson:
+        assert value is archive
+        return _make_index_json(
+            record,
+            depends=["python >=3.13", "numpy >=1.26"],
+            license="BSD-3-Clause",
+        )
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_from_url,
+    )
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
+    monkeypatch.setattr(loader, "get_about_urls", _fake_get_about_urls)
+    monkeypatch.setattr(loader, "get_run_exports", _fake_get_run_exports)
+    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
+
+    details = asyncio.run(
+        loader.load_version_artifact_data("demo", record, preview_key=preview_key)
+    )
+
+    assert details.repodata_patches == RepodataPatchDiff(
+        metadata=(
+            CompareRow(label="license", left="BSD-3-Clause", right="MIT", changed=True),
+        ),
+        dependencies=(
+            CompareRow(
+                label="depends",
+                left="numpy >=1.26",
+                right="numpy >=1.26,<2",
+                changed=True,
+            ),
+        ),
+    )
+    assert (
+        "Repodata patches      2 changes (see section 4)"
+        in format_version_details_metadata_lines(details)
+    )
+
+
+def test_load_version_artifact_data_tolerates_unavailable_index_json(
+    monkeypatch,
+) -> None:
+    loader = VersionDataLoader(client=cast(Client, object()))
+    record = _make_repo_data_record(name="demo")
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", record.file_name)
+
+    async def _fake_get_package_paths(
+        _preview_key: tuple[str, str, str, int, str, str], _value: PackageArchive
+    ) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_info_files(_value: PackageArchive) -> list[PackageFile]:
+        return []
+
+    async def _fake_get_index_json(_value: PackageArchive) -> IndexJson:
+        raise RuntimeError("index.json missing")
+
+    monkeypatch.setattr(
+        "pixi_browse.tui.version_loader.PackageArchive.from_url",
+        _fake_package_archive_from_url,
+    )
+    monkeypatch.setattr(loader, "get_package_paths", _fake_get_package_paths)
+    monkeypatch.setattr(loader, "get_info_files", _fake_get_info_files)
+    monkeypatch.setattr(loader, "get_index_json", _fake_get_index_json)
+
+    details = asyncio.run(
+        loader.load_version_artifact_data("demo", record, preview_key=preview_key)
+    )
+
+    assert details.repodata_patches is None
+    assert (
+        "Repodata patches      unknown (info/index.json unavailable)"
+        in format_version_details_metadata_lines(details)
+    )
 
 
 def test_load_version_artifact_data_raises_when_package_paths_are_unavailable(
@@ -1719,7 +2010,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "?                 Show this help" in help_text
     assert "j / k             Move selection or scroll" in help_text
     assert "h / l             Focus left / right pane" in help_text
-    assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
+    assert "1 / 2 / 3 / 4     Focus metadata, deps, files, or patches" in help_text
     assert "Tab / Shift+Tab" in help_text
     assert "Cycle focused section" in help_text
     assert "x                 Swap compare left / right" in help_text
@@ -2368,6 +2659,28 @@ def test_on_key_numeric_shortcut_focuses_main_section(monkeypatch) -> None:
     assert event.stopped is True
 
 
+def test_on_key_four_focuses_repodata_patches_section(monkeypatch) -> None:
+    app = CondaMetadataTui()
+    app._mode = "versions"
+    focused: list[str] = []
+    selected_sections: list[int] = []
+
+    monkeypatch.setattr(
+        app, "_set_active_main_section", lambda value: selected_sections.append(value)
+    )
+    monkeypatch.setattr(app, "_sidebar_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_main_panel_shows_version_details", lambda: True)
+    monkeypatch.setattr(app, "_main_panel_is_focused", lambda: False)
+    monkeypatch.setattr(app, "_focus_main_panel", lambda: focused.append("main"))
+
+    event = _FakeKeyEvent("4", "4")
+    app.on_key(event)  # type: ignore[arg-type]
+
+    assert selected_sections == [3]
+    assert focused == ["main"]
+    assert event.stopped is True
+
+
 def test_on_key_zero_focuses_sidebar_in_versions_mode(monkeypatch) -> None:
     app = CondaMetadataTui()
     app._mode = "versions"
@@ -2506,6 +2819,45 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
     assert "-pane-selected" in view.classes
     assert len(sections) == 3
     assert all(isinstance(section, DetailSection) for section in sections)
+
+
+def test_version_details_view_composes_repodata_patches_section() -> None:
+    view = VersionDetailsView()
+    sections = list(view.compose())
+
+    assert len(sections) == 4
+    assert all(isinstance(section, DetailSection) for section in sections)
+
+
+def test_repodata_patches_header_shows_change_count() -> None:
+    view = VersionDetailsView()
+    view._pane_selected = True
+    view._active_section = 3
+
+    assert view._render_repodata_patches_header().plain == "[4] Repodata patches"
+
+    view._details = VersionArtifactData(
+        metadata_rows=(),
+        dependencies=(),
+        constraints=(),
+        repodata_patches=None,
+    )
+    unknown_header = view._render_repodata_patches_header()
+    assert unknown_header.plain == "[4] Repodata patches (?)"
+    assert unknown_header.style == ACTIVE_SECTION_TITLE_STYLE
+
+    view._details = VersionArtifactData(
+        metadata_rows=(),
+        dependencies=(),
+        constraints=(),
+        repodata_patches=RepodataPatchDiff(
+            dependencies=(
+                CompareRow(label="depends", left="", right="requests", changed=True),
+                CompareRow(label="depends", left="scipy", right="", changed=True),
+            )
+        ),
+    )
+    assert view._render_repodata_patches_header().plain == "[4] Repodata patches (2)"
 
 
 def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:

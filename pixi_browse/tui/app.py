@@ -915,7 +915,7 @@ class CondaMetadataTui(App[None]):
             [
                 ("j / k", "Move selection or scroll"),
                 ("h / l", "Focus left / right pane"),
-                ("1 / 2 / 3", "Focus metadata, deps, or files"),
+                ("1 / 2 / 3 / 4", "Focus metadata, deps, files, or patches"),
                 ("Tab / Shift+Tab", "Cycle focused section"),
                 ("x", "Swap compare left / right"),
                 ("[ / ]", "Cycle dependency tabs"),
@@ -2794,7 +2794,7 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and self._main_panel_shows_version_details()
-            and event.character in {"1", "2", "3"}
+            and event.character in {"1", "2", "3", "4"}
         ):
             self._set_active_main_section(int(event.character) - 1)
             self._focus_main_panel()

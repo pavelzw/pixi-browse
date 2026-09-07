@@ -46,6 +46,41 @@ class PackageFile:
 
 
 @dataclass(frozen=True)
+class CompareRow:
+    label: str
+    left: str
+    right: str
+    changed: bool
+
+
+@dataclass(frozen=True)
+class RepodataPatchDiff:
+    """Differences between a package's ``info/index.json`` and its repodata record.
+
+    Channels can ship repodata patches that rewrite the metadata served by the
+    channel without touching the package archive itself. Each row pairs the
+    unpatched value from ``index.json`` (``left``) with the value the gateway
+    returned from the channel's repodata (``right``). Only changed rows are kept.
+    """
+
+    metadata: tuple[CompareRow, ...] = ()
+    dependencies: tuple[CompareRow, ...] = ()
+    constraints: tuple[CompareRow, ...] = ()
+
+    @property
+    def rows(self) -> tuple[CompareRow, ...]:
+        return (*self.metadata, *self.dependencies, *self.constraints)
+
+    @property
+    def change_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def is_patched(self) -> bool:
+        return self.change_count > 0
+
+
+@dataclass(frozen=True)
 class VersionArtifactData:
     metadata_rows: tuple[MetadataRow, ...]
     dependencies: tuple[str, ...]
@@ -61,20 +96,13 @@ class VersionArtifactData:
     provenance_remote_url: str | None = None
     provenance_sha: str | None = None
     rattler_build_version: str | None = None
+    repodata_patches: RepodataPatchDiff | None = None
 
 
 @dataclass(frozen=True)
 class CompareSelection:
     package_name: str
     entry: VersionEntry
-
-
-@dataclass(frozen=True)
-class CompareRow:
-    label: str
-    left: str
-    right: str
-    changed: bool
 
 
 @dataclass(frozen=True)
