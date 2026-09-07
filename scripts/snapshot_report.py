@@ -131,7 +131,7 @@ def test_docstring(revision: str, snapshot_path: PurePosixPath) -> str:
 
     module_path = PurePosixPath(*parts[:snapshot_directory_index], f"{module_name}.py")
     module = ast.parse(run_git("show", f"{revision}:{module_path}"))
-    test_name = snapshot_path.stem
+    test_name = snapshot_path.stem.partition("[")[0]
 
     for node in ast.walk(module):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
@@ -151,18 +151,6 @@ def missing_snapshot_svg(label: str) -> str:
 """
 
 
-def change_label(change: SnapshotChange) -> str:
-    """Describe a Git name-status code for the report."""
-    labels = {
-        "A": "Added",
-        "C": "Copied",
-        "D": "Deleted",
-        "M": "Modified",
-        "R": "Renamed",
-    }
-    return labels.get(change.status[0], "Changed")
-
-
 def build_diffs(
     changes: list[SnapshotChange], base: str, head: str
 ) -> list[SvgSnapshotDiff]:
@@ -179,12 +167,11 @@ def build_diffs(
 
         actual = after or missing_snapshot_svg(f"Not present in {head}")
         snapshot = before or missing_snapshot_svg(f"Not present in {base}")
-        label = change_label(change)
-        if change.before_path != change.after_path and change.before_path is not None:
-            description = f"{label} from {change.before_path}"
-        else:
-            description = label
-        docstring = test_docstring(head, display_path)
+        docstring = (
+            test_docstring(head, change.after_path)
+            if change.after_path is not None
+            else ""
+        )
 
         diffs.append(
             SvgSnapshotDiff(
@@ -195,7 +182,7 @@ def build_diffs(
                 line_number=1,
                 app=app,
                 environment={},
-                docstring=docstring or f"{description} between {base} and {head}.",
+                docstring=docstring,
                 app_path=None,
                 snapshot_exists=before is not None,
             )
