@@ -6,30 +6,23 @@ snapshot in ``tests/__snapshots__/test_snapshots/``.
 
 Review a failure with the generated ``snapshot_report.html``; accept intended
 changes with ``pixi run snapshot-update``.
+
+The ``test_snapshots_*.py`` modules next to this one cover navigation, the
+query prompts, the compare screen and the file actions the same way.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from textual.pilot import Pilot
 
-from tests.helpers import TERMINAL_SIZE, AppFactory, type_text, wait_for_idle
-
-SnapCompare = Callable[..., bool]
-
-
-async def open_versions(pilot: Pilot[None], package_index: int) -> None:
-    """Open the version list of the ``package_index``-th package and highlight
-    its newest artifact so the main panel loads that artifact's details."""
-    await wait_for_idle(pilot)
-    await pilot.press(*(["j"] * package_index))
-    await wait_for_idle(pilot)
-    await pilot.press("enter")
-    await wait_for_idle(pilot)
-    # Row 0 is "< Back to packages", row 1 the first platform section.
-    await pilot.press("j", "j")
-    await wait_for_idle(pilot)
+from tests.helpers import (
+    TERMINAL_SIZE,
+    AppFactory,
+    SnapCompare,
+    open_versions,
+    type_text,
+    wait_for_idle,
+)
 
 
 def test_packages_view_lists_channel_packages(
