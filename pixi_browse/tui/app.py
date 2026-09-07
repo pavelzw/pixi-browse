@@ -2279,6 +2279,10 @@ class CondaMetadataTui(App[None]):
             )
         elif self._mode == "platforms":
             label = "Platforms"
+        elif self._matchspec_query:
+            label = f"MatchSpec: {self._matchspec_query}"
+        elif self._whoneeds_target is not None:
+            label = f"Who needs: {whoneeds_target_label(self._whoneeds_target)}"
         else:
             label = "Packages"
         return Text(
