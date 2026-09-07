@@ -40,9 +40,9 @@ ty = "*"
 types-pyyaml = "*"
 vhs = "*"
 [feature.test.pypi-dependencies]
-# From PyPI until conda-forge ships the `resources/` report template, see
-# https://github.com/conda-forge/pytest-textual-snapshot-feedstock
-pytest-textual-snapshot = "*"
+# TODO: get from conda-forge
+# https://github.com/conda-forge/pytest-textual-snapshot-feedstock/pull/2
+pytest-textual-snapshot = ">=1.1.0"
 [feature.test.tasks]
 test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
