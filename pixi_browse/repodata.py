@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from time import perf_counter
 
 from rattler.exceptions import GatewayError
@@ -38,9 +39,13 @@ def whoneeds_target_label(target: str | PackageRecord) -> str:
 
 
 def create_gateway(
-    *, client: Client | None = None, sharded_enabled: bool = True
+    *,
+    client: Client | None = None,
+    sharded_enabled: bool = True,
+    cache_dir: Path | None = None,
 ) -> Gateway:
     return Gateway(
+        cache_dir=cache_dir,
         default_config=SourceConfig(
             sharded_enabled=sharded_enabled,
             cache_action="cache-or-fetch",

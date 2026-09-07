@@ -7,6 +7,8 @@ pre-commit:
   fail_on_changes: always
   exclude:
     - assets/**/*
+    # Snapshot files must stay byte-for-byte as generated.
+    - tests/__snapshots__/**
   jobs:
     - name: pixi-install
       run: pixi install

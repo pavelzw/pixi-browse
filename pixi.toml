@@ -39,9 +39,18 @@ mypy = "*"
 ty = "*"
 types-pyyaml = "*"
 vhs = "*"
+[feature.test.pypi-dependencies]
+# TODO: get from conda-forge
+# https://github.com/conda-forge/pytest-textual-snapshot-feedstock/pull/2
+pytest-textual-snapshot = ">=1.1.0"
 [feature.test.tasks]
 test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
+# Accept changed TUI snapshots after reviewing snapshot_report.html.
+snapshot-update = "pytest tests/test_snapshots.py --snapshot-update"
+# Pre-download the real conda-forge artifacts of the offline test channel
+# (the test session does this on demand as well).
+fetch-test-channel = "python -m tests.channel_artifacts"
 
 [feature.build.dependencies]
 python = "*"

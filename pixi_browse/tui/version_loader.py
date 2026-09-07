@@ -89,7 +89,10 @@ class VersionDataLoader:
         paths_json = await archive.paths_json()
         paths = [
             PackageFile(
-                path=str(path.relative_path),
+                # `relative_path` is a pathlib.Path; str() would render it with
+                # backslashes on Windows and break symlink matching against the
+                # archive entry names, which are always POSIX.
+                path=path.relative_path.as_posix(),
                 size_in_bytes=path.size_in_bytes,
                 sha256=path.sha256,
                 no_link=path.no_link,

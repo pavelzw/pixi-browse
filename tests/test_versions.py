@@ -4,6 +4,7 @@ import shutil
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
@@ -252,9 +253,12 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     user_agents: list[str] = []
 
     def _fake_create_gateway(
-        *, client: object | None = None, sharded_enabled: bool = True
+        *,
+        client: object | None = None,
+        sharded_enabled: bool = True,
+        cache_dir: object | None = None,
     ) -> object:
-        gateway_calls.append((client, sharded_enabled))
+        gateway_calls.append((client, sharded_enabled, cache_dir))
         return object()
 
     def _fake_default_client(*, user_agent: str) -> object:
@@ -273,7 +277,10 @@ def test_conda_metadata_tui_uses_one_shared_authenticated_client(monkeypatch) ->
     app = CondaMetadataTui()
 
     assert app._client is shared_client
-    assert gateway_calls == [(shared_client, True), (shared_client, False)]
+    assert gateway_calls == [
+        (shared_client, True, None),
+        (shared_client, False, None),
+    ]
     assert user_agents == [f"pixi-browse/{__version__}"]
 
 
@@ -1275,7 +1282,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
             no_link: bool,
             path_type: str,
         ) -> None:
-            self.relative_path = relative_path
+            self.relative_path = PurePosixPath(relative_path)
             self.size_in_bytes = size_in_bytes
             self.sha256 = sha256
             self.no_link = no_link

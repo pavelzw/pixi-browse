@@ -5,3 +5,5 @@ Everything runs in a pixi environment. Any command (like `pytest`) must be prefi
 Code formatting must align with our standards. Run `pixi run lint` before `git commit`s to ensure this.
 
 When using things from py-rattler and pulling data, always properly type them, try to avoid using `Any`.
+
+Don't write tests with `monkeypatch`. Instead, write real-data tests using snapshots.

@@ -52,3 +52,18 @@ jobs:
           environments: ${{ matrix.environment }}
       - name: Run pytest
         run: pixi run -e ${{ matrix.environment }} test-coverage --color=yes
+      - name: Rename snapshot report
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f snapshot_report.html ]; then
+            mv snapshot_report.html "snapshot-report-${{ matrix.os }}-${{ matrix.environment }}.html"
+          fi
+      - name: Upload TUI snapshot report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: snapshot-report-${{ matrix.os }}-${{ matrix.environment }}
+          path: snapshot-report-${{ matrix.os }}-${{ matrix.environment }}.html
+          archive: false
+          if-no-files-found: ignore
