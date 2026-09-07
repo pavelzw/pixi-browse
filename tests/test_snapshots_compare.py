@@ -29,6 +29,21 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
     await wait_for_idle(pilot)
 
 
+async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
+    """Compare ``polars 1.44.1`` (compare A) with ``polars 1.44.0`` on noarch;
+    the screen orders the older build on the left."""
+    await open_versions(pilot, package_index=2)
+    await pilot.press("C", "j")
+    await wait_for_idle(pilot)
+    await pilot.press("C")
+    await wait_for_idle(pilot)
+
+
+# Row of ``site-packages/polars/functions/lit.py`` in the compare file list,
+# which follows the order of the older build's ``paths.json``.
+POLARS_LIT_PY_ROW = 91
+
+
 def test_compare_key_stores_first_selection(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
@@ -226,15 +241,15 @@ def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
-def test_compare_screen_diff_of_info_file(
+def test_compare_screen_diff_of_python_file(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Diff left / right`` on a changed info file (``paths.json``) opens the
-    side-by-side diff of both archives' copies."""
+    """``Diff left / right`` on a changed Python file (``polars/functions/lit.py``)
+    opens the diff of both archives' copies with syntax highlighting."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_compare_screen(pilot)
-        await pilot.press("3", "]", "j", "enter")
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
         await wait_for_screen(pilot, FileActionScreen)
         # "Diff left / right" is the first action of a changed two-sided row.
         await pilot.press("enter")
@@ -253,8 +268,8 @@ def test_compare_screen_diff_escape_returns_to_compare(
     """``Escape`` closes the diff and returns to the compare screen."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_compare_screen(pilot)
-        await pilot.press("3", "]", "j", "enter")
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
         await wait_for_screen(pilot, FileActionScreen)
         await pilot.press("enter")
         await wait_for_screen(pilot, FileDiffScreen)
@@ -276,8 +291,8 @@ def test_compare_screen_diff_without_textual_diff_view_explains_install(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_compare_screen(pilot)
-            await pilot.press("3", "]", "j", "enter")
+            await open_polars_compare_screen(pilot)
+            await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
             await wait_for_screen(pilot, FileActionScreen)
             await pilot.press("enter")
             await wait_for_idle(pilot)

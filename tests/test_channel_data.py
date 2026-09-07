@@ -59,7 +59,7 @@ def test_fetch_package_names_lists_channel_packages(
     )
 
     assert platforms == list(CHANNEL_PLATFORMS)
-    assert names == ["libzlib", "pixi-browse", "six", "zlib"]
+    assert names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
 
 
 def test_query_package_records_sorts_newest_first(
