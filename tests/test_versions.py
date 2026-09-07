@@ -2296,7 +2296,7 @@ def test_preview_content_rejects_large_files() -> None:
     rendered = CondaMetadataTui._preview_content("info/about.json", b"x" * 300_000)
 
     assert "File too large to preview in-app" in rendered.text
-    assert "300,000 bytes" in rendered.text
+    assert "293.0 KiB" in rendered.text
     assert rendered.lexer is None
 
 

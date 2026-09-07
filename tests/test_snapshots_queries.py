@@ -285,7 +285,7 @@ def test_dependency_matchspec_query_opens_dependency_versions(
     querying it opens exactly that build."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=3)
+        await open_versions(pilot, package_index=4)
         await pilot.press("2", "G", "enter")
         await wait_for_screen(pilot, MatchSpecScreen)
         await pilot.press("enter")

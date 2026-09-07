@@ -7,7 +7,12 @@ import asyncio
 import pytest
 from textual.pilot import Pilot
 
-from pixi_browse.tui import DetailSection, FileActionScreen
+from pixi_browse.tui import (
+    DIFF_VIEW_AVAILABLE,
+    DetailSection,
+    FileActionScreen,
+    FileDiffScreen,
+)
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
@@ -26,6 +31,21 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
     await wait_for_idle(pilot)
     await pilot.press("C")
     await wait_for_idle(pilot)
+
+
+async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
+    """Compare ``polars 1.44.1`` (compare A) with ``polars 1.44.0`` on noarch;
+    the screen orders the older build on the left."""
+    await open_versions(pilot, package_index=2)
+    await pilot.press("C", "j")
+    await wait_for_idle(pilot)
+    await pilot.press("C")
+    await wait_for_idle(pilot)
+
+
+# Row of ``site-packages/polars/functions/lit.py`` in the compare file list,
+# which follows the order of the older build's ``paths.json``.
+POLARS_LIT_PY_ROW = 91
 
 
 def test_compare_key_stores_first_selection(
@@ -235,6 +255,27 @@ def test_compare_key_in_packages_view_is_ignored(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+@pytest.mark.skipif(
+    not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
+)
+def test_compare_screen_diff_of_python_file(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Diff left / right`` on a changed Python file (``polars/functions/lit.py``)
+    opens the diff of both archives' copies with syntax highlighting."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        # "Diff left / right" is the first action of a changed two-sided row.
+        await pilot.press("enter")
+        await wait_for_screen(pilot, FileDiffScreen)
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_compare_screen_left_bracket_wraps_dependency_tab(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
@@ -347,5 +388,25 @@ def test_compare_screen_file_actions_escape_returns_to_compare(
         await wait_for_screen(pilot, FileActionScreen)
         await pilot.press("escape")
         await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.skipif(
+    not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
+)
+def test_compare_screen_diff_escape_returns_to_compare(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` closes the diff and returns to the compare screen."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("enter")
+        await wait_for_screen(pilot, FileDiffScreen)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
