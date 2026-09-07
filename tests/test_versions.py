@@ -2147,6 +2147,45 @@ def test_whoneeds_screen_initial_value(
     assert app._whoneeds_screen_initial_value() == expected
 
 
+@pytest.mark.parametrize(
+    ("mode", "matchspec_query", "target", "expected"),
+    [
+        ("packages", "", None, "[0] Packages"),
+        ("platforms", "numpy >=2", None, "[0] Platforms"),
+        ("packages", "numpy >=2", None, "[0] MatchSpec: numpy >=2"),
+        ("packages", "", "python", "[0] Who needs: python"),
+    ],
+)
+def test_sidebar_title_names_active_query(
+    mode: ViewMode,
+    matchspec_query: str,
+    target: str | None,
+    expected: str,
+) -> None:
+    app = CondaMetadataTui()
+    app._mode = mode
+    app._matchspec_query = matchspec_query
+    app._whoneeds_target = target
+
+    assert app._sidebar_title_text(selected=False).plain == expected
+
+
+def test_sidebar_title_shows_whoneeds_record_target() -> None:
+    app = CondaMetadataTui()
+    app._whoneeds_target = _make_repo_data_record(
+        version="1.2.3",
+        build="py313h123_0",
+        build_number=0,
+        subdir="noarch",
+        file_name="demo-1.2.3-py313h123_0.conda",
+    )
+
+    assert (
+        app._sidebar_title_text(selected=False).plain
+        == "[0] Who needs: demo 1.2.3 py313h123_0"
+    )
+
+
 def _detail_selection() -> CompareSelection:
     return CompareSelection(
         "demo",
