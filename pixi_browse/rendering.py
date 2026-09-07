@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
-from rattler.package import IndexJson, RunExportsJson
+from rattler.package import IndexJson, NoArchType, RunExportsJson
 from rattler.repo_data import RepoDataRecord
 from rich.markup import escape
 
@@ -443,6 +443,12 @@ def _repodata_field_text(value: object) -> str:
     """Render an ``index.json``/repodata field for a plain-text diff cell."""
     if value is None:
         return ""
+    if isinstance(value, NoArchType):
+        if value.python:
+            return "python"
+        if value.generic:
+            return "generic"
+        return ""
     if isinstance(value, (list, tuple)):
         return ", ".join(str(item) for item in value)
     if isinstance(value, datetime):
@@ -468,6 +474,9 @@ def build_repodata_patch_diff(
     fill it in for every record that lacks it, which is every rattler-build
     package, so it would flag nearly all recent artifacts as patched. See
     https://github.com/conda-forge/conda-forge-repodata-patches-feedstock/blob/98e5f9bcb6a31f56d168a7e343c7ad70c784e194/recipe/gen_patch_json.py#L600-L603
+
+    ``purls`` and ``repodata_revision`` are available on ``IndexJson`` but not on
+    py-rattler's ``PackageRecord``, so they cannot be compared.
     """
     scalar_fields: tuple[tuple[str, object, object], ...] = (
         ("version", index_json.version, record.version),
@@ -477,8 +486,13 @@ def build_repodata_patch_diff(
         ("features", index_json.features, record.features),
         ("track_features", index_json.track_features, record.track_features),
         ("timestamp", index_json.timestamp, record.timestamp),
-        # TODO: compare `noarch` once py-rattler exposes it on `IndexJson`,
-        # see https://github.com/pavelzw/pixi-browse/issues/93
+        ("noarch", index_json.noarch, record.noarch),
+        (
+            "python_site_packages_path",
+            index_json.python_site_packages_path,
+            record.python_site_packages_path,
+        ),
+        ("flags", index_json.flags, record.flags),
     )
     metadata_rows: list[CompareRow] = []
     for label, unpatched, patched in scalar_fields:
@@ -499,13 +513,32 @@ def build_repodata_patch_diff(
             )
         )
 
-    dependencies = tuple(
+    dependency_rows: list[CompareRow] = [
         CompareRow(label="depends", left=row.left, right=row.right, changed=True)
         for row in _diff_dependency_group(
             index_json.depends, record.depends, run_export=False
         )
         if row.changed
-    )
+    ]
+    # Extra dependency groups (`pkg[extras=["group"]]`) are patched per group.
+    unpatched_extra_depends = index_json.extra_depends
+    patched_extra_depends = record.extra_depends
+    for group in sorted({*unpatched_extra_depends, *patched_extra_depends}):
+        dependency_rows.extend(
+            CompareRow(
+                label=f"extra_depends[{group}]",
+                left=row.left,
+                right=row.right,
+                changed=True,
+            )
+            for row in _diff_dependency_group(
+                unpatched_extra_depends.get(group, []),
+                patched_extra_depends.get(group, []),
+                run_export=False,
+            )
+            if row.changed
+        )
+    dependencies = tuple(dependency_rows)
     constraints = tuple(
         CompareRow(label="constrains", left=row.left, right=row.right, changed=True)
         for row in _diff_dependency_group(
