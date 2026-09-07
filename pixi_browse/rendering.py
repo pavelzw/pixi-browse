@@ -463,13 +463,17 @@ def build_repodata_patch_diff(
     ``arch`` and ``platform`` are deliberately not compared: the indexer drops
     them from repodata because they are implied by ``subdir``, so they differ
     for every package without any patch being involved.
+
+    ``license_family`` is not compared either: conda-forge's repodata patches
+    fill it in for every record that lacks it, which is every rattler-build
+    package, so it would flag nearly all recent artifacts as patched. See
+    https://github.com/conda-forge/conda-forge-repodata-patches-feedstock/blob/98e5f9bcb6a31f56d168a7e343c7ad70c784e194/recipe/gen_patch_json.py#L600-L603
     """
     scalar_fields: tuple[tuple[str, object, object], ...] = (
         ("version", index_json.version, record.version),
         ("build", index_json.build, record.build),
         ("build_number", index_json.build_number, record.build_number),
         ("license", index_json.license, record.license),
-        ("license_family", index_json.license_family, record.license_family),
         ("features", index_json.features, record.features),
         ("track_features", index_json.track_features, record.track_features),
         ("timestamp", index_json.timestamp, record.timestamp),

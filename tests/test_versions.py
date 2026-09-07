@@ -379,15 +379,17 @@ def _make_index_json(
         "depends": record.depends if depends is None else depends,
         "constrains": record.constrains if constrains is None else constrains,
         "license": record.license if license is None else license,
-        "license_family": (
-            record.license_family if license_family is None else license_family
-        ),
         "track_features": (
             record.track_features if track_features is None else track_features
         ),
         "arch": record.arch,
         "platform": record.platform,
     }
+    resolved_license_family = (
+        record.license_family if license_family is None else license_family
+    )
+    if resolved_license_family:
+        data["license_family"] = resolved_license_family
     if subdir == "keep":
         data["subdir"] = record.subdir
     elif subdir is not None:
@@ -448,6 +450,16 @@ def test_build_repodata_patch_diff_reports_patched_fields() -> None:
     assert diff.is_patched is True
     assert diff.change_count == 6
     assert diff.rows == (*diff.metadata, *diff.dependencies, *diff.constraints)
+
+
+def test_build_repodata_patch_diff_ignores_license_family() -> None:
+    """conda-forge patches add ``license_family`` to nearly every record."""
+    record = _make_repo_data_record(license_family="BSD")
+
+    assert (
+        build_repodata_patch_diff(record, _make_index_json(record, license_family=""))
+        == RepodataPatchDiff()
+    )
 
 
 def test_build_repodata_patch_diff_ignores_arch_and_platform() -> None:
