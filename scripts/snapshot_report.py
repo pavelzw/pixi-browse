@@ -113,6 +113,30 @@ def changed_svg_snapshots(base: str, head: str) -> list[SnapshotChange]:
     return changes
 
 
+def unchanged_svg_snapshot_count(changes: list[SnapshotChange], head: str) -> int:
+    """Count SVG snapshots in the head tree that are absent from the changes."""
+    output = run_git(
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "-z",
+        head,
+        "--",
+        str(SNAPSHOT_DIRECTORY),
+    )
+    head_paths = {
+        PurePosixPath(path)
+        for path in output.rstrip("\0").split("\0")
+        if path and PurePosixPath(path).suffix == ".svg"
+    }
+    changed_head_paths = {
+        change.after_path
+        for change in changes
+        if change.after_path is not None and change.after_path.suffix == ".svg"
+    }
+    return len(head_paths - changed_head_paths)
+
+
 def read_snapshot(revision: str, path: PurePosixPath | None) -> str | None:
     """Read an SVG snapshot from a revision, if that side of the change exists."""
     if path is None or path.suffix != ".svg":
@@ -220,7 +244,8 @@ def main() -> None:
 
     diffs = build_diffs(changes, args.base, args.head)
     session = cast("Session", ReportSession(args.output))
-    save_svg_diffs(diffs, session, num_snapshots_passing=0)
+    num_snapshots_passing = unchanged_svg_snapshot_count(changes, args.head)
+    save_svg_diffs(diffs, session, num_snapshots_passing=num_snapshots_passing)
     print(f"Wrote {args.output} with {len(diffs)} changed snapshot(s).")
 
 
