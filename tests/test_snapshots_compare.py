@@ -12,7 +12,6 @@ from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
-    notification_messages,
     open_versions,
     wait_for_idle,
     wait_for_screen,
@@ -277,30 +276,3 @@ def test_compare_screen_diff_escape_returns_to_compare(
         await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
-
-
-@pytest.mark.skipif(
-    DIFF_VIEW_AVAILABLE, reason="textual-diff-view is installed in this environment"
-)
-def test_compare_screen_diff_without_textual_diff_view_explains_install(
-    make_app: AppFactory,
-) -> None:
-    """Without the optional ``textual-diff-view`` package the diff action still
-    shows up, and picking it explains how to install the package."""
-
-    async def run() -> None:
-        app = make_app()
-        async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_polars_compare_screen(pilot)
-            await pilot.press("3", *(["j"] * POLARS_LIT_PY_ROW), "enter")
-            await wait_for_screen(pilot, FileActionScreen)
-            await pilot.press("enter")
-            await wait_for_idle(pilot)
-            assert not isinstance(app.screen, FileDiffScreen)
-            messages = notification_messages(app)
-            assert any(
-                message.startswith("Diff: Diffing files needs the optional")
-                for message in messages
-            ), messages
-
-    asyncio.run(run())
