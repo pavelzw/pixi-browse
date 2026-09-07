@@ -34,6 +34,18 @@ sha256 = "c52c5f3d57ac8e2de5da37ffabc053adfdfa73fd90472614b337b73285832cce"
 [[artifacts]]
 channel = "conda-forge"
 subdir = "noarch"
+file_name = "polars-1.44.0-pyh8da0edf_0.conda"
+sha256 = "30283eacfdc455cc8838a3706fbe2e08a3648c89c5739f9d8deda2ae84d3ae05"
+
+[[artifacts]]
+channel = "conda-forge"
+subdir = "noarch"
+file_name = "polars-1.44.1-pyh8da0edf_0.conda"
+sha256 = "04a1d4401656be9ab8df89b8a850c9a3e4d0e58176d114ee95dd8d5446b92b4f"
+
+[[artifacts]]
+channel = "conda-forge"
+subdir = "noarch"
 file_name = "six-1.16.0-pyh6c4a22f_0.tar.bz2"
 sha256 = "a85c38227b446f42c5b90d9b642f2c0567880c15d72492d8da074a59c8f91dd6"
 
