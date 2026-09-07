@@ -62,6 +62,8 @@ from pixi_browse.repodata import (
     create_gateway,
     discover_available_platforms,
     fetch_package_names,
+    fetch_repodata_revisions,
+    format_repodata_revisions_summary,
     query_matchspec_records,
     query_package_records,
     query_whoneeds_records,
@@ -136,6 +138,7 @@ class CondaMetadataTui(App[None]):
         self._selected_platform_names: set[Platform] = set(selected_platforms)
         self._draft_selected_platform_names: set[Platform] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
+        self._repodata_revisions_summary: str | None = None
         self._channel_name = channel_name
         self._mode: ViewMode = "packages"
         self._search_query = ""
@@ -249,6 +252,13 @@ class CondaMetadataTui(App[None]):
             gateway=self._gateway,
             channel_name=self._channel_name,
             selected_platforms=self._selected_platform_names,
+        )
+        self._repodata_revisions_summary = format_repodata_revisions_summary(
+            await fetch_repodata_revisions(
+                gateway=self._gateway,
+                channel_name=self._channel_name,
+                platforms=self._platforms,
+            )
         )
         return package_names
 
@@ -443,6 +453,7 @@ class CondaMetadataTui(App[None]):
         self._clear_compare_state()
         self._platforms = []
         self._available_platform_names = []
+        self._repodata_revisions_summary = None
         self._channel_package_names = []
         self._all_package_names = []
         self._visible_package_names = []
@@ -553,6 +564,7 @@ class CondaMetadataTui(App[None]):
             last_package_scroll_y=self._last_package_scroll_y,
             sidebar_highlight=package_list.highlighted,
             sidebar_scroll_y=package_list.scroll_y,
+            repodata_revisions_summary=self._repodata_revisions_summary,
         )
 
     def _restore_channel_state(self, snapshot: ChannelStateSnapshot) -> None:
@@ -573,6 +585,7 @@ class CondaMetadataTui(App[None]):
         self._available_platform_names = snapshot.available_platform_names
         self._selected_platform_names = snapshot.selected_platform_names
         self._channel_package_names = snapshot.channel_package_names
+        self._repodata_revisions_summary = snapshot.repodata_revisions_summary
         self._all_package_names = snapshot.all_package_names
         self._visible_package_names = snapshot.visible_package_names
         self._matchspec_query = snapshot.matchspec_query
@@ -726,9 +739,10 @@ class CondaMetadataTui(App[None]):
         self._update_platform_selection_status()
 
     def _update_package_selection_status(self) -> None:
-        self.query_one("#status", Static).update(
-            f"{len(self._visible_package_names):,} packages in selection."
-        )
+        message = f"{len(self._visible_package_names):,} packages in selection."
+        if self._repodata_revisions_summary is not None:
+            message += f"\n{self._repodata_revisions_summary}"
+        self.query_one("#status", Static).update(message)
 
     async def _get_package_records(self, package_name: str) -> list[RepoDataRecord]:
         cached = self._package_records_cache.get(package_name)

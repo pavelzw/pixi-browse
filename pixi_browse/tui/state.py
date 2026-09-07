@@ -62,3 +62,4 @@ class ChannelStateSnapshot:
     last_package_scroll_y: float
     sidebar_highlight: int | None
     sidebar_scroll_y: float
+    repodata_revisions_summary: str | None = None

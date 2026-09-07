@@ -11,12 +11,20 @@ from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import (
     Gateway,
+    PackageFormatSelection,
     PackageRecord,
     RepoDataRecord,
+    RepodataRevisionMetadata,
     SourceConfig,
 )
 
 from pixi_browse.platform_utils import platform_sort_key
+
+RepodataRevisions = dict[str, RepodataRevisionMetadata]
+"""Revisions advertised by one subdirectory, keyed by ``vN`` as in CEP 48."""
+
+SUPPORTED_REPODATA_REVISION = 3
+"""The newest CEP 48 repodata revision that rattler can read."""
 
 
 @dataclass(frozen=True)
@@ -44,10 +52,87 @@ def create_gateway(
         default_config=SourceConfig(
             sharded_enabled=sharded_enabled,
             cache_action="cache-or-fetch",
+            # Pixi Browse inspects conda archives only. Selecting the format
+            # explicitly keeps sharded and full repodata in agreement and
+            # keeps CEP 48 `.whl` records out of the version list.
+            package_format_selection=PackageFormatSelection.PREFER_CONDA,
         ),
         client=client,
         show_progress=False,
     )
+
+
+async def fetch_repodata_revisions(
+    *,
+    gateway: Gateway,
+    channel_name: str,
+    platforms: Iterable[Platform],
+) -> dict[Platform, RepodataRevisions]:
+    """Return the CEP 48 repodata revisions each platform of ``channel_name`` advertises.
+
+    The gateway answers from the subdirectories it already fetched for the
+    package names, so this does not cost another request.
+    """
+    sorted_platforms = sorted(set(platforms), key=platform_sort_key)
+    revisions = await asyncio.gather(
+        *(
+            gateway.repodata_revisions(channel_name, platform)
+            for platform in sorted_platforms
+        )
+    )
+    return dict(zip(sorted_platforms, revisions, strict=True))
+
+
+def repodata_revision_number(revision: str) -> int | None:
+    """Parse the ``vN`` key of a repodata revision into ``N``."""
+    if not revision.startswith(("v", "V")):
+        return None
+    try:
+        return int(revision[1:])
+    except ValueError:
+        return None
+
+
+def format_repodata_revisions_summary(
+    revisions_by_platform: dict[Platform, RepodataRevisions],
+) -> str | None:
+    """Summarize the repodata revisions advertised across the selected platforms.
+
+    Returns ``None`` for channels that only publish legacy repodata. Package
+    counts are summed across platforms when every platform reports one, and
+    revisions newer than rattler understands are marked as unsupported.
+    """
+    package_totals: dict[str, int | None] = {}
+    for revisions in revisions_by_platform.values():
+        for revision, metadata in revisions.items():
+            n_packages = metadata.get("n_packages")
+            if revision not in package_totals:
+                package_totals[revision] = n_packages
+                continue
+            total = package_totals[revision]
+            package_totals[revision] = (
+                total + n_packages
+                if total is not None and n_packages is not None
+                else None
+            )
+    if not package_totals:
+        return None
+
+    def sort_key(revision: str) -> tuple[bool, int, str]:
+        number = repodata_revision_number(revision)
+        return (number is None, number or 0, revision)
+
+    parts: list[str] = []
+    for revision in sorted(package_totals, key=sort_key):
+        label = revision
+        n_packages = package_totals[revision]
+        if n_packages is not None:
+            label += f" ({n_packages:,} package{'s' if n_packages != 1 else ''})"
+        number = repodata_revision_number(revision)
+        if number is None or number > SUPPORTED_REPODATA_REVISION:
+            label += " [unsupported]"
+        parts.append(label)
+    return "Repodata revisions: " + ", ".join(parts)
 
 
 async def discover_available_platforms(
