@@ -473,6 +473,10 @@ def build_repodata_patch_diff(
     repodata patches applied. ``index_json`` is read from the package archive
     and is what the package was built with. Every field that differs is a
     repodata patch. Field labels follow the ``index.json`` key names.
+
+    ``arch`` and ``platform`` are deliberately not compared: the indexer drops
+    them from repodata because they are implied by ``subdir``, so they differ
+    for every package without any patch being involved.
     """
     scalar_fields: tuple[tuple[str, object, object], ...] = (
         ("version", index_json.version, record.version),
@@ -482,8 +486,6 @@ def build_repodata_patch_diff(
         ("license_family", index_json.license_family, record.license_family),
         ("features", index_json.features, record.features),
         ("track_features", index_json.track_features, record.track_features),
-        ("arch", index_json.arch, record.arch),
-        ("platform", index_json.platform, record.platform),
         ("timestamp", index_json.timestamp, record.timestamp),
     )
     metadata_rows: list[CompareRow] = []

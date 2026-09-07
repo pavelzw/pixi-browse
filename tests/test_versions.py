@@ -436,6 +436,30 @@ def test_build_repodata_patch_diff_reports_patched_fields() -> None:
     assert diff.rows == (*diff.metadata, *diff.dependencies, *diff.constraints)
 
 
+def test_build_repodata_patch_diff_ignores_arch_and_platform() -> None:
+    """The indexer strips ``arch``/``platform`` from repodata; that is not a patch."""
+    record = _make_repo_data_record(subdir="linux-64", arch=None, platform=None)
+    index_json = IndexJson.from_str(
+        json.dumps(
+            {
+                "name": "demo",
+                "version": "1.2.3",
+                "build": "py313h123_0",
+                "build_number": 0,
+                "subdir": "linux-64",
+                "arch": "x86_64",
+                "platform": "linux",
+                "license": "BSD-3-Clause",
+                "license_family": "BSD",
+                "depends": [],
+                "timestamp": int(datetime(2026, 1, 1, tzinfo=UTC).timestamp() * 1000),
+            }
+        )
+    )
+
+    assert build_repodata_patch_diff(record, index_json) == RepodataPatchDiff()
+
+
 def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> None:
     record = _make_repo_data_record(subdir="linux-64")
 
