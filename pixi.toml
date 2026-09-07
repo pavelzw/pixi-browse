@@ -47,7 +47,7 @@ pytest-textual-snapshot = ">=1.1.0"
 test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
 # Accept changed TUI snapshots after reviewing snapshot_report.html.
-snapshot-update = "pytest tests/test_snapshots.py --snapshot-update"
+snapshot-update = "pytest tests/test_snapshots.py tests/test_snapshots_*.py --snapshot-update"
 # Compare committed TUI snapshots without rerunning the application.
 snapshot-report = "python scripts/snapshot_report.py"
 # Pre-download the real conda-forge artifacts of the offline test channel

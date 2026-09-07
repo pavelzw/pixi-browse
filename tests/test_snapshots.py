@@ -6,30 +6,23 @@ snapshot in ``tests/__snapshots__/test_snapshots/``.
 
 Review a failure with the generated ``snapshot_report.html``; accept intended
 changes with ``pixi run snapshot-update``.
+
+The ``test_snapshots_*.py`` modules next to this one cover navigation, the
+query prompts, the compare screen and the file actions the same way.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from textual.pilot import Pilot
 
-from tests.helpers import TERMINAL_SIZE, AppFactory, type_text, wait_for_idle
-
-SnapCompare = Callable[..., bool]
-
-
-async def open_versions(pilot: Pilot[None], package_index: int) -> None:
-    """Open the version list of the ``package_index``-th package and highlight
-    its newest artifact so the main panel loads that artifact's details."""
-    await wait_for_idle(pilot)
-    await pilot.press(*(["j"] * package_index))
-    await wait_for_idle(pilot)
-    await pilot.press("enter")
-    await wait_for_idle(pilot)
-    # Row 0 is "< Back to packages", row 1 the first platform section.
-    await pilot.press("j", "j")
-    await wait_for_idle(pilot)
+from tests.helpers import (
+    TERMINAL_SIZE,
+    AppFactory,
+    SnapCompare,
+    open_versions,
+    type_text,
+    wait_for_idle,
+)
 
 
 def test_packages_view_lists_channel_packages(
@@ -71,6 +64,9 @@ def test_versions_view_groups_subdirs_by_latest_version(
 def test_filter_narrows_package_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """Typing ``six`` into the ``/`` search narrows the package list to fuzzy
+    matches and previews the best one."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("slash")
@@ -83,6 +79,9 @@ def test_filter_narrows_package_list(
 def test_matchspec_query_filters_records(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
+    """A MatchSpec that matches a single package opens its versions, limited to
+    the matching builds."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("m")
@@ -129,6 +128,9 @@ def test_whoneeds_query_lists_dependents(
 
 
 def test_platform_selector(snap_compare: SnapCompare, make_app: AppFactory) -> None:
+    """``p`` turns the sidebar into the platform selector with the current
+    selection ticked."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("p")
@@ -138,6 +140,8 @@ def test_platform_selector(snap_compare: SnapCompare, make_app: AppFactory) -> N
 
 
 def test_help_screen(snap_compare: SnapCompare, make_app: AppFactory) -> None:
+    """``?`` opens the help overlay listing every keybinding."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("question_mark")

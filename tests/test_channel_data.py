@@ -15,6 +15,7 @@ from rattler.networking import Client
 from rattler.platform import Platform
 from syrupy.assertion import SnapshotAssertion
 
+from pixi_browse.models import VersionArtifactData
 from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
@@ -27,6 +28,7 @@ from pixi_browse.repodata import (
     query_package_records,
     query_whoneeds_records,
 )
+from pixi_browse.tui import CondaMetadataTui
 from pixi_browse.tui.version_loader import VersionDataLoader
 from tests.helpers import CHANNEL_PLATFORMS, GatewayFactory
 
@@ -217,3 +219,58 @@ def test_load_version_artifact_data_reads_real_archives(
         # so anything reported here is a false positive of the patch detection.
         "repodata_patches": repodata_patches,
     } == snapshot
+
+
+def test_load_version_artifact_data_is_cached_per_preview_key(
+    make_gateway: GatewayFactory, rattler_client: Client
+) -> None:
+    """The archive, its paths and the assembled details are read once per
+    artifact; later requests for the same key reuse the cached objects."""
+
+    async def load_twice() -> tuple[VersionArtifactData, VersionArtifactData]:
+        records = await query_package_records(
+            gateway=make_gateway(),
+            channel_name="conda-forge",
+            platforms=[Platform("noarch")],
+            package_name="six",
+        )
+        record = records[0]
+        loader = VersionDataLoader(client=rattler_client)
+        preview_key = (
+            "six",
+            str(record.version),
+            record.build,
+            record.build_number,
+            record.subdir,
+            record.file_name,
+        )
+        first = await loader.load_version_details(
+            "six", record, preview_key=preview_key
+        )
+        archive = await loader.get_package_archive(preview_key, str(record.url))
+        second = await loader.load_version_artifact_data(
+            "six", record, preview_key=preview_key
+        )
+        assert loader.archive_cache[preview_key] is archive
+        assert preview_key in loader.paths_cache
+        assert preview_key in loader.about_urls_cache
+        return first, second
+
+    first, second = asyncio.run(load_twice())
+
+    assert second is first
+    assert first.dependencies == ("python >=3.9",)
+
+
+def test_app_shares_the_client_with_its_version_loader(rattler_client: Client) -> None:
+    app = CondaMetadataTui(client=rattler_client)
+
+    assert app._client is rattler_client
+    assert app._version_loader._client is rattler_client
+
+
+def test_app_creates_a_default_client_when_none_is_given() -> None:
+    app = CondaMetadataTui()
+
+    assert isinstance(app._client, Client)
+    assert app._version_loader._client is app._client

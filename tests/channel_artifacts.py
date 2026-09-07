@@ -1,9 +1,10 @@
-"""Download and verify the real conda-forge artifacts of the test channel.
+"""Download and verify the real artifacts of the offline test channels.
 
 The artifacts listed in ``tests/fixtures/channel_artifacts.toml`` are not
-committed. They are fetched into the git-ignored ``tests/fixtures/channel``
-directory on first use and verified by SHA256, so the test-suite is deterministic and works offline once
-the files are present. Run ``pixi run fetch-test-channel`` to pre-download them.
+committed. They are fetched into the git-ignored ``tests/fixtures/channels``
+directory (one subdirectory per channel) on first use and verified by SHA256,
+so the test-suite is deterministic and works offline once the files are
+present. Run ``pixi run fetch-test-channel`` to pre-download them.
 """
 
 from __future__ import annotations
@@ -20,45 +21,58 @@ from rattler.package_streaming import download_to_path
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 MANIFEST_PATH = FIXTURES_DIR / "channel_artifacts.toml"
-# Git-ignored download location.
-CHANNEL_DIR = FIXTURES_DIR / "channel"
+# Git-ignored download location, one subdirectory per channel name.
+CHANNELS_DIR = FIXTURES_DIR / "channels"
 
 
 @dataclass(frozen=True)
 class ChannelArtifact:
+    channel: str
     subdir: str
     file_name: str
     sha256: str
 
-    def url(self, channel: str) -> str:
-        return f"{channel}/{self.subdir}/{self.file_name}"
+    def url(self, channel_url: str) -> str:
+        return f"{channel_url}/{self.subdir}/{self.file_name}"
 
     @property
     def local_path(self) -> Path:
-        return CHANNEL_DIR / self.subdir / self.file_name
+        return CHANNELS_DIR / self.channel / self.subdir / self.file_name
 
 
 @dataclass(frozen=True)
 class ChannelManifest:
-    channel: str
+    #: Channel name (as typed into the app) to the URL the artifacts come from.
+    channels: dict[str, str]
     artifacts: tuple[ChannelArtifact, ...]
+
+    def url(self, artifact: ChannelArtifact) -> str:
+        return artifact.url(self.channels[artifact.channel])
+
+    def artifacts_of(self, channel: str) -> tuple[ChannelArtifact, ...]:
+        return tuple(
+            artifact for artifact in self.artifacts if artifact.channel == channel
+        )
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
     manifest = tomllib.loads(path.read_text(encoding="utf-8"))
-    channel = manifest["channel"]
-    assert isinstance(channel, str)
-    return ChannelManifest(
-        channel=channel.rstrip("/"),
-        artifacts=tuple(
-            ChannelArtifact(
-                subdir=str(entry["subdir"]),
-                file_name=str(entry["file_name"]),
-                sha256=str(entry["sha256"]),
-            )
-            for entry in manifest["artifacts"]
-        ),
+    channels = {
+        str(name): str(url).rstrip("/") for name, url in manifest["channels"].items()
+    }
+    artifacts = tuple(
+        ChannelArtifact(
+            channel=str(entry["channel"]),
+            subdir=str(entry["subdir"]),
+            file_name=str(entry["file_name"]),
+            sha256=str(entry["sha256"]),
+        )
+        for entry in manifest["artifacts"]
     )
+    unknown = sorted({a.channel for a in artifacts} - channels.keys())
+    if unknown:
+        raise ValueError(f"artifacts reference undefined channels: {unknown}")
+    return ChannelManifest(channels=channels, artifacts=artifacts)
 
 
 def _sha256_of(path: Path) -> str:
@@ -76,14 +90,12 @@ async def _download(
     path = artifact.local_path
     path.parent.mkdir(parents=True, exist_ok=True)
     partial_path = path.with_name(path.name + ".part")
-    await download_to_path(client, artifact.url(manifest.channel), partial_path)
+    url = manifest.url(artifact)
+    await download_to_path(client, url, partial_path)
     digest = _sha256_of(partial_path)
     if digest != artifact.sha256:
         partial_path.unlink()
-        raise RuntimeError(
-            f"{artifact.url(manifest.channel)}: expected sha256 {artifact.sha256}, "
-            f"got {digest}"
-        )
+        raise RuntimeError(f"{url}: expected sha256 {artifact.sha256}, got {digest}")
     partial_path.replace(path)
 
 
@@ -94,7 +106,7 @@ async def _download_missing(manifest: ChannelManifest) -> int:
 
     client = Client.default_client(user_agent="pixi-browse-tests")
     for artifact in missing:
-        print(f"fetching  {artifact.url(manifest.channel)}", file=sys.stderr)
+        print(f"fetching  {manifest.url(artifact)}", file=sys.stderr)
         await _download(client, manifest, artifact)
     return len(missing)
 
@@ -110,8 +122,9 @@ def main() -> int:
     manifest = load_manifest()
     fetched = asyncio.run(_download_missing(manifest))
     print(
-        f"{len(manifest.artifacts)} artifacts in {CHANNEL_DIR} "
-        f"({fetched} downloaded, {len(manifest.artifacts) - fetched} cached)"
+        f"{len(manifest.artifacts)} artifacts of {len(manifest.channels)} channels "
+        f"in {CHANNELS_DIR} ({fetched} downloaded, "
+        f"{len(manifest.artifacts) - fetched} cached)"
     )
     return 0
 

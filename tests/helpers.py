@@ -10,23 +10,32 @@ import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from textual.pilot import Pilot
+from textual.screen import Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker, WorkerState
 
 from pixi_browse.tui import CondaMetadataTui
 
-UPSTREAM_CHANNEL_URL = "https://conda.anaconda.org/conda-forge/"
+ANACONDA_CHANNELS_URL = "https://conda.anaconda.org/"
+# The channel the app loads by default.
+MAIN_CHANNEL = "conda-forge"
+UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
+# A second real channel from the manifest, for channel switching.
+BIOCONDA_CHANNEL = "bioconda"
+# Mirrored, but without any repodata: loading it fails.
+MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
 CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
+SnapCompare = Callable[..., bool]
 
 
 class RangeRequestHandler(SimpleHTTPRequestHandler):
@@ -96,18 +105,22 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
 
     ``on_mount`` awaits the initial repodata load and the previews run in
     Textual workers, so a snapshot must wait for both before it is stable.
+    Modal screens (query prompts, the who-needs loading screen, ...) may be on
+    top of the main screen while waiting, so the widgets are looked up on the
+    main screen rather than on whatever screen is active.
     """
     app = pilot.app
     assert isinstance(app, CondaMetadataTui)
+    main_screen = app.screen_stack[0]
     deadline = time.monotonic() + timeout
     seen_workers: dict[int, Worker[object]] = {}
     while True:
         await pilot.pause()
         workers = list(app.workers)
         seen_workers.update((id(worker), worker) for worker in workers)
-        sidebar = app.query_one("#sidebar-list", OptionList)
-        status = app.query_one("#status", Static)
-        if str(status.content).startswith("Failed to load"):
+        sidebar = main_screen.query_one("#sidebar-list", OptionList)
+        status = main_screen.query_one("#status", Static)
+        if str(status.content).startswith("Failed to load repodata"):
             raise AssertionError(f"app failed to load repodata: {status.content}")
         # Poll instead of `workers.wait_for_complete()`: that raises
         # WorkerCancelled for workers cancelled by exclusive groups or resets.
@@ -132,6 +145,53 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
             "app workers failed: "
             + "; ".join(f"{worker.group}: {worker.error!r}" for worker in failed)
         )
+
+
+async def wait_for_screen(
+    # ``Screen`` is invariant in its result type, so only ``Any`` accepts every
+    # modal of the app here.
+    pilot: Pilot[None],
+    screen_type: type[Screen[Any]],
+    *,
+    timeout: float = 5.0,
+) -> None:
+    """Wait until a screen of ``screen_type`` is on top of the screen stack.
+
+    The app opens some modals via ``call_after_refresh`` (the file action
+    screen, the MatchSpec prompt for a selected dependency), so a test that
+    presses the key has to wait for the deferred push instead of assuming it
+    already happened.
+    """
+    deadline = time.monotonic() + timeout
+    while not isinstance(pilot.app.screen, screen_type):
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"{screen_type.__name__} did not open within {timeout}s "
+                f"(top screen: {type(pilot.app.screen).__name__})"
+            )
+        await pilot.pause()
+    await pilot.pause()
+
+
+async def open_versions(pilot: Pilot[None], package_index: int) -> None:
+    """Open the version list of the ``package_index``-th package and highlight
+    its newest artifact so the main panel loads that artifact's details."""
+    await wait_for_idle(pilot)
+    await pilot.press(*(["j"] * package_index))
+    await wait_for_idle(pilot)
+    await pilot.press("enter")
+    await wait_for_idle(pilot)
+    # Row 0 is "< Back to packages", row 1 the first platform section.
+    await pilot.press("j", "j")
+    await wait_for_idle(pilot)
+
+
+def notification_messages(app: CondaMetadataTui) -> list[str]:
+    """The notifications the app currently shows, as ``title: message``."""
+    return [
+        f"{notification.title}: {notification.message}"
+        for notification in app._notifications
+    ]
 
 
 async def type_text(pilot: Pilot[None], text: str) -> None:

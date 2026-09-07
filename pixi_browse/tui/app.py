@@ -3142,6 +3142,11 @@ class CondaMetadataTui(App[None]):
         if event.option_list.id != "sidebar-list":
             return
 
+        # Enter confirms the channel draft; the package list receives the same
+        # key first and must not open the highlighted package as well.
+        if self._channel_edit_mode:
+            return
+
         if self._mode == "packages":
             if not self._visible_package_names:
                 return

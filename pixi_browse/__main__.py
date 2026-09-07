@@ -13,6 +13,7 @@ __all__ = [
     "CondaMetadataTui",
     "VersionEntry",
     "VersionRow",
+    "build_app",
     "cli",
     "run",
 ]
@@ -59,12 +60,25 @@ def run(
         help="Show version and exit.",
     ),
 ) -> None:
+    build_app(channel=channel, platforms=platform, matchspec=matchspec).run()
+
+
+def build_app(
+    *,
+    channel: str,
+    platforms: list[str] | None,
+    matchspec: str | None,
+) -> CondaMetadataTui:
+    """Validate the command line options and build the (not yet running) app.
+
+    Exits with status 1 on an unknown platform or an invalid MatchSpec.
+    """
     requested_platforms: list[Platform] | None = None
     requested_matchspec: MatchSpec | None = None
-    if platform is not None:
+    if platforms is not None:
         try:
             requested_platforms = [
-                Platform(platform_name) for platform_name in platform
+                Platform(platform_name) for platform_name in platforms
             ]
         except ParsePlatformError as exc:
             typer.echo(str(exc), err=True)
@@ -76,11 +90,11 @@ def run(
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
 
-    CondaMetadataTui(
+    return CondaMetadataTui(
         default_channel=channel,
         default_platforms=requested_platforms,
         default_matchspec=requested_matchspec,
-    ).run()
+    )
 
 
 if __name__ == "__main__":

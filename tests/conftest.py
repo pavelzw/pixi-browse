@@ -11,6 +11,11 @@ mirror would. A rattler ``Client`` with a
 started with its production defaults (``conda-forge``) and exercises the exact
 gateway, repodata, package-streaming and rendering code paths it uses for
 users, without network access and with deterministic data.
+
+The manifest lists artifacts of more than one channel (``bioconda`` next to
+``conda-forge``), each served under its own name, so channel switching runs
+for real. ``missing`` is mirrored too but has no repodata at all, so loading
+it fails.
 """
 
 from __future__ import annotations
@@ -33,9 +38,11 @@ from rattler.repo_data import Gateway
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
-from tests.channel_artifacts import ensure_channel_artifacts
+from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
 from tests.helpers import (
-    UPSTREAM_CHANNEL_URL,
+    ANACONDA_CHANNELS_URL,
+    MAIN_CHANNEL,
+    MISSING_CHANNEL,
     AppFactory,
     GatewayFactory,
     RangeRequestHandler,
@@ -43,23 +50,32 @@ from tests.helpers import (
 
 
 @pytest.fixture(scope="session")
-def fixture_channel_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A copy of the (downloaded, hash-verified) artifacts, indexed into a
-    complete conda channel."""
-    manifest = ensure_channel_artifacts()
-    channel_dir = tmp_path_factory.mktemp("channel")
-    for artifact in manifest.artifacts:
-        destination = channel_dir / artifact.subdir / artifact.file_name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(artifact.local_path, destination)
-    asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
-    return channel_dir
+def channel_manifest() -> ChannelManifest:
+    """The manifest of test artifacts, downloaded and hash-verified."""
+    return ensure_channel_artifacts()
 
 
 @pytest.fixture(scope="session")
-def channel_server(fixture_channel_dir: Path) -> Iterator[str]:
-    """Serve the indexed channel on a random loopback port."""
-    handler = partial(RangeRequestHandler, directory=str(fixture_channel_dir))
+def fixture_channels_dir(
+    channel_manifest: ChannelManifest, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """The manifest artifacts indexed into complete conda channels, one
+    directory per channel name."""
+    channels_dir = tmp_path_factory.mktemp("channels")
+    for channel_name in channel_manifest.channels:
+        channel_dir = channels_dir / channel_name
+        for artifact in channel_manifest.artifacts_of(channel_name):
+            destination = channel_dir / artifact.subdir / artifact.file_name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(artifact.local_path, destination)
+        asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
+    return channels_dir
+
+
+@pytest.fixture(scope="session")
+def channel_server(fixture_channels_dir: Path) -> Iterator[str]:
+    """Serve the indexed channels on a random loopback port."""
+    handler = partial(RangeRequestHandler, directory=str(fixture_channels_dir))
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -71,10 +87,19 @@ def channel_server(fixture_channel_dir: Path) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def rattler_client(channel_server: str) -> Client:
-    """A rattler client that serves ``conda-forge`` from the fixture channel."""
+def rattler_client(channel_manifest: ChannelManifest, channel_server: str) -> Client:
+    """A rattler client that serves the test channels from the local server
+    under the URLs the app resolves their names to."""
+    mirrors = {
+        f"{channel_url}/": [f"{channel_server}{channel_name}/"]
+        for channel_name, channel_url in channel_manifest.channels.items()
+    }
+    mirrors[f"{ANACONDA_CHANNELS_URL}{MISSING_CHANNEL}/"] = [
+        f"{channel_server}{MISSING_CHANNEL}/"
+    ]
+    assert f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/" in mirrors
     return Client(
-        middlewares=[MirrorMiddleware({UPSTREAM_CHANNEL_URL: [channel_server]})],
+        middlewares=[MirrorMiddleware(mirrors)],
         user_agent="pixi-browse-tests",
     )
 
@@ -103,7 +128,7 @@ def make_app(rattler_client: Client, rattler_cache_dir: Path) -> AppFactory:
 
     def factory(
         *,
-        default_channel: str = "conda-forge",
+        default_channel: str = MAIN_CHANNEL,
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
     ) -> CondaMetadataTui:
