@@ -2703,6 +2703,7 @@ class FileDiffScreen(ScrollableModalScreen):
                     self._right_text,
                     # Split when the terminal is wide enough, unified otherwise.
                     split=False,
+                    annotations=True,
                     auto_split=True,
                     wrap=True,
                     id="file-diff-view",
