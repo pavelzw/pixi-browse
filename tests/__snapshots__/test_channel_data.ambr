@@ -56,6 +56,9 @@
       "Recipe maintainers    [@click=app.open_external_url('https://github.com/groutr')]@groutr[/], [@click=app.open_external_url('https://github.com/msarahan')]@msarahan[/], [@click=app.open_external_url('https://github.com/ocefpaf')]@ocefpaf[/], [@click=app.open_external_url('https://github.com/isuruf')]@isuruf[/]",
       "Provenance            [@click=app.open_external_url('https://github.com/conda-forge/zlib-feedstock/commit/044fc2361e1c5f1a35c8f417f1434a585e627297')]conda-forge/zlib-feedstock@044fc2361e1c5f1a35c8f417f1434a585e627297[/]",
     ]),
+    'repodata_patches': list([
+      "constrains: 'zlib 1.3.2 *_3' -> 'zlib ==1.3.2 *_3'",
+    ]),
     'run_exports': list([
       'weak: libzlib >=1.3.2,<2.0a0',
     ]),
@@ -136,6 +139,8 @@
       "Provenance            [@click=app.open_external_url('https://github.com/conda-forge/pixi-browse-feedstock/commit/94b9f1d564e589aaebc8c4baffff1133d8874690')]conda-forge/pixi-browse-feedstock@94b9f1d564e589aaebc8c4baffff1133d8874690[/]",
       'Built with            rattler-build 0.65.1',
     ]),
+    'repodata_patches': list([
+    ]),
     'run_exports': list([
     ]),
   })
@@ -199,6 +204,8 @@
       "Documentation         [@click=app.open_external_url('https://six.readthedocs.io/')]https://six.readthedocs.io/[/]",
       "Homepage              [@click=app.open_external_url('https://six.readthedocs.io/')]https://six.readthedocs.io/[/]",
       "Recipe maintainers    [@click=app.open_external_url('https://github.com/jakirkham')]@jakirkham[/], [@click=app.open_external_url('https://github.com/msarahan')]@msarahan[/], [@click=app.open_external_url('https://github.com/ocefpaf')]@ocefpaf[/]",
+    ]),
+    'repodata_patches': list([
     ]),
     'run_exports': list([
     ]),
