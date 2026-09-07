@@ -2668,21 +2668,17 @@ class FileDiffScreen(ScrollableModalScreen):
 
     def __init__(
         self,
-        title: str,
+        file_path: str,
         *,
         left_label: str,
         right_label: str,
-        left_path: str,
-        right_path: str,
         left_text: str,
         right_text: str,
     ) -> None:
         super().__init__()
-        self._title = title
+        self._file_path = file_path
         self._left_label = left_label
         self._right_label = right_label
-        self._left_path = left_path
-        self._right_path = right_path
         self._left_text = left_text
         self._right_text = right_text
 
@@ -2697,12 +2693,12 @@ class FileDiffScreen(ScrollableModalScreen):
         if not DIFF_VIEW_AVAILABLE:
             raise RuntimeError(DIFF_VIEW_INSTALL_HINT)
         with Vertical(id="file-diff-dialog"):
-            yield Static(self._title, id="file-diff-title", markup=False)
+            yield Static(f"Diff: {self._file_path}", id="file-diff-title", markup=False)
             yield Static(self._sides_text(), id="file-diff-sides", markup=False)
             with VerticalScroll(id="file-diff-scroll"):
                 yield DiffView(
-                    self._left_path,
-                    self._right_path,
+                    self._file_path,
+                    self._file_path,
                     self._left_text,
                     self._right_text,
                     # Split when the terminal is wide enough, unified otherwise.

@@ -1822,18 +1822,13 @@ class CondaMetadataTui(App[None]):
             )
             if left_text is None or right_text is None:
                 return
-            title = (
-                f"Diff: {left_file.path}"
-                if left_file.path == right_file.path
-                else f"Diff: {left_file.path} vs {right_file.path}"
-            )
+            # Compare rows pair files by path.
+            assert left_file.path == right_file.path
             self.push_screen(
                 FileDiffScreen(
-                    title,
+                    left_file.path,
                     left_label=self._compare_selection_label(left_selection),
                     right_label=self._compare_selection_label(right_selection),
-                    left_path=left_file.path,
-                    right_path=right_file.path,
                     left_text=left_text,
                     right_text=right_text,
                 )
