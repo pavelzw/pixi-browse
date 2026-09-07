@@ -131,6 +131,12 @@ screenshots with:
 pixi run snapshot-update
 ```
 
+To review committed snapshot changes against `main` without rerunning the tests:
+
+```bash
+pixi run snapshot-report
+```
+
 ### Linting
 
 ```bash

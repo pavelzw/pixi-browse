@@ -94,6 +94,23 @@ def test_matchspec_query_filters_records(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_matchspec_query_lists_matching_packages(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A query matching ``libzlib`` and ``zlib`` stays in the package list and
+    names the MatchSpec in the sidebar heading."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("m")
+        await pilot.pause()
+        await type_text(pilot, "*zlib*")
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_whoneeds_query_lists_dependents(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
