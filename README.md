@@ -117,6 +117,16 @@ pixi run pre-commit-install
 pixi run test
 ```
 
+The tests run the app against a small offline conda channel made of real
+conda-forge artifacts (`tests/fixtures/channel`). TUI screens are checked with
+[pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot);
+after an intentional UI change, review `snapshot_report.html` and accept the new
+screenshots with:
+
+```bash
+pixi run snapshot-update
+```
+
 ### Linting
 
 ```bash

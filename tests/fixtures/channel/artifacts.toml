@@ -1,0 +1,64 @@
+# Real conda-forge artifacts that make up the offline test channel.
+#
+# `tests/conftest.py` indexes this directory with py-rattler at test time and
+# serves it over a local HTTP server, so the app runs against the exact code
+# paths it uses in production without touching the network.
+#
+# Refresh or extend with: pixi run fetch-test-channel
+
+channel = "https://conda.anaconda.org/conda-forge"
+
+[[artifacts]]
+subdir = "noarch"
+file_name = "pixi-browse-0.0.12-pyhc364b38_0.conda"
+sha256 = "84c036322b3e27702e04ff85d6feeba377cd4b3bf10b44074cb0e09a1b027562"
+
+[[artifacts]]
+subdir = "noarch"
+file_name = "pixi-browse-0.0.13-pyhc364b38_0.conda"
+sha256 = "efcfd3f1cbb29ec1ad20deb7c861c05cb1a364076ad17607a599a173c845fcf1"
+
+[[artifacts]]
+subdir = "noarch"
+file_name = "pixi-browse-0.0.14-pyhc364b38_0.conda"
+sha256 = "c52c5f3d57ac8e2de5da37ffabc053adfdfa73fd90472614b337b73285832cce"
+
+[[artifacts]]
+subdir = "noarch"
+file_name = "six-1.16.0-pyh6c4a22f_0.tar.bz2"
+sha256 = "a85c38227b446f42c5b90d9b642f2c0567880c15d72492d8da074a59c8f91dd6"
+
+[[artifacts]]
+subdir = "noarch"
+file_name = "six-1.17.0-pyhd8ed1ab_0.conda"
+sha256 = "41db0180680cc67c3fa76544ffd48d6a5679d96f4b71d7498a759e94edc9a2db"
+
+[[artifacts]]
+subdir = "linux-64"
+file_name = "libzlib-1.3.1-hb9d3cd8_2.conda"
+sha256 = "d4bfe88d7cb447768e31650f06257995601f89076080e76df55e3112d4e47dc4"
+
+[[artifacts]]
+subdir = "linux-64"
+file_name = "libzlib-1.3.2-h25fd6f3_3.conda"
+sha256 = "eb8a0db0aa570124f7d2a93d7c7f596e3390df5e047818d873baad32985fc736"
+
+[[artifacts]]
+subdir = "linux-64"
+file_name = "zlib-1.3.1-hb9d3cd8_2.conda"
+sha256 = "5d7c0e5f0005f74112a34a7425179f4eb6e73c92f5d109e6af4ddeca407c92ab"
+
+[[artifacts]]
+subdir = "osx-arm64"
+file_name = "libzlib-1.3.1-h8359307_2.conda"
+sha256 = "ce34669eadaba351cd54910743e6a2261b67009624dbc7daeeafdef93616711b"
+
+[[artifacts]]
+subdir = "osx-arm64"
+file_name = "libzlib-1.3.2-h8088a28_3.conda"
+sha256 = "a18fa5d5bac452401459f966cf0d872224e8080c4ff93c77e168d43ab42ef9d7"
+
+[[artifacts]]
+subdir = "osx-arm64"
+file_name = "zlib-1.3.1-h8359307_2.conda"
+sha256 = "58f8860756680a4831c1bf4f294e2354d187f2e999791d53b1941834c4b37430"

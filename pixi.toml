@@ -39,9 +39,17 @@ mypy = "*"
 ty = "*"
 types-pyyaml = "*"
 vhs = "*"
+[feature.test.pypi-dependencies]
+# From PyPI until conda-forge ships the `resources/` report template, see
+# https://github.com/conda-forge/pytest-textual-snapshot-feedstock
+pytest-textual-snapshot = "*"
 [feature.test.tasks]
 test = "pytest"
 test-coverage = "pytest --cov=pixi_browse --cov-report=xml --cov-report=term-missing"
+# Accept changed TUI snapshots after reviewing snapshot_report.html.
+snapshot-update = "pytest tests/test_snapshots.py --snapshot-update"
+# (Re)download the real conda-forge artifacts of the offline test channel.
+fetch-test-channel = "python tests/fixtures/fetch_channel_artifacts.py"
 
 [feature.build.dependencies]
 python = "*"

@@ -7,6 +7,9 @@ pre-commit:
   fail_on_changes: always
   exclude:
     - assets/**/*
+    - tests/__snapshots__/**/*
+    - tests/fixtures/channel/**/*.conda
+    - tests/fixtures/channel/**/*.tar.bz2
   jobs:
     - name: pixi-install
       run: pixi install

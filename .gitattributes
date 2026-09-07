@@ -1,1 +1,4 @@
 pixi.lock merge=binary linguist-language=YAML linguist-generated=true
+tests/__snapshots__/** linguist-generated=true
+*.conda binary
+*.tar.bz2 binary
