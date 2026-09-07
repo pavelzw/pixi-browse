@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from pytest_textual_snapshot import (
+from pytest_textual_snapshot import (  # type: ignore[import-untyped]
     PseudoApp,
     PseudoConsole,
     SvgSnapshotDiff,
@@ -93,6 +93,8 @@ def changed_svg_snapshots(base: str, head: str) -> list[SnapshotChange]:
         status = fields[index]
         index += 1
         change_type = status[0]
+        before_path: PurePosixPath | None
+        after_path: PurePosixPath | None
 
         if change_type in {"R", "C"}:
             before_path = PurePosixPath(fields[index])
