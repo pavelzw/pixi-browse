@@ -132,17 +132,14 @@ class CondaMetadataTui(App[None]):
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
         config: Config | None = None,
-        client: Client | None = None,
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__()
         selected_platforms = set(default_platforms or [])
         self.theme = "ansi-dark"
         config = config if config is not None else Config()
-        self._client = (
-            client
-            if client is not None
-            else Client.from_config(config, user_agent=f"pixi-browse/{__version__}")
+        self._client = Client.from_config(
+            config, user_agent=f"pixi-browse/{__version__}"
         )
 
         self._gateway: Gateway = create_gateway(

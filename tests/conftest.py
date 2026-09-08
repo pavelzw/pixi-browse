@@ -5,8 +5,7 @@ The channel consists of real conda-forge artifacts listed in
 downloads them into a git-ignored directory on first use and verifies their
 hashes. At session start the directory is indexed with py-rattler and served by
 a small HTTP server that supports range requests, the same way a real channel
-mirror would. A rattler ``Client`` with a
-``MirrorMiddleware`` then transparently redirects every request for
+mirror would. A rattler ``Config`` with local mirrors then redirects every request for
 ``https://conda.anaconda.org/conda-forge/`` to that server, so the app can be
 started with its production defaults (``conda-forge``) and exercises the exact
 gateway, repodata, package-streaming and rendering code paths it uses for
@@ -21,6 +20,7 @@ it fails.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import threading
 from collections.abc import Iterable, Iterator
@@ -29,10 +29,10 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from rattler.config import Config
 from rattler.index import index_fs
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
-from rattler.networking.middleware import MirrorMiddleware
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 
@@ -87,8 +87,8 @@ def channel_server(fixture_channels_dir: Path) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def rattler_client(channel_manifest: ChannelManifest, channel_server: str) -> Client:
-    """A rattler client that serves the test channels from the local server
+def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
+    """Configure the test channels to be served from the local server
     under the URLs the app resolves their names to."""
     mirrors = {
         f"{channel_url}/": [f"{channel_server}{channel_name}/"]
@@ -98,10 +98,15 @@ def rattler_client(channel_manifest: ChannelManifest, channel_server: str) -> Cl
         f"{channel_server}{MISSING_CHANNEL}/"
     ]
     assert f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/" in mirrors
-    return Client(
-        middlewares=[MirrorMiddleware(mirrors)],
-        user_agent="pixi-browse-tests",
-    )
+    config = Config()
+    config.set("mirrors", json.dumps(mirrors))
+    return config
+
+
+@pytest.fixture(scope="session")
+def rattler_client(rattler_config: Config) -> Client:
+    """Use the same configuration for direct package-streaming tests."""
+    return Client.from_config(rattler_config, user_agent="pixi-browse-tests")
 
 
 @pytest.fixture
@@ -111,10 +116,10 @@ def rattler_cache_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def make_gateway(rattler_client: Client, rattler_cache_dir: Path) -> GatewayFactory:
+def make_gateway(rattler_config: Config, rattler_cache_dir: Path) -> GatewayFactory:
     def factory(*, sharded_enabled: bool = True) -> Gateway:
         return create_gateway(
-            client=rattler_client,
+            config=rattler_config,
             sharded_enabled=sharded_enabled,
             cache_dir=rattler_cache_dir,
         )
@@ -123,7 +128,7 @@ def make_gateway(rattler_client: Client, rattler_cache_dir: Path) -> GatewayFact
 
 
 @pytest.fixture
-def make_app(rattler_client: Client, rattler_cache_dir: Path) -> AppFactory:
+def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
     """Build the real app against the fixture channel."""
 
     def factory(
@@ -136,7 +141,7 @@ def make_app(rattler_client: Client, rattler_cache_dir: Path) -> AppFactory:
             default_channels=default_channels,
             default_platforms=default_platforms,
             default_matchspec=default_matchspec,
-            client=rattler_client,
+            config=rattler_config,
             cache_dir=rattler_cache_dir,
         )
 
