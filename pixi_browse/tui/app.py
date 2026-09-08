@@ -145,9 +145,6 @@ class CondaMetadataTui(App[None]):
         self._gateway: Gateway = create_gateway(
             client=self._client, cache_dir=cache_dir
         )
-        self._whoneeds_gateway: Gateway = create_gateway(
-            client=self._client, sharded_enabled=False, cache_dir=cache_dir
-        )
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -431,13 +428,13 @@ class CondaMetadataTui(App[None]):
         self._version_loader.clear_caches()
 
     def _release_whoneeds_repodata(self) -> None:
-        """Drop the repodata the who-needs gateway scanned.
+        """Drop the repodata the who-needs query scanned.
 
-        A who-needs query runs against unsharded repodata, so the gateway
-        retains the *complete* repodata of every platform it scanned - well
-        over a gigabyte for a channel the size of conda-forge. Nothing needs
-        it once the who-needs view is gone, and the on-disk cache is kept, so
-        a later query only has to re-read it.
+        A who-needs query runs against the complete repodata, so the gateway
+        retains the full repodata of every platform it scanned - well over a
+        gigabyte for a channel the size of conda-forge. Nothing needs it once
+        the who-needs view is gone, and the on-disk cache is kept, so a later
+        query only has to re-read it.
 
         The scanned channels are tracked separately because the selection may
         already have been changed by the time this runs.
@@ -448,7 +445,7 @@ class CondaMetadataTui(App[None]):
 
         self._whoneeds_scanned_channels = None
         for channel_name in channel_names:
-            self._whoneeds_gateway.clear_repodata_cache(channel_name)
+            self._gateway.clear_repodata_cache(channel_name)
 
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
@@ -531,7 +528,7 @@ class CondaMetadataTui(App[None]):
         # released again even if the channels change in the meantime.
         self._whoneeds_scanned_channels = list(self._channel_names)
         return await query_whoneeds_records(
-            gateway=self._whoneeds_gateway,
+            gateway=self._gateway,
             channel_names=self._channel_names,
             platforms=self._platforms,
             target=target,

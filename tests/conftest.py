@@ -112,12 +112,8 @@ def rattler_cache_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def make_gateway(rattler_client: Client, rattler_cache_dir: Path) -> GatewayFactory:
-    def factory(*, sharded_enabled: bool = True) -> Gateway:
-        return create_gateway(
-            client=rattler_client,
-            sharded_enabled=sharded_enabled,
-            cache_dir=rattler_cache_dir,
-        )
+    def factory() -> Gateway:
+        return create_gateway(client=rattler_client, cache_dir=rattler_cache_dir)
 
     return factory
 

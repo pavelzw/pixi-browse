@@ -114,7 +114,7 @@ def test_whoneeds_query_lists_dependents(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
     """``zlib`` depends on ``libzlib``; the who-needs scan runs against the
-    unsharded repodata of the fixture channel."""
+    complete repodata of the fixture channel."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
