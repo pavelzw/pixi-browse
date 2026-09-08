@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
@@ -24,7 +25,6 @@ from pixi_browse.rendering import (
 from pixi_browse.repodata import (
     discover_available_platforms,
     fetch_package_names,
-    merge_available_platforms,
     normalize_channel_names,
     query_matchspec_records,
     query_package_records,
@@ -44,47 +44,55 @@ from tests.helpers import (
 def test_discover_available_platforms_finds_indexed_subdirs(
     make_gateway: GatewayFactory,
 ) -> None:
-    platforms_by_channel = asyncio.run(
+    platforms = asyncio.run(
         discover_available_platforms(
             gateway=make_gateway(), channel_names=[MAIN_CHANNEL]
         )
     )
 
-    assert platforms_by_channel == {
-        MAIN_CHANNEL: [
-            Platform("linux-64"),
-            Platform("osx-arm64"),
-            Platform("noarch"),
-        ]
-    }
-
-
-def test_discover_available_platforms_probes_every_channel_separately(
-    make_gateway: GatewayFactory,
-) -> None:
-    """``bioconda`` only ships noarch packages and ``missing`` has no repodata
-    at all; both stay visible next to the platforms of ``conda-forge``."""
-    platforms_by_channel = asyncio.run(
-        discover_available_platforms(
-            gateway=make_gateway(),
-            channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL, MISSING_CHANNEL],
-        )
-    )
-
-    assert platforms_by_channel == {
-        MAIN_CHANNEL: [
-            Platform("linux-64"),
-            Platform("osx-arm64"),
-            Platform("noarch"),
-        ],
-        BIOCONDA_CHANNEL: [Platform("noarch")],
-        MISSING_CHANNEL: [],
-    }
-    assert merge_available_platforms(platforms_by_channel) == [
+    assert platforms == [
         Platform("linux-64"),
         Platform("osx-arm64"),
         Platform("noarch"),
     ]
+
+
+def test_discover_available_platforms_merges_the_channels(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``bioconda`` only ships noarch packages; the result is the union with
+    the platforms of ``conda-forge``."""
+    gateway = make_gateway()
+
+    assert asyncio.run(
+        discover_available_platforms(gateway=gateway, channel_names=[BIOCONDA_CHANNEL])
+    ) == [Platform("noarch")]
+    assert asyncio.run(
+        discover_available_platforms(
+            gateway=gateway, channel_names=[BIOCONDA_CHANNEL, MAIN_CHANNEL]
+        )
+    ) == [
+        Platform("linux-64"),
+        Platform("osx-arm64"),
+        Platform("noarch"),
+    ]
+
+
+def test_discover_available_platforms_rejects_channel_without_noarch(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``missing`` serves no repodata at all. rattler requires the noarch
+    subdir of every channel, so the whole selection is refused and rattler's
+    error names the channel."""
+    with pytest.raises(
+        GatewayError, match="could not find subdir 'noarch' in channel .*missing"
+    ):
+        asyncio.run(
+            discover_available_platforms(
+                gateway=make_gateway(),
+                channel_names=[MAIN_CHANNEL, MISSING_CHANNEL],
+            )
+        )
 
 
 def test_normalize_channel_names_strips_dedupes_and_defaults() -> None:

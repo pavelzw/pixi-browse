@@ -66,7 +66,6 @@ from pixi_browse.repodata import (
     create_gateway,
     discover_available_platforms,
     fetch_package_names,
-    merge_available_platforms,
     normalize_channel_names,
     query_matchspec_records,
     query_package_records,
@@ -235,7 +234,9 @@ class CondaMetadataTui(App[None]):
             self._channel_package_names = await self._fetch_package_names_with_gateway()
         except (GatewayError, RuntimeError) as exc:
             status.update(f"Failed to load repodata: {exc!s}")
-            return str(exc)
+            # Rattler appends the failing request as "Caused by" lines; the
+            # first line already says what went wrong and for which channel.
+            return str(exc).strip().splitlines()[0]
 
         self._all_package_names = list(self._channel_package_names)
         self._visible_package_names = list(self._all_package_names)
@@ -251,28 +252,10 @@ class CondaMetadataTui(App[None]):
         return None
 
     async def _discover_available_platforms(self) -> list[Platform]:
-        """The platforms served by the selected channels.
-
-        Every channel has to serve at least one platform: a channel without any
-        repodata is most likely a typo, and quietly browsing the other channels
-        would hide that.
-        """
-        platforms_by_channel = await discover_available_platforms(
+        return await discover_available_platforms(
             gateway=self._gateway,
             channel_names=self._channel_names,
         )
-        unreachable = [
-            channel_name
-            for channel_name, platforms in platforms_by_channel.items()
-            if not platforms
-        ]
-        if unreachable:
-            noun = "channel" if len(unreachable) == 1 else "channels"
-            raise RuntimeError(
-                "No reachable platform repodata endpoints found for "
-                f"{noun} {channels_label(unreachable)}."
-            )
-        return merge_available_platforms(platforms_by_channel)
 
     async def _ensure_available_platforms(self) -> None:
         if not self._available_platform_names:

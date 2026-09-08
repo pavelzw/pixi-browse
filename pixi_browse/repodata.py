@@ -21,6 +21,8 @@ from pixi_browse.platform_utils import platform_sort_key
 
 # The channel the app browses when none is given.
 DEFAULT_CHANNEL = "conda-forge"
+# The one subdir every conda channel must serve.
+NOARCH_PLATFORM = Platform("noarch")
 
 
 @dataclass(frozen=True)
@@ -82,13 +84,15 @@ async def discover_available_platforms(
     gateway: Gateway,
     channel_names: Sequence[str],
     max_parallel: int = 12,
-) -> dict[str, list[Platform]]:
-    """Probe which platforms each channel serves repodata for.
+) -> list[Platform]:
+    """Probe which platforms at least one of the channels serves repodata for.
 
-    Every channel is probed on its own so that a channel without any repodata
-    (a typo, a private channel without access) can be told apart from one that
-    merely lacks some platforms: the result maps each channel to its platforms,
-    and an unreachable channel maps to an empty list.
+    Every conda channel has to serve a ``noarch`` subdir, and rattler enforces
+    that: a missing ``noarch`` is an error, while any other missing subdir is
+    simply empty. A channel whose ``noarch`` cannot be fetched (a typo, a
+    private channel without access) therefore cannot be browsed at all, and
+    its ``GatewayError`` is raised instead of quietly browsing the other
+    channels without it. Errors on the other subdirs only drop that platform.
     """
     candidates = sorted(
         Platform.all(),
@@ -104,35 +108,21 @@ async def discover_available_platforms(
                     platforms=[platform],
                 )
             except GatewayError:
+                if platform == NOARCH_PLATFORM:
+                    raise
                 return None
 
         return platform if names else None
 
-    async def probe_channel(channel_name: str) -> list[Platform]:
-        discovered = await asyncio.gather(
-            *(probe(channel_name, platform) for platform in candidates)
+    discovered = await asyncio.gather(
+        *(
+            probe(channel_name, platform)
+            for channel_name in channel_names
+            for platform in candidates
         )
-        return sorted(
-            (platform for platform in discovered if platform is not None),
-            key=platform_sort_key,
-        )
-
-    platforms_by_channel = await asyncio.gather(
-        *(probe_channel(channel_name) for channel_name in channel_names)
     )
-    return dict(zip(channel_names, platforms_by_channel, strict=True))
-
-
-def merge_available_platforms(
-    platforms_by_channel: dict[str, list[Platform]],
-) -> list[Platform]:
-    """The platforms served by at least one of the channels, in display order."""
     return sorted(
-        {
-            platform
-            for platforms in platforms_by_channel.values()
-            for platform in platforms
-        },
+        {platform for platform in discovered if platform is not None},
         key=platform_sort_key,
     )
 
