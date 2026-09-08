@@ -63,10 +63,23 @@ def test_build_app_keeps_channel_order_and_drops_repeats() -> None:
     assert app._channel_names == ["bioconda", "conda-forge"]
 
 
-def test_build_app_defaults_to_conda_forge_without_channels() -> None:
-    app = entrypoint.build_app(channels=None, platforms=None, matchspec=None)
+def test_cli_defaults_the_channel_option_to_conda_forge() -> None:
+    runner = CliRunner()
 
-    assert app._channel_names == ["conda-forge"]
+    result = runner.invoke(entrypoint.cli, ["--help"])
+    output = strip_ansi(result.output)
+
+    assert result.exit_code == 0
+    assert re.search(r"default:\s+conda-forge", output)
+
+
+def test_cli_exits_without_any_channel() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(entrypoint.cli, ["-c", "  "])
+
+    assert result.exit_code == 1
+    assert "At least one channel is required." in result.output
 
 
 def test_build_app_passes_matchspec() -> None:

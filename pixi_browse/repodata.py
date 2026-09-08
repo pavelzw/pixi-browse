@@ -61,17 +61,13 @@ def create_gateway(
 
 
 def normalize_channel_names(channel_names: Iterable[str]) -> list[str]:
-    """Clean up a channel selection: strip, drop blanks and repeats, keep order.
-
-    An empty selection falls back to ``DEFAULT_CHANNEL`` so the app always has
-    something to load.
-    """
+    """Clean up a channel selection: strip, drop blanks and repeats, keep order."""
     normalized: list[str] = []
     for channel_name in channel_names:
         cleaned = channel_name.strip()
         if cleaned and cleaned not in normalized:
             normalized.append(cleaned)
-    return normalized or [DEFAULT_CHANNEL]
+    return normalized
 
 
 def channels_label(channel_names: Sequence[str]) -> str:

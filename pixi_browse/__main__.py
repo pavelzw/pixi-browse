@@ -35,14 +35,11 @@ cli = typer.Typer(
 
 @cli.callback(invoke_without_command=True)
 def run(
-    channel: list[str] | None = typer.Option(
-        None,
+    channel: list[str] = typer.Option(
+        [DEFAULT_CHANNEL],
         "--channel",
         "-c",
-        help=(
-            "Channels loaded at startup. Repeat the flag to pass "
-            f"multiple channels. Defaults to {DEFAULT_CHANNEL}."
-        ),
+        help="Channels loaded at startup. Repeat the flag to pass multiple channels.",
     ),
     platform: list[str] | None = typer.Option(
         None,
@@ -69,16 +66,19 @@ def run(
 
 def build_app(
     *,
-    channels: list[str] | None,
+    channels: list[str],
     platforms: list[str] | None,
     matchspec: str | None,
 ) -> CondaMetadataTui:
     """Validate the command line options and build the (not yet running) app.
 
-    Exits with status 1 on an unknown platform or an invalid MatchSpec. Blank
-    and repeated channels are dropped; without any channel left the app
-    starts on ``conda-forge``.
+    Exits with status 1 on an unknown platform, an invalid MatchSpec, or when
+    no channel is left after dropping blank and repeated ones.
     """
+    channel_names = normalize_channel_names(channels)
+    if not channel_names:
+        typer.echo("At least one channel is required.", err=True)
+        raise typer.Exit(code=1)
     requested_platforms: list[Platform] | None = None
     requested_matchspec: MatchSpec | None = None
     if platforms is not None:
@@ -97,7 +97,7 @@ def build_app(
             raise typer.Exit(code=1) from exc
 
     return CondaMetadataTui(
-        default_channels=normalize_channel_names(channels or []),
+        default_channels=channel_names,
         default_platforms=requested_platforms,
         default_matchspec=requested_matchspec,
     )

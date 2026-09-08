@@ -95,13 +95,13 @@ def test_discover_available_platforms_rejects_channel_without_noarch(
         )
 
 
-def test_normalize_channel_names_strips_dedupes_and_defaults() -> None:
+def test_normalize_channel_names_strips_and_dedupes() -> None:
     assert normalize_channel_names([" bioconda ", "conda-forge", "bioconda", ""]) == [
         "bioconda",
         "conda-forge",
     ]
-    assert normalize_channel_names([]) == ["conda-forge"]
-    assert normalize_channel_names(["", "  "]) == ["conda-forge"]
+    assert normalize_channel_names([]) == []
+    assert normalize_channel_names(["", "  "]) == []
 
 
 def test_fetch_package_names_lists_channel_packages(
@@ -364,14 +364,14 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
 
 
 def test_app_shares_the_client_with_its_version_loader(rattler_client: Client) -> None:
-    app = CondaMetadataTui(client=rattler_client)
+    app = CondaMetadataTui(default_channels=["conda-forge"], client=rattler_client)
 
     assert app._client is rattler_client
     assert app._version_loader._client is rattler_client
 
 
 def test_app_creates_a_default_client_when_none_is_given() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
 
     assert isinstance(app._client, Client)
     assert app._version_loader._client is app._client

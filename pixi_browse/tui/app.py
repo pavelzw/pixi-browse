@@ -127,7 +127,7 @@ class CondaMetadataTui(App[None]):
     def __init__(
         self,
         *,
-        default_channels: Iterable[str] | None = None,
+        default_channels: Iterable[str],
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
         client: Client | None = None,
@@ -154,7 +154,9 @@ class CondaMetadataTui(App[None]):
         self._draft_selected_platform_names: set[Platform] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
         # The channels being browsed, in the order they were added; never empty.
-        self._channel_names: list[str] = normalize_channel_names(default_channels or [])
+        self._channel_names: list[str] = normalize_channel_names(default_channels)
+        if not self._channel_names:
+            raise ValueError("At least one channel is required.")
         self._mode: ViewMode = "packages"
         self._search_query = ""
         self._channel_package_names: list[str] = []
@@ -707,7 +709,7 @@ class CondaMetadataTui(App[None]):
 
     async def _apply_channel_selection(self, channel_names: Sequence[str]) -> None:
         channel_names = normalize_channel_names(channel_names)
-        if channel_names == self._channel_names:
+        if not channel_names or channel_names == self._channel_names:
             self._update_filter_indicator()
             return
 
