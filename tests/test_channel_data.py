@@ -149,7 +149,7 @@ def test_query_whoneeds_records_spans_all_channels(
     query sees the dependency across the channel boundary."""
     result = asyncio.run(
         query_whoneeds_records(
-            gateway=make_gateway(sharded_enabled=False),
+            gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
             platforms=list(CHANNEL_PLATFORMS),
             target="six",
@@ -218,7 +218,7 @@ def test_query_whoneeds_records_finds_zlib_depending_on_libzlib(
     logs: list[str] = []
     result = asyncio.run(
         query_whoneeds_records(
-            gateway=make_gateway(sharded_enabled=False),
+            gateway=make_gateway(),
             channel_names=["conda-forge"],
             platforms=list(CHANNEL_PLATFORMS),
             target="libzlib",

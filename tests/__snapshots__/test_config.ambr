@@ -146,7 +146,7 @@
     ]),
   ])
 # ---
-# name: test_whoneeds_disables_shards_even_with_channel_override
+# name: test_whoneeds_scans_full_repodata_with_shards_enabled
   list([
     'libzlib-1.3.1-hb9d3cd8_2.conda',
     'libzlib-1.3.2-h25fd6f3_3.conda',

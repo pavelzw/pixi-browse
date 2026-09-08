@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,22 +47,9 @@ def create_gateway(
     *,
     client: Client | None = None,
     config: Config | None = None,
-    sharded_enabled: bool | None = None,
     cache_dir: Path | None = None,
 ) -> Gateway:
     config = config if config is not None else Config()
-    if sharded_enabled is not None:
-        # Keep the caller's configuration intact. Override every channel as
-        # well as the default so who-needs always scans unsharded repodata.
-        config = config.merge(Config())
-        disabled = json.dumps(not sharded_enabled)
-        config.set("repodata-config.disable-sharded", disabled)
-        repodata_config: dict[str, object] = config.repodata_config
-        for channel, options in repodata_config.items():
-            if isinstance(options, dict):
-                config.set(
-                    f"repodata-config.{json.dumps(channel)}.disable-sharded", disabled
-                )
     return Gateway.from_config(
         config,
         cache_dir=cache_dir,
@@ -231,9 +217,9 @@ async def query_whoneeds_records(
     """Return all records of the channels that depend on ``target``.
 
     The gateway performs the full repodata scan in Rust and only returns
-    matching records to Python. Callers should pass a gateway configured with
-    sharded repodata disabled: against sharded repodata the scan fetches one
-    shard per package name, while the full repodata is a single request.
+    matching records to Python. Rattler always scans the complete repodata
+    for this query, even on a gateway that otherwise browses sharded
+    repodata, so the same gateway serves both kinds of queries.
     """
     target_label = whoneeds_target_label(target)
     platforms_label = ",".join(str(platform) for platform in platforms)

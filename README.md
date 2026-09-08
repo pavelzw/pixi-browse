@@ -120,8 +120,8 @@ disable-sharded = true
 The shared network client applies mirrors, S3 options, authentication, proxy,
 and TLS settings to repodata, package previews, and downloads. Repodata format
 settings (including per-channel overrides) and `concurrency.downloads` are
-applied to both gateways. Who-needs queries always disable sharded repodata
-because they scan the full channel.
+applied to the gateway. Who-needs queries scan the full channel repodata,
+even when sharded repodata is enabled for browsing.
 
 Explicit `-c` flags replace `default-channels`. If neither is set, pixi-browse
 uses `conda-forge`.

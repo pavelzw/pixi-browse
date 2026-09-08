@@ -288,7 +288,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/yarl-1.24.5-pyh7db6752_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - conda_source: pixi-browse[ff462651] @ .
-      - conda_source: py-rattler[718588e9] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[4bcde0a0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-64:
@@ -498,7 +498,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zizmor-1.28.0-h19f9e61_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[9f5af371] @ .
-      - conda_source: py-rattler[ff8afbe6] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[efe4cdeb] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-arm64:
@@ -708,7 +708,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zizmor-1.28.0-h6fdd925_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[2ab0674f] @ .
-      - conda_source: py-rattler[5ef4c3b0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[359d99d4] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       win-64:
@@ -895,7 +895,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[e316aef4] @ .
-      - conda_source: py-rattler[26c12d81] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[1be84369] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
   py313:
@@ -1112,7 +1112,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/uc-micro-py-2.0.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wayland-protocols-1.49-hd8ed1ab_0.conda
       - conda_source: pixi-browse[ff462651] @ .
-      - conda_source: py-rattler[718588e9] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[4bcde0a0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-64:
@@ -1274,7 +1274,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yarl-1.24.5-py313h035b7d0_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[9f5af371] @ .
-      - conda_source: py-rattler[ff8afbe6] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[efe4cdeb] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-arm64:
@@ -1436,7 +1436,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yarl-1.24.5-py313h65a2061_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[2ab0674f] @ .
-      - conda_source: py-rattler[5ef4c3b0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[359d99d4] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       win-64:
@@ -1576,7 +1576,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[e316aef4] @ .
-      - conda_source: py-rattler[26c12d81] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[1be84369] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
   py314:
@@ -1795,7 +1795,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/wayland-protocols-1.49-hd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/yarl-1.24.5-pyh7db6752_0.conda
       - conda_source: pixi-browse[ff462651] @ .
-      - conda_source: py-rattler[718588e9] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[4bcde0a0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-64:
@@ -1959,7 +1959,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-64/yaml-0.2.5-h4132b18_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-64/zstd-1.5.7-h3eecb57_6.conda
       - conda_source: pixi-browse[9f5af371] @ .
-      - conda_source: py-rattler[ff8afbe6] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[efe4cdeb] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       osx-arm64:
@@ -2123,7 +2123,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h925e9cb_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda_source: pixi-browse[2ab0674f] @ .
-      - conda_source: py-rattler[5ef4c3b0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[359d99d4] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
       win-64:
@@ -2265,7 +2265,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zlib-1.3.2-hfd05255_2.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda_source: pixi-browse[e316aef4] @ .
-      - conda_source: py-rattler[26c12d81] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+      - conda_source: py-rattler[1be84369] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
       - pypi: https://files.pythonhosted.org/packages/1c/30/c31d800f8d40d663fc84d83548b26aecf613c9c39bd6985c813d623d7b84/pytest_textual_snapshot-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ed/c7/8cd6b5fa8cc4a5c025d3d36a014dff44436fda8b3003a471253931c77f1b/syrupy-4.8.0-py3-none-any.whl
 packages:
@@ -14689,7 +14689,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/trove-classifiers-2026.6.1.19-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-- conda_source: py-rattler[26c12d81] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+- conda_source: py-rattler[1be84369] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
   version: 0.25.0
   build: he01afda_0
   subdir: win-64
@@ -14735,7 +14735,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
   - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
   - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-- conda_source: py-rattler[5ef4c3b0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+- conda_source: py-rattler[359d99d4] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
   version: 0.25.0
   build: hea27dcd_0
   subdir: osx-arm64
@@ -14809,7 +14809,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/readline-8.3-h8b90a29_1.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-hbeba79b_4.conda
   - conda: https://conda.anaconda.org/conda-forge/osx-arm64/uv-0.12.8-h0e72303_0.conda
-- conda_source: py-rattler[718588e9] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+- conda_source: py-rattler[4bcde0a0] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
   version: 0.25.0
   build: ha35fb5c_0
   subdir: linux-64
@@ -14879,7 +14879,7 @@ packages:
   - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.10-8_cp310.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
   - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
-- conda_source: py-rattler[ff8afbe6] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#e15836fcf244d80fc774fc79fceda3bfb748b380
+- conda_source: py-rattler[efe4cdeb] @ git+https://github.com/conda/rattler?subdirectory=py-rattler&branch=main#22265303ea680f66b4ea66bd41cbb53d6c74f53c
   version: 0.25.0
   build: h4778241_0
   subdir: osx-64

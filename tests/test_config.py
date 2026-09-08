@@ -135,7 +135,7 @@ disable-bzip2 = true
     )
 
 
-def test_whoneeds_disables_shards_even_with_channel_override(
+def test_whoneeds_scans_full_repodata_with_shards_enabled(
     tmp_path: Path,
     recording_channel_server: tuple[str, list[str]],
     snapshot: SnapshotAssertion,
@@ -153,9 +153,7 @@ disable-bzip2 = true
 disable-sharded = false
 ''')
     original = config.to_toml()
-    gateway = create_gateway(
-        config=config, sharded_enabled=False, cache_dir=tmp_path / "cache"
-    )
+    gateway = create_gateway(config=config, cache_dir=tmp_path / "cache")
     assert config.to_toml() == original
 
     async def run() -> list[str]:

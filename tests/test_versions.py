@@ -1968,10 +1968,10 @@ def test_clicking_dependency_tab_does_not_activate_section_click_handler() -> No
     assert event.stopped is True
 
 
-def test_whoneeds_gateway_tracks_and_releases_the_scanned_channel() -> None:
+def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
     app = CondaMetadataTui(default_channels=["conda-forge"])
     gateway = _RecordingGateway()
-    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._gateway = cast(Gateway, gateway)
     app._platforms = [Platform("noarch")]
 
     app._channel_names = ["conda-forge", "bioconda"]
