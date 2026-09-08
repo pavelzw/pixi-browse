@@ -68,6 +68,9 @@ pixi-browse
 # Browse a different channel
 pixi-browse -c https://prefix.dev/conda-forge
 
+# Browse several channels at once
+pixi-browse -c conda-forge -c bioconda
+
 # Restrict to specific platforms
 pixi-browse -p linux-64 -p osx-arm64
 
@@ -83,13 +86,13 @@ pixi-browse --version
 
 ### CLI Options
 
-| Option              | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `-c`, `--channel`   | Channel to load at startup (default: `conda-forge`) |
-| `-p`, `--platform`  | Platforms to include (repeat for multiple)          |
-| `-m`, `--matchspec` | MatchSpec query to apply at startup                 |
-| `--version`         | Show version and exit                               |
-| `--help`            | Show help and exit                                  |
+| Option              | Description                                                               |
+| ------------------- | ------------------------------------------------------------------------- |
+| `-c`, `--channel`   | Channels to load at startup (repeat for multiple; default: `conda-forge`) |
+| `-p`, `--platform`  | Platforms to include (repeat for multiple)                                |
+| `-m`, `--matchspec` | MatchSpec query to apply at startup                                       |
+| `--version`         | Show version and exit                                                     |
+| `--help`            | Show help and exit                                                        |
 
 ## Keybindings
 
@@ -111,12 +114,25 @@ pixi-browse --version
 | `?`        | Show help                                     |
 | `/` or `f` | Start package filter                          |
 | `p`        | Open platform selector                        |
-| `c`        | Edit channel                                  |
+| `c`        | Select channels                               |
 | `C`        | Compare selected artifact (in versions view)  |
 | `m`        | Query packages with a MatchSpec               |
 | `w`        | Query packages that need a package            |
 | `d`        | Download selected artifact (in versions view) |
 | `q`        | Quit                                          |
+
+### Channel selector
+
+`c` opens a dialog with the channels being browsed. The package list and the
+MatchSpec and who-needs queries run against all of them.
+
+| Control              | Action                                               |
+| -------------------- | ---------------------------------------------------- |
+| Text field           | Type a channel name or URL, `Enter` adds it          |
+| `✕` button           | Remove that channel (the last one cannot be removed) |
+| `Apply` button       | Load the listed channels                             |
+| `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
+| `Esc`                | Cancel                                               |
 
 ## Development
 

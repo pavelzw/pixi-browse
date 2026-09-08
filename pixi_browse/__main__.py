@@ -7,6 +7,7 @@ from rattler.platform import Platform
 
 from pixi_browse import __version__
 from pixi_browse.models import VersionEntry, VersionRow
+from pixi_browse.repodata import DEFAULT_CHANNEL, normalize_channel_names
 from pixi_browse.tui import CondaMetadataTui
 
 __all__ = [
@@ -34,11 +35,11 @@ cli = typer.Typer(
 
 @cli.callback(invoke_without_command=True)
 def run(
-    channel: str = typer.Option(
-        "conda-forge",
+    channel: list[str] = typer.Option(
+        [DEFAULT_CHANNEL],
         "--channel",
         "-c",
-        help="Default channel loaded at startup.",
+        help="Channels loaded at startup. Repeat the flag to pass multiple channels.",
     ),
     platform: list[str] | None = typer.Option(
         None,
@@ -60,19 +61,24 @@ def run(
         help="Show version and exit.",
     ),
 ) -> None:
-    build_app(channel=channel, platforms=platform, matchspec=matchspec).run()
+    build_app(channels=channel, platforms=platform, matchspec=matchspec).run()
 
 
 def build_app(
     *,
-    channel: str,
+    channels: list[str],
     platforms: list[str] | None,
     matchspec: str | None,
 ) -> CondaMetadataTui:
     """Validate the command line options and build the (not yet running) app.
 
-    Exits with status 1 on an unknown platform or an invalid MatchSpec.
+    Exits with status 1 on an unknown platform, an invalid MatchSpec, or when
+    no channel is left after dropping blank and repeated ones.
     """
+    channel_names = normalize_channel_names(channels)
+    if not channel_names:
+        typer.echo("At least one channel is required.", err=True)
+        raise typer.Exit(code=1)
     requested_platforms: list[Platform] | None = None
     requested_matchspec: MatchSpec | None = None
     if platforms is not None:
@@ -91,7 +97,7 @@ def build_app(
             raise typer.Exit(code=1) from exc
 
     return CondaMetadataTui(
-        default_channel=channel,
+        default_channels=channel_names,
         default_platforms=requested_platforms,
         default_matchspec=requested_matchspec,
     )

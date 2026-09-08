@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -18,6 +18,11 @@ from rattler.repo_data import (
 )
 
 from pixi_browse.platform_utils import platform_sort_key
+
+# The channel the app browses when none is given.
+DEFAULT_CHANNEL = "conda-forge"
+# The one subdir every conda channel must serve.
+NOARCH_PLATFORM = Platform("noarch")
 
 
 @dataclass(frozen=True)
@@ -55,19 +60,43 @@ def create_gateway(
     )
 
 
+def normalize_channel_names(channel_names: Iterable[str]) -> list[str]:
+    """Clean up a channel selection: strip, drop blanks and repeats, keep order."""
+    normalized: list[str] = []
+    for channel_name in channel_names:
+        cleaned = channel_name.strip()
+        if cleaned and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized
+
+
+def channels_label(channel_names: Sequence[str]) -> str:
+    """Render an ordered channel selection for status lines and titles."""
+    return ", ".join(channel_names)
+
+
 async def discover_available_platforms(
     *,
     gateway: Gateway,
-    channel_name: str,
+    channel_names: Sequence[str],
     max_parallel: int = 12,
 ) -> list[Platform]:
+    """Probe which platforms at least one of the channels serves repodata for.
+
+    Every conda channel has to serve a ``noarch`` subdir, and rattler enforces
+    that: a missing ``noarch`` is an error, while any other missing subdir is
+    simply empty. A channel whose ``noarch`` cannot be fetched (a typo, a
+    private channel without access) therefore cannot be browsed at all, and
+    its ``GatewayError`` is raised instead of quietly browsing the other
+    channels without it. Errors on the other subdirs only drop that platform.
+    """
     candidates = sorted(
         Platform.all(),
         key=platform_sort_key,
     )
     semaphore = asyncio.Semaphore(max_parallel)
 
-    async def probe(platform: Platform) -> Platform | None:
+    async def probe(channel_name: str, platform: Platform) -> Platform | None:
         async with semaphore:
             try:
                 names = await gateway.names(
@@ -75,13 +104,21 @@ async def discover_available_platforms(
                     platforms=[platform],
                 )
             except GatewayError:
+                if platform == NOARCH_PLATFORM:
+                    raise
                 return None
 
         return platform if names else None
 
-    discovered = await asyncio.gather(*(probe(platform) for platform in candidates))
+    discovered = await asyncio.gather(
+        *(
+            probe(channel_name, platform)
+            for channel_name in channel_names
+            for platform in candidates
+        )
+    )
     return sorted(
-        (platform for platform in discovered if platform is not None),
+        {platform for platform in discovered if platform is not None},
         key=platform_sort_key,
     )
 
@@ -89,7 +126,7 @@ async def discover_available_platforms(
 async def fetch_package_names(
     *,
     gateway: Gateway,
-    channel_name: str,
+    channel_names: Sequence[str],
     selected_platforms: Iterable[Platform],
 ) -> tuple[list[Platform], list[str]]:
     platforms = sorted(
@@ -97,7 +134,7 @@ async def fetch_package_names(
         key=platform_sort_key,
     )
     names = await gateway.names(
-        sources=[channel_name],
+        sources=list(channel_names),
         platforms=platforms,
     )
     return platforms, sorted({name.normalized for name in names})
@@ -126,12 +163,12 @@ def record_identity_key(
 async def query_package_records(
     *,
     gateway: Gateway,
-    channel_name: str,
+    channel_names: Sequence[str],
     platforms: list[Platform],
     package_name: str,
 ) -> list[RepoDataRecord]:
     by_source = await gateway.query(
-        sources=[channel_name],
+        sources=list(channel_names),
         platforms=platforms,
         specs=[package_name],
         recursive=False,
@@ -145,12 +182,12 @@ async def query_package_records(
 async def query_matchspec_records(
     *,
     gateway: Gateway,
-    channel_name: str,
+    channel_names: Sequence[str],
     platforms: list[Platform],
     matchspec: MatchSpec,
 ) -> MatchSpecQueryResult:
     by_source = await gateway.query(
-        sources=[channel_name],
+        sources=list(channel_names),
         platforms=platforms,
         specs=[matchspec],
         recursive=False,
@@ -174,12 +211,12 @@ async def query_matchspec_records(
 async def query_whoneeds_records(
     *,
     gateway: Gateway,
-    channel_name: str,
+    channel_names: Sequence[str],
     platforms: list[Platform],
     target: str | PackageRecord,
     log: Callable[[str], None],
 ) -> WhoNeedsQueryResult:
-    """Return all channel records that depend on ``target``.
+    """Return all records of the channels that depend on ``target``.
 
     The gateway performs the full repodata scan in Rust and only returns
     matching records to Python. Callers should pass a gateway configured with
@@ -190,13 +227,13 @@ async def query_whoneeds_records(
     platforms_label = ",".join(str(platform) for platform in platforms)
     log(
         "who-needs: starting gateway reverse query "
-        f"target={target_label!r} channel={channel_name!r} "
+        f"target={target_label!r} channels={channels_label(channel_names)!r} "
         f"platforms={platforms_label!r}"
     )
 
     query_started = perf_counter()
     dependents = await gateway.who_needs(
-        sources=[channel_name],
+        sources=list(channel_names),
         platforms=platforms,
         target=target,
     )

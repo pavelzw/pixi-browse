@@ -5,10 +5,9 @@ from __future__ import annotations
 
 from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
-from textual.events import Paste
 from textual.pilot import Pilot
 
-from pixi_browse.tui import MatchSpecScreen
+from pixi_browse.tui import ChannelScreen, MatchSpecScreen
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
@@ -39,12 +38,33 @@ async def run_whoneeds_query(pilot: Pilot[None], query: str) -> None:
     await wait_for_idle(pilot)
 
 
-async def switch_channel(pilot: Pilot[None], channel_name: str) -> None:
+async def open_channel_screen(pilot: Pilot[None]) -> None:
     await pilot.press("c")
-    await pilot.press(*(["backspace"] * len(MAIN_CHANNEL)))
+    await wait_for_screen(pilot, ChannelScreen)
+
+
+async def add_channel(pilot: Pilot[None], channel_name: str) -> None:
+    """Type ``channel_name`` into the field of the open channel dialog and
+    add it with ``Enter``."""
     await type_text(pilot, channel_name)
     await pilot.press("enter")
+    await pilot.pause()
+
+
+async def apply_channels(pilot: Pilot[None]) -> None:
+    """Press the ``Apply`` button of the open channel dialog and wait for the
+    channels to load."""
+    await pilot.click("#channel-apply")
     await wait_for_idle(pilot)
+
+
+async def switch_channel(pilot: Pilot[None], channel_name: str) -> None:
+    """Replace the single startup channel with ``channel_name``."""
+    await open_channel_screen(pilot)
+    await add_channel(pilot, channel_name)
+    await pilot.click("#channel-remove-0")
+    await pilot.pause()
+    await apply_channels(pilot)
 
 
 # --- package search -----------------------------------------------------------
@@ -549,62 +569,240 @@ def test_platform_change_reapplies_whoneeds_query(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-# --- channel ------------------------------------------------------------------
+# --- channels -----------------------------------------------------------------
 
 
-def test_channel_edit_mode_types_shortcut_keys_into_draft(
+def test_channel_screen_lists_selected_channels(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """While editing the channel, shortcut keys are typed into the draft and
-    ``Backspace`` edits it."""
+    """``c`` opens the channel dialog: the channels in the order they were
+    added, each with a remove button, the field to add one, and ``Apply``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("c", "slash", "p", "c", "C", "q", "space", "x", "backspace")
+        await open_channel_screen(pilot)
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_field_takes_input(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """The field has focus when the dialog opens; shortcut keys are typed
+    into it rather than triggered."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await type_text(pilot, "https://prefix.dev/conda-forge")
         await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-def test_channel_edit_escape_discards_draft(
+def test_channel_screen_adds_channel_at_the_end(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Escape`` discards the channel draft; reopening starts from the current
+    """``Enter`` in the field appends the channel and clears the field;
+    nothing is loaded until ``Apply``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_channel_screen_rejects_duplicate_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Adding a channel that is already selected is refused and the typed
+    name stays in the field."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, MAIN_CHANNEL)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_channel_screen_rejects_empty_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Submitting a blank field is refused."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, "  ")
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_channel_screen_keeps_last_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """The remove button of the only remaining channel is disabled; clicking
+    it changes nothing."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.click("#channel-remove-0")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_channel_screen_removes_clicked_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Clicking a channel's remove button takes it out of the list and
+    returns the focus to the field."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.click("#channel-remove-1")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_escape_discards_edits(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` closes the dialog without applying; reopening it shows the
+    channels that are actually loaded."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_channel_screen_up_focuses_remove_buttons(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Up`` from the field focuses the ``✕`` button of the last channel,
+    which is highlighted."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.press("up")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_enter_on_focused_remove_button(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Up`` twice reaches the first channel's ``✕``; ``Enter`` removes it
+    and the focus returns to the field. ``Up`` stops at the top."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.press("up", "up", "up", "enter")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_down_reaches_apply(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Down`` from the field focuses ``Apply``; ``Enter`` loads the added
     channel."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("c", "x", "escape", "c")
-        await pilot.pause()
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.press("down", "enter")
+        await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-def test_channel_edit_paste_strips_line_breaks(
+def test_channel_screen_apply_via_keyboard(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Pasting into the channel draft drops carriage returns and newlines."""
+    """``Tab`` moves from the field to ``Apply``, and ``Enter`` there loads
+    the channels."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("c")
-        await pilot.pause()
-        pilot.app.post_message(Paste("/label/dev\r\n"))
-        await pilot.pause()
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.press("tab", "enter")
+        await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-def test_empty_channel_is_rejected(
+def test_confirming_unchanged_channels_keeps_the_view(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Submitting an empty channel name is refused with a warning and stays in
-    edit mode."""
+    """``Apply`` without edits does not reload anything."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await open_channel_screen(pilot)
+        await apply_channels(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_startup_channels_list_packages_of_every_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Started with ``-c conda-forge -c bioconda`` the package list merges
+    both channels."""
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=wait_for_idle,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_adding_channel_lists_packages_of_both_channels(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Adding ``bioconda`` next to ``conda-forge`` loads the packages of both
+    channels."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("c", *(["backspace"] * len(MAIN_CHANNEL)), "enter")
-        await pilot.pause()
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await apply_channels(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -612,8 +810,8 @@ def test_empty_channel_is_rejected(
 def test_switching_channel_lists_its_packages(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Typing ``bioconda`` loads that channel's packages and previews the
-    first one."""
+    """Replacing ``conda-forge`` with ``bioconda`` loads that channel's
+    packages and previews the first one."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -647,3 +845,52 @@ def test_switching_to_unreachable_channel_restores_previous_view(
         await switch_channel(pilot, MISSING_CHANNEL)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_adding_unreachable_channel_restores_previous_view(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """An unreachable channel is refused even next to a working one, so a
+    typo does not silently browse the other channels; the toast names it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, MISSING_CHANNEL)
+        await apply_channels(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_matchspec_query_spans_all_channels(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``p*`` matches ``pixi-browse`` and ``polars`` from conda-forge and
+    ``pyfaidx`` from bioconda."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "p*")
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_whoneeds_query_spans_all_channels(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``pyfaidx`` (bioconda) depends on ``six`` (conda-forge); the reverse
+    query crosses the channel boundary and opens the single match."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "six")
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
