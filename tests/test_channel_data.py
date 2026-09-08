@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -363,14 +364,13 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
     assert first.dependencies == ("python >=3.9",)
 
 
-def test_app_shares_the_client_with_its_version_loader(rattler_client: Client) -> None:
-    app = CondaMetadataTui(default_channels=["conda-forge"], client=rattler_client)
+def test_app_shares_the_client_with_its_version_loader(rattler_config: Config) -> None:
+    app = CondaMetadataTui(default_channels=["conda-forge"], config=rattler_config)
 
-    assert app._client is rattler_client
-    assert app._version_loader._client is rattler_client
+    assert app._version_loader._client is app._client
 
 
-def test_app_creates_a_default_client_when_none_is_given() -> None:
+def test_app_creates_a_default_client_without_config() -> None:
     app = CondaMetadataTui(default_channels=["conda-forge"])
 
     assert isinstance(app._client, Client)

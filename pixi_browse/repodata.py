@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -14,7 +15,6 @@ from rattler.repo_data import (
     Gateway,
     PackageRecord,
     RepoDataRecord,
-    SourceConfig,
 )
 
 from pixi_browse.platform_utils import platform_sort_key
@@ -46,11 +46,13 @@ def whoneeds_target_label(target: str | PackageRecord) -> str:
 def create_gateway(
     *,
     client: Client | None = None,
+    config: Config | None = None,
     cache_dir: Path | None = None,
 ) -> Gateway:
-    return Gateway(
+    config = config if config is not None else Config()
+    return Gateway.from_config(
+        config,
         cache_dir=cache_dir,
-        default_config=SourceConfig(cache_action="cache-or-fetch"),
         client=client,
         show_progress=False,
     )

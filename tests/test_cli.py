@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 import pytest
 from rattler.match_spec import MatchSpec
@@ -25,6 +26,7 @@ def test_help_includes_expected_options() -> None:
     assert "--channel" in output
     assert "--matchspec" in output
     assert "--platform" in output
+    assert "--config" in output
     assert "--version" in output
 
 
@@ -63,14 +65,15 @@ def test_build_app_keeps_channel_order_and_drops_repeats() -> None:
     assert app._channel_names == ["bioconda", "conda-forge"]
 
 
-def test_cli_defaults_the_channel_option_to_conda_forge() -> None:
+def test_cli_documents_configured_channel_defaults() -> None:
     runner = CliRunner()
 
     result = runner.invoke(entrypoint.cli, ["--help"])
     output = strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert re.search(r"default:\s+conda-forge", output)
+    assert "configured channels" in output
+    assert "conda-forge" in output
 
 
 def test_cli_exits_without_any_channel() -> None:
@@ -119,3 +122,50 @@ def test_cli_exits_for_invalid_matchspec() -> None:
 
     assert result.exit_code == 1
     assert result.output.strip()
+
+
+@pytest.mark.parametrize(
+    "contents", [None, "default-channels = [", "default-channels = 42"]
+)
+def test_cli_exits_for_invalid_config(tmp_path: Path, contents: str | None) -> None:
+    path = tmp_path / "config.toml"
+    if contents is not None:
+        path.write_text(contents)
+
+    result = CliRunner().invoke(entrypoint.cli, ["--config", str(path)])
+
+    assert result.exit_code == 1
+    assert "Failed to load configuration:" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("contents", "channels", "expected"),
+    [
+        ("", None, ["conda-forge"]),
+        (
+            'default-channels = ["bioconda", "conda-forge"]',
+            None,
+            ["bioconda", "conda-forge"],
+        ),
+        ('default-channels = ["bioconda"]', ["conda-forge"], ["conda-forge"]),
+        ('default-channels = ["bioconda", " bioconda ", ""]', None, ["bioconda"]),
+    ],
+)
+def test_config_channel_precedence(
+    tmp_path: Path, contents: str, channels: list[str] | None, expected: list[str]
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(contents)
+    app = entrypoint.build_app(
+        channels=channels, platforms=None, matchspec=None, config_path=path
+    )
+    assert app._channel_names == expected
+
+
+def test_cli_rejects_empty_configured_channels(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("default-channels = []")
+    result = CliRunner().invoke(entrypoint.cli, ["--config", str(path)])
+    assert result.exit_code == 1
+    assert "At least one channel is required." in result.output

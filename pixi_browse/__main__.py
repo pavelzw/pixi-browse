@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
-from rattler.exceptions import InvalidMatchSpecError, ParsePlatformError
+from rattler.config import Config
+from rattler.exceptions import ConfigError, InvalidMatchSpecError, ParsePlatformError
 from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 
@@ -35,11 +38,16 @@ cli = typer.Typer(
 
 @cli.callback(invoke_without_command=True)
 def run(
-    channel: list[str] = typer.Option(
-        [DEFAULT_CHANNEL],
+    channel: list[str] | None = typer.Option(
+        None,
         "--channel",
         "-c",
-        help="Channels loaded at startup. Repeat the flag to pass multiple channels.",
+        help="Startup channels (repeat for multiple). Defaults to configured channels or conda-forge.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        help="Read this config file instead of the default Pixi and rattler locations.",
     ),
     platform: list[str] | None = typer.Option(
         None,
@@ -61,20 +69,37 @@ def run(
         help="Show version and exit.",
     ),
 ) -> None:
-    build_app(channels=channel, platforms=platform, matchspec=matchspec).run()
+    build_app(
+        channels=channel, platforms=platform, matchspec=matchspec, config_path=config
+    ).run()
 
 
 def build_app(
     *,
-    channels: list[str],
+    channels: list[str] | None,
     platforms: list[str] | None,
     matchspec: str | None,
+    config_path: Path | None = None,
+    cache_dir: Path | None = None,
 ) -> CondaMetadataTui:
     """Validate the command line options and build the (not yet running) app.
 
     Exits with status 1 on an unknown platform, an invalid MatchSpec, or when
     no channel is left after dropping blank and repeated ones.
     """
+    try:
+        config = (
+            Config.load_from_files([config_path])
+            if config_path is not None
+            else Config.load_from_default_locations("pixi")
+        )
+    except ConfigError as exc:
+        typer.echo(f"Failed to load configuration: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    if channels is None:
+        channels = config.default_channels
+        if channels is None:
+            channels = [DEFAULT_CHANNEL]
     channel_names = normalize_channel_names(channels)
     if not channel_names:
         typer.echo("At least one channel is required.", err=True)
@@ -100,6 +125,8 @@ def build_app(
         default_channels=channel_names,
         default_platforms=requested_platforms,
         default_matchspec=requested_matchspec,
+        config=config,
+        cache_dir=cache_dir,
     )
 
 
