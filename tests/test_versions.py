@@ -234,7 +234,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
     async def _query(target: str | PackageRecord) -> WhoNeedsQueryResult:
         return await query_whoneeds_records(
             gateway=cast(Gateway, _FakeGateway()),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=[Platform("linux-64"), Platform("noarch")],
             target=target,
             log=lambda _message: None,
@@ -1969,21 +1969,22 @@ def test_whoneeds_gateway_tracks_and_releases_the_scanned_channel() -> None:
     app._whoneeds_gateway = cast(Gateway, gateway)
     app._platforms = [Platform("noarch")]
 
+    app._channel_names = ["conda-forge", "bioconda"]
     asyncio.run(app._query_whoneeds_records("python"))
 
-    app._channel_name = "robostack"
+    app._channel_names = ["robostack"]
     app._release_whoneeds_repodata()
 
     assert gateway.queries == [
-        (["conda-forge"], [Platform("noarch")], "python"),
+        (["conda-forge", "bioconda"], [Platform("noarch")], "python"),
     ]
-    assert gateway.cleared == ["conda-forge"]
-    assert app._whoneeds_scanned_channel is None
+    assert gateway.cleared == ["conda-forge", "bioconda"]
+    assert app._whoneeds_scanned_channels is None
 
     # Nothing is cached anymore, so releasing again must not touch the gateway.
     app._release_whoneeds_repodata()
 
-    assert gateway.cleared == ["conda-forge"]
+    assert gateway.cleared == ["conda-forge", "bioconda"]
 
 
 def test_footer_text_matches_redesigned_shortcuts() -> None:
@@ -2056,14 +2057,6 @@ def test_footer_text_shows_live_search_query_in_filter_mode() -> None:
     app._search_query = "polars"
 
     assert app._footer_text() == "Search: polars_"
-
-
-def test_footer_text_shows_live_channel_draft_in_channel_edit_mode() -> None:
-    app = CondaMetadataTui()
-    app._channel_edit_mode = True
-    app._channel_draft = "prefix.dev/conda-forge"
-
-    assert app._footer_text() == "Channel: prefix.dev/conda-forge_"
 
 
 def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:

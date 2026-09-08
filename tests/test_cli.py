@@ -39,12 +39,12 @@ def test_version_flag_prints_version_and_exits() -> None:
 
 def test_build_app_passes_channel_and_platforms() -> None:
     app = entrypoint.build_app(
-        channel="prefix.dev/conda-forge",
+        channels=["prefix.dev/conda-forge"],
         platforms=["linux-64", "noarch", "osx-arm64"],
         matchspec=None,
     )
 
-    assert app._channel_name == "prefix.dev/conda-forge"
+    assert app._channel_names == ["prefix.dev/conda-forge"]
     assert app._selected_platform_names == {
         Platform("linux-64"),
         Platform("noarch"),
@@ -53,12 +53,28 @@ def test_build_app_passes_channel_and_platforms() -> None:
     assert app._startup_matchspec is None
 
 
-def test_build_app_passes_matchspec() -> None:
+def test_build_app_keeps_channel_order_and_drops_repeats() -> None:
     app = entrypoint.build_app(
-        channel="conda-forge", platforms=None, matchspec=" numpy >=2 "
+        channels=["bioconda", " conda-forge ", "bioconda", ""],
+        platforms=None,
+        matchspec=None,
     )
 
-    assert app._channel_name == "conda-forge"
+    assert app._channel_names == ["bioconda", "conda-forge"]
+
+
+def test_build_app_defaults_to_conda_forge_without_channels() -> None:
+    app = entrypoint.build_app(channels=None, platforms=None, matchspec=None)
+
+    assert app._channel_names == ["conda-forge"]
+
+
+def test_build_app_passes_matchspec() -> None:
+    app = entrypoint.build_app(
+        channels=["conda-forge"], platforms=None, matchspec=" numpy >=2 "
+    )
+
+    assert app._channel_names == ["conda-forge"]
     assert app._selected_platform_names == set()
     assert isinstance(app._startup_matchspec, MatchSpec)
     assert str(app._startup_matchspec) == "numpy >=2"
@@ -67,7 +83,7 @@ def test_build_app_passes_matchspec() -> None:
 @pytest.mark.parametrize("matchspec", [None, "", "   "])
 def test_build_app_ignores_blank_matchspec(matchspec: str | None) -> None:
     app = entrypoint.build_app(
-        channel="conda-forge", platforms=None, matchspec=matchspec
+        channels=["conda-forge"], platforms=None, matchspec=matchspec
     )
 
     assert app._startup_matchspec is None

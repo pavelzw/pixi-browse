@@ -128,12 +128,12 @@ def make_app(rattler_client: Client, rattler_cache_dir: Path) -> AppFactory:
 
     def factory(
         *,
-        default_channel: str = MAIN_CHANNEL,
+        default_channels: Iterable[str] = (MAIN_CHANNEL,),
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
     ) -> CondaMetadataTui:
         return CondaMetadataTui(
-            default_channel=default_channel,
+            default_channels=default_channels,
             default_platforms=default_platforms,
             default_matchspec=default_matchspec,
             client=rattler_client,

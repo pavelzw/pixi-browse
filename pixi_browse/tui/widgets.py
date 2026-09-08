@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import monotonic
 from typing import Literal, cast
@@ -1909,6 +1909,228 @@ class SidebarPanel(Vertical):
         event.stop()
 
 
+class ChannelScreen(ModalScreen[list[str] | None]):
+    """Edit the ordered list of channels the app browses.
+
+    The list is the selection as it will be applied: ``n`` adds a channel,
+    ``Backspace`` removes the highlighted one, ``Ctrl+j``/``Ctrl+k`` move it
+    down or up. Nothing is loaded until ``Enter`` confirms; ``Escape`` drops
+    every edit. At least one channel always stays, so the app never ends up
+    without anything to show.
+    """
+
+    DEFAULT_CSS = """
+    ChannelScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #channel-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #channel-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #channel-list {
+        border: none;
+        background: $background;
+        height: auto;
+        max-height: 12;
+        padding: 0 0 0 1;
+    }
+
+    #channel-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #channel-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+
+    #channel-input {
+        border: tall #ec4899;
+        margin-top: 1;
+    }
+
+    #channel-input:focus {
+        border: tall #ec4899;
+    }
+
+    #channel-input > .input--selection {
+        background: #ec4899;
+        color: #ffffff;
+    }
+
+    #channel-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #channel-error {
+        color: $error;
+        min-height: 1;
+        margin-top: 1;
+    }
+    """
+
+    LIST_HELP = (
+        "Move: j / k | Reorder: Ctrl+j / Ctrl+k | Add: n\n"
+        "Remove: Backspace | Apply: Enter | Cancel: Esc"
+    )
+    INPUT_HELP = "Type a channel name or URL. Add: Enter | Back to the list: Esc"
+
+    def __init__(self, channel_names: Sequence[str]) -> None:
+        super().__init__()
+        self._channel_names = list(channel_names)
+
+    @property
+    def channel_names(self) -> list[str]:
+        """The selection as currently edited, in priority order."""
+        return list(self._channel_names)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="channel-dialog"):
+            yield Static("Channels", id="channel-title")
+            yield OptionList(*self._channel_names, id="channel-list", markup=False)
+            yield Input(placeholder="bioconda", id="channel-input")
+            yield Static(self.LIST_HELP, id="channel-help")
+            yield Static("", id="channel-error")
+
+    def on_mount(self) -> None:
+        channel_input = self.query_one("#channel-input", Input)
+        channel_input.display = False
+        channel_list = self.query_one("#channel-list", OptionList)
+        channel_list.highlighted = 0
+        channel_list.focus()
+
+    # -- state -----------------------------------------------------------------
+
+    def _is_adding(self) -> bool:
+        return self.query_one("#channel-input", Input).display
+
+    def _highlighted_index(self) -> int | None:
+        return self.query_one("#channel-list", OptionList).highlighted
+
+    def _render_channels(self, *, highlight: int) -> None:
+        channel_list = self.query_one("#channel-list", OptionList)
+        channel_list.clear_options()
+        channel_list.add_options(self._channel_names)
+        channel_list.highlighted = max(0, min(highlight, len(self._channel_names) - 1))
+
+    def _show_error(self, message: str) -> None:
+        self.query_one("#channel-error", Static).update(Text(message))
+
+    def _show_help(self, message: str) -> None:
+        self.query_one("#channel-help", Static).update(Text(message))
+
+    # -- editing ---------------------------------------------------------------
+
+    def _move_highlight(self, offset: int) -> None:
+        index = self._highlighted_index()
+        if index is None:
+            return
+        self._render_channels(highlight=index + offset)
+
+    def _move_channel(self, offset: int) -> None:
+        index = self._highlighted_index()
+        if index is None:
+            return
+        target = index + offset
+        if target < 0 or target >= len(self._channel_names):
+            return
+        names = self._channel_names
+        names[index], names[target] = names[target], names[index]
+        self._show_error("")
+        self._render_channels(highlight=target)
+
+    def _remove_highlighted_channel(self) -> None:
+        index = self._highlighted_index()
+        if index is None:
+            return
+        if len(self._channel_names) == 1:
+            self._show_error("At least one channel must remain.")
+            return
+        del self._channel_names[index]
+        self._show_error("")
+        self._render_channels(highlight=index)
+
+    def _start_adding(self) -> None:
+        channel_input = self.query_one("#channel-input", Input)
+        channel_input.value = ""
+        channel_input.display = True
+        self._show_error("")
+        self._show_help(self.INPUT_HELP)
+        channel_input.focus()
+
+    def _stop_adding(self) -> None:
+        channel_input = self.query_one("#channel-input", Input)
+        channel_input.display = False
+        self._show_help(self.LIST_HELP)
+        self.query_one("#channel-list", OptionList).focus()
+
+    def _add_channel(self, value: str) -> None:
+        channel_name = value.strip()
+        if not channel_name:
+            self._show_error("Channel cannot be empty.")
+            return
+        if channel_name in self._channel_names:
+            self._show_error(f"{channel_name} is already selected.")
+            return
+        self._channel_names.append(channel_name)
+        self._show_error("")
+        self._stop_adding()
+        self._render_channels(highlight=len(self._channel_names) - 1)
+
+    # -- events ----------------------------------------------------------------
+
+    def on_key(self, event: Key) -> None:
+        if self._is_adding():
+            # The input handles its own editing keys; only the way out is ours.
+            if event.key == "escape":
+                self._stop_adding()
+                event.stop()
+            return
+
+        if event.key in {"j", "down"}:
+            self._move_highlight(1)
+        elif event.key in {"k", "up"}:
+            self._move_highlight(-1)
+        elif event.key == "ctrl+j":
+            self._move_channel(1)
+        elif event.key == "ctrl+k":
+            self._move_channel(-1)
+        elif event.key == "n":
+            self._start_adding()
+        elif event.key == "backspace":
+            self._remove_highlighted_channel()
+        elif event.key in {"escape", "q"}:
+            self.dismiss(None)
+        else:
+            return
+        event.stop()
+
+    @on(Input.Submitted, "#channel-input")
+    def _submit_channel(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._add_channel(event.value)
+
+    @on(OptionList.OptionSelected, "#channel-list")
+    def _apply(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(list(self._channel_names))
+
+
 class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
     DEFAULT_CSS = """
     MatchSpecScreen {
@@ -2271,10 +2493,10 @@ class WhoNeedsLoadingScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(self, *, query: str, channel_name: str) -> None:
+    def __init__(self, *, query: str, channel_names: Sequence[str]) -> None:
         super().__init__()
         self._query = query
-        self._channel_name = channel_name
+        self._channel_names = list(channel_names)
         self._started = monotonic()
 
     def compose(self) -> ComposeResult:
@@ -2289,7 +2511,7 @@ class WhoNeedsLoadingScreen(ModalScreen[None]):
             yield LoadingIndicator(id="whoneeds-loading-indicator")
             yield Static("", id="whoneeds-loading-elapsed")
             yield Static(
-                f"Scanning the full {self._channel_name} repodata."
+                f"Scanning the full {', '.join(self._channel_names)} repodata."
                 " This can take a minute.",
                 id="whoneeds-loading-help",
             )
