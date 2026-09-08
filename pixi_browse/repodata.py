@@ -46,15 +46,11 @@ def whoneeds_target_label(target: str | PackageRecord) -> str:
 def create_gateway(
     *,
     client: Client | None = None,
-    sharded_enabled: bool = True,
     cache_dir: Path | None = None,
 ) -> Gateway:
     return Gateway(
         cache_dir=cache_dir,
-        default_config=SourceConfig(
-            sharded_enabled=sharded_enabled,
-            cache_action="cache-or-fetch",
-        ),
+        default_config=SourceConfig(cache_action="cache-or-fetch"),
         client=client,
         show_progress=False,
     )
@@ -219,9 +215,9 @@ async def query_whoneeds_records(
     """Return all records of the channels that depend on ``target``.
 
     The gateway performs the full repodata scan in Rust and only returns
-    matching records to Python. Callers should pass a gateway configured with
-    sharded repodata disabled: against sharded repodata the scan fetches one
-    shard per package name, while the full repodata is a single request.
+    matching records to Python. Rattler always scans the complete repodata
+    for this query, even on a gateway that otherwise browses sharded
+    repodata, so the same gateway serves both kinds of queries.
     """
     target_label = whoneeds_target_label(target)
     platforms_label = ",".join(str(platform) for platform in platforms)
