@@ -1009,14 +1009,19 @@ class CondaMetadataTui(App[None]):
     async def _package_url_for_version_entry(
         self, package_name: str, entry: VersionEntry
     ) -> str:
-        record = await self._get_record_for_version_entry(package_name, entry)
-        if record is not None:
-            return str(record.url)
+        """The download URL of ``entry`` from its repodata record.
 
-        channel_base = self._channel_names[0].rstrip("/")
-        if "://" not in channel_base:
-            channel_base = f"https://conda.anaconda.org/{channel_base}"
-        return f"{channel_base}/{entry.subdir}/{entry.file_name}"
+        The version rows are built from the very records searched here, so a
+        record is normally found. Without one the URL cannot be known: the
+        entry could come from any of the selected channels, so guessing a
+        channel would download the wrong file or nothing at all.
+        """
+        record = await self._get_record_for_version_entry(package_name, entry)
+        if record is None:
+            raise RuntimeError(
+                f"No repodata record found for {package_name} {entry.file_name}."
+            )
+        return str(record.url)
 
     @staticmethod
     def _file_destination_path(file_path: str) -> Path:
