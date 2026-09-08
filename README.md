@@ -62,8 +62,11 @@ package.
 ## Usage
 
 ```bash
-# Browse conda-forge across all platforms (default)
+# Browse configured default channels (conda-forge if unset) across all platforms
 pixi-browse
+
+# Read a specific config file
+pixi-browse --config ./config.toml
 
 # Browse a different channel
 pixi-browse -c https://prefix.dev/conda-forge
@@ -86,13 +89,42 @@ pixi-browse --version
 
 ### CLI Options
 
-| Option              | Description                                                               |
-| ------------------- | ------------------------------------------------------------------------- |
-| `-c`, `--channel`   | Channels to load at startup (repeat for multiple; default: `conda-forge`) |
-| `-p`, `--platform`  | Platforms to include (repeat for multiple)                                |
-| `-m`, `--matchspec` | MatchSpec query to apply at startup                                       |
-| `--version`         | Show version and exit                                                     |
-| `--help`            | Show help and exit                                                        |
+| Option              | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| `-c`, `--channel`   | Startup channels (repeat for multiple; overrides configured defaults) |
+| `--config`          | Config file to read instead of the default locations                  |
+| `-p`, `--platform`  | Platforms to include (repeat for multiple)                            |
+| `-m`, `--matchspec` | MatchSpec query to apply at startup                                   |
+| `--version`         | Show version and exit                                                 |
+| `--help`            | Show help and exit                                                    |
+
+### Configuration
+
+Without `--config`, pixi-browse loads Pixi's default configuration locations
+through rattler, including shared rattler configuration. These include system
+configuration, the platform's user configuration directory (and
+`XDG_CONFIG_HOME`), and `$PIXI_HOME/config.toml` or `~/.pixi/config.toml`.
+Later files override earlier ones; missing default files are skipped.
+`--config <path>` reads only that file and reports missing or invalid files.
+
+```toml
+default-channels = ["conda-forge", "bioconda"]
+
+[mirrors]
+"https://conda.anaconda.org/conda-forge" = ["https://prefix.dev/conda-forge"]
+
+[repodata-config]
+disable-sharded = true
+```
+
+The shared network client applies mirrors, S3 options, authentication, proxy,
+and TLS settings to repodata, package previews, and downloads. Repodata format
+settings (including per-channel overrides) and `concurrency.downloads` are
+applied to both gateways. Who-needs queries always disable sharded repodata
+because they scan the full channel.
+
+Explicit `-c` flags replace `default-channels`. If neither is set, pixi-browse
+uses `conda-forge`.
 
 ## Keybindings
 

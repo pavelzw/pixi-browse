@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -14,7 +16,6 @@ from rattler.repo_data import (
     Gateway,
     PackageRecord,
     RepoDataRecord,
-    SourceConfig,
 )
 
 from pixi_browse.platform_utils import platform_sort_key
@@ -46,15 +47,26 @@ def whoneeds_target_label(target: str | PackageRecord) -> str:
 def create_gateway(
     *,
     client: Client | None = None,
-    sharded_enabled: bool = True,
+    config: Config | None = None,
+    sharded_enabled: bool | None = None,
     cache_dir: Path | None = None,
 ) -> Gateway:
-    return Gateway(
+    config = config if config is not None else Config()
+    if sharded_enabled is not None:
+        # Keep the caller's configuration intact. Override every channel as
+        # well as the default so who-needs always scans unsharded repodata.
+        config = config.merge(Config())
+        disabled = json.dumps(not sharded_enabled)
+        config.set("repodata-config.disable-sharded", disabled)
+        repodata_config: dict[str, object] = config.repodata_config
+        for channel, options in repodata_config.items():
+            if isinstance(options, dict):
+                config.set(
+                    f"repodata-config.{json.dumps(channel)}.disable-sharded", disabled
+                )
+    return Gateway.from_config(
+        config,
         cache_dir=cache_dir,
-        default_config=SourceConfig(
-            sharded_enabled=sharded_enabled,
-            cache_action="cache-or-fetch",
-        ),
         client=client,
         show_progress=False,
     )

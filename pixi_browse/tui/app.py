@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Literal, cast
 
+from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -130,23 +131,28 @@ class CondaMetadataTui(App[None]):
         default_channels: Iterable[str],
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
+        config: Config | None = None,
         client: Client | None = None,
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__()
         selected_platforms = set(default_platforms or [])
         self.theme = "ansi-dark"
+        config = config if config is not None else Config()
         self._client = (
             client
             if client is not None
-            else Client.default_client(user_agent=f"pixi-browse/{__version__}")
+            else Client.from_config(config, user_agent=f"pixi-browse/{__version__}")
         )
 
         self._gateway: Gateway = create_gateway(
-            client=self._client, cache_dir=cache_dir
+            client=self._client, config=config, cache_dir=cache_dir
         )
         self._whoneeds_gateway: Gateway = create_gateway(
-            client=self._client, sharded_enabled=False, cache_dir=cache_dir
+            client=self._client,
+            config=config,
+            sharded_enabled=False,
+            cache_dir=cache_dir,
         )
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
@@ -227,11 +233,11 @@ class CondaMetadataTui(App[None]):
         Returns the error message when loading fails, ``None`` on success.
         """
         status = self.query_one("#status", Static)
-        status.update("Discovering available platforms via sharded gateway...")
+        status.update("Discovering available platforms...")
         try:
             await self._ensure_available_platforms()
             status.update(
-                f"Downloading repodata for {self._selected_platforms_text()} (sharded)..."
+                f"Downloading repodata for {self._selected_platforms_text()}..."
             )
             self._channel_package_names = await self._fetch_package_names_with_gateway()
         except (GatewayError, RuntimeError) as exc:
