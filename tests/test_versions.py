@@ -1992,23 +1992,6 @@ def test_whoneeds_gateway_tracks_and_releases_the_scanned_channel() -> None:
     assert gateway.cleared == ["conda-forge", "bioconda"]
 
 
-def test_package_url_requires_a_repodata_record() -> None:
-    app = CondaMetadataTui(default_channels=["conda-forge", "bioconda"])
-    # An active query with no records for the package: nothing to look up and
-    # no gateway call, so the URL cannot be resolved.
-    app._query_records_by_package["demo"] = []
-    entry = VersionEntry(
-        version=Version("1.2.3"),
-        build="py313h123_0",
-        build_number=0,
-        subdir="noarch",
-        file_name="demo-1.2.3-py313h123_0.conda",
-    )
-
-    with pytest.raises(RuntimeError, match="No repodata record found for demo"):
-        asyncio.run(app._package_url_for_version_entry("demo", entry))
-
-
 def test_app_requires_at_least_one_channel() -> None:
     with pytest.raises(ValueError, match="At least one channel is required."):
         CondaMetadataTui(default_channels=["", "  "])

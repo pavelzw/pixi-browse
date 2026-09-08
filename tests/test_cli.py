@@ -39,12 +39,12 @@ def test_version_flag_prints_version_and_exits() -> None:
 
 def test_build_app_passes_channel_and_platforms() -> None:
     app = entrypoint.build_app(
-        channels=["prefix.dev/conda-forge"],
+        channels=["https://prefix.dev/conda-forge"],
         platforms=["linux-64", "noarch", "osx-arm64"],
         matchspec=None,
     )
 
-    assert app._channel_names == ["prefix.dev/conda-forge"]
+    assert app._channel_names == ["https://prefix.dev/conda-forge"]
     assert app._selected_platform_names == {
         Platform("linux-64"),
         Platform("noarch"),

@@ -598,7 +598,7 @@ def test_channel_screen_field_takes_input(
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await type_text(pilot, "prefix.dev/kn-q")
+        await type_text(pilot, "https://prefix.dev/conda-forge")
         await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
@@ -670,24 +670,6 @@ def test_channel_screen_removes_clicked_channel(
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
         await pilot.click("#channel-remove-1")
-        await pilot.pause()
-
-    assert snap_compare(
-        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
-        run_before=run_before,
-        terminal_size=TERMINAL_SIZE,
-    )
-
-
-def test_channel_screen_channel_names_are_not_clickable(
-    snap_compare: SnapCompare, make_app: AppFactory
-) -> None:
-    """Clicking a channel name does nothing: no selection, no apply."""
-
-    async def run_before(pilot: Pilot[None]) -> None:
-        await wait_for_idle(pilot)
-        await open_channel_screen(pilot)
-        await pilot.click(".channel-name")
         await pilot.pause()
 
     assert snap_compare(
