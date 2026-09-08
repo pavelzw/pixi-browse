@@ -20,6 +20,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
+from textual.widget import Widget
 from textual.widgets import Button, Input, LoadingIndicator, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -1937,6 +1938,9 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     adds the typed channel to the list on ``Enter``. Nothing is loaded until
     ``Apply`` is pressed, and ``Escape`` drops every edit. At least one channel
     always stays, so the app never ends up without anything to show.
+
+    ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
+    field, ``Apply``. ``Tab`` cycles the same widgets.
     """
 
     DEFAULT_CSS = """
@@ -1979,9 +1983,10 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         color: #ec4899;
     }
 
-    .channel-remove:focus, .channel-remove:hover {
-        background: #ec4899;
-        color: #ffffff;
+    /* Anchored to the id so these outrank the theme's Button:focus rules. */
+    #channel-rows .channel-remove:focus, #channel-rows .channel-remove:hover {
+        background: #ec4899 !important;
+        color: #ffffff !important;
         text-style: bold;
     }
 
@@ -2018,15 +2023,17 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     }
 
     #channel-apply {
+        border: none !important;
+        height: 3;
+        padding: 0 2;
+        content-align: center middle;
         background: #ec4899;
         color: #ffffff;
-        border-top: tall #f9a8d4;
-        border-bottom: tall #9d174d;
+        text-style: bold;
     }
 
     #channel-apply:focus, #channel-apply:hover {
         background: #f472b6;
-        text-style: bold;
     }
 
     #channel-help {
@@ -2039,7 +2046,7 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         Binding("escape", "dismiss", show=False),
     ]
 
-    HELP = "Enter adds the typed channel. Tab: Apply and the ✕ buttons | Esc: cancel"
+    HELP = "Enter adds the typed channel. Up/Down: move between fields | Esc: cancel"
 
     def __init__(self, channel_names: Sequence[str]) -> None:
         super().__init__()
@@ -2108,6 +2115,32 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         self.query_one("#channel-input", Input).focus()
 
     # -- events ----------------------------------------------------------------
+
+    def _focus_order(self) -> list[Widget]:
+        """The focusable widgets top to bottom, as ``Up``/``Down`` walk them."""
+        return [
+            *self.query(".channel-remove").results(Button),
+            self.query_one("#channel-input", Input),
+            self.query_one("#channel-apply", Button),
+        ]
+
+    def _focus_neighbour(self, offset: int) -> None:
+        order = [widget for widget in self._focus_order() if not widget.disabled]
+        focused = self.focused
+        if focused not in order:
+            return
+        target = order.index(focused) + offset
+        if 0 <= target < len(order):
+            order[target].focus()
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "up":
+            self._focus_neighbour(-1)
+        elif event.key == "down":
+            self._focus_neighbour(1)
+        else:
+            return
+        event.stop()
 
     @on(Input.Submitted, "#channel-input")
     async def _submit_channel(self, event: Input.Submitted) -> None:

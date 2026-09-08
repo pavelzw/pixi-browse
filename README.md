@@ -126,13 +126,13 @@ pixi-browse --version
 `c` opens a dialog with the channels being browsed. The package list and the
 MatchSpec and who-needs queries run against all of them.
 
-| Control             | Action                                               |
-| ------------------- | ---------------------------------------------------- |
-| Text field          | Type a channel name or URL, `Enter` adds it          |
-| `✕` button          | Remove that channel (the last one cannot be removed) |
-| `Apply` button      | Load the listed channels                             |
-| `Tab` / `Shift+Tab` | Move between the field and the buttons               |
-| `Esc`               | Cancel                                               |
+| Control              | Action                                               |
+| -------------------- | ---------------------------------------------------- |
+| Text field           | Type a channel name or URL, `Enter` adds it          |
+| `✕` button           | Remove that channel (the last one cannot be removed) |
+| `Apply` button       | Load the listed channels                             |
+| `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
+| `Esc`                | Cancel                                               |
 
 ## Development
 

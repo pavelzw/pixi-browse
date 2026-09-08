@@ -714,6 +714,60 @@ def test_channel_screen_escape_discards_edits(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_channel_screen_up_focuses_remove_buttons(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Up`` from the field focuses the ``✕`` button of the last channel,
+    which is highlighted."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.press("up")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_enter_on_focused_remove_button(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Up`` twice reaches the first channel's ``✕``; ``Enter`` removes it
+    and the focus returns to the field. ``Up`` stops at the top."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.press("up", "up", "up", "enter")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_down_reaches_apply(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Down`` from the field focuses ``Apply``; ``Enter`` loads the added
+    channel."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.press("down", "enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_channel_screen_apply_via_keyboard(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
