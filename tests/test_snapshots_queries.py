@@ -570,8 +570,8 @@ def test_platform_change_reapplies_whoneeds_query(
 def test_channel_screen_lists_selected_channels(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``c`` opens the channel popup listing the channels in priority order
-    with the first one highlighted."""
+    """``c`` opens the channel popup listing the channels in the order they
+    were added, with the first one highlighted."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -691,34 +691,16 @@ def test_channel_screen_removes_highlighted_channel(
     )
 
 
-def test_channel_screen_reorders_with_ctrl_j(
+def test_channel_screen_click_only_highlights(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Ctrl+j`` moves the highlighted channel one position down."""
+    """Clicking a channel moves the highlight but does not apply the list;
+    only ``Enter`` does."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await pilot.press("ctrl+j")
-        await pilot.pause()
-
-    assert snap_compare(
-        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
-        run_before=run_before,
-        terminal_size=TERMINAL_SIZE,
-    )
-
-
-def test_channel_screen_reorders_with_ctrl_k(
-    snap_compare: SnapCompare, make_app: AppFactory
-) -> None:
-    """``Ctrl+k`` moves the highlighted channel one position up and stops at
-    the top."""
-
-    async def run_before(pilot: Pilot[None]) -> None:
-        await wait_for_idle(pilot)
-        await open_channel_screen(pilot)
-        await pilot.press("j", "ctrl+k", "ctrl+k")
+        await pilot.click("#channel-list", offset=(3, 1))
         await pilot.pause()
 
     assert snap_compare(

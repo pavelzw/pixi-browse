@@ -40,7 +40,7 @@ def run(
         "--channel",
         "-c",
         help=(
-            "Channels loaded at startup, in order. Repeat the flag to pass "
+            "Channels loaded at startup. Repeat the flag to pass "
             f"multiple channels. Defaults to {DEFAULT_CHANNEL}."
         ),
     ),

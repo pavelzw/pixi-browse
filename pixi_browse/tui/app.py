@@ -153,7 +153,7 @@ class CondaMetadataTui(App[None]):
         self._selected_platform_names: set[Platform] = set(selected_platforms)
         self._draft_selected_platform_names: set[Platform] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
-        # The channels being browsed, in priority order; never empty.
+        # The channels being browsed, in the order they were added; never empty.
         self._channel_names: list[str] = normalize_channel_names(default_channels or [])
         self._mode: ViewMode = "packages"
         self._search_query = ""

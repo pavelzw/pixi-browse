@@ -68,7 +68,7 @@ pixi-browse
 # Browse a different channel
 pixi-browse -c https://prefix.dev/conda-forge
 
-# Browse several channels at once (in priority order)
+# Browse several channels at once
 pixi-browse -c conda-forge -c bioconda
 
 # Restrict to specific platforms
@@ -123,17 +123,16 @@ pixi-browse --version
 
 ### Channel selector
 
-`c` opens a popup with the channels being browsed, in priority order. The
+`c` opens a popup with the channels being browsed. The package list and the
 MatchSpec and who-needs queries run against all of them.
 
-| Key                 | Action                                 |
-| ------------------- | -------------------------------------- |
-| `j` / `k`           | Move selection                         |
-| `Ctrl+j` / `Ctrl+k` | Move the highlighted channel down / up |
-| `n`                 | Add a channel (name or URL)            |
-| `Backspace`         | Remove the highlighted channel         |
-| `Enter`             | Apply the selection                    |
-| `Esc`               | Cancel                                 |
+| Key         | Action                         |
+| ----------- | ------------------------------ |
+| `j` / `k`   | Move selection                 |
+| `n`         | Add a channel (name or URL)    |
+| `Backspace` | Remove the highlighted channel |
+| `Enter`     | Apply the selection            |
+| `Esc`       | Cancel                         |
 
 ## Development
 

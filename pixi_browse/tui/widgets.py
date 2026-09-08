@@ -1910,13 +1910,13 @@ class SidebarPanel(Vertical):
 
 
 class ChannelScreen(ModalScreen[list[str] | None]):
-    """Edit the ordered list of channels the app browses.
+    """Edit the list of channels the app browses.
 
-    The list is the selection as it will be applied: ``n`` adds a channel,
-    ``Backspace`` removes the highlighted one, ``Ctrl+j``/``Ctrl+k`` move it
-    down or up. Nothing is loaded until ``Enter`` confirms; ``Escape`` drops
-    every edit. At least one channel always stays, so the app never ends up
-    without anything to show.
+    The list is the selection as it will be applied, in the order the channels
+    were added: ``n`` adds a channel and ``Backspace`` removes the highlighted
+    one. Nothing is loaded until ``Enter`` confirms; a mouse click only moves
+    the highlight, and ``Escape`` drops every edit. At least one channel always
+    stays, so the app never ends up without anything to show.
     """
 
     DEFAULT_CSS = """
@@ -1984,10 +1984,7 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     }
     """
 
-    LIST_HELP = (
-        "Move: j / k | Reorder: Ctrl+j / Ctrl+k | Add: n\n"
-        "Remove: Backspace | Apply: Enter | Cancel: Esc"
-    )
+    LIST_HELP = "Move: j / k | Add: n | Remove: Backspace\nApply: Enter | Cancel: Esc"
     INPUT_HELP = "Type a channel name or URL. Add: Enter | Back to the list: Esc"
 
     def __init__(self, channel_names: Sequence[str]) -> None:
@@ -1996,7 +1993,7 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     @property
     def channel_names(self) -> list[str]:
-        """The selection as currently edited, in priority order."""
+        """The selection as currently edited."""
         return list(self._channel_names)
 
     def compose(self) -> ComposeResult:
@@ -2041,18 +2038,6 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         if index is None:
             return
         self._render_channels(highlight=index + offset)
-
-    def _move_channel(self, offset: int) -> None:
-        index = self._highlighted_index()
-        if index is None:
-            return
-        target = index + offset
-        if target < 0 or target >= len(self._channel_names):
-            return
-        names = self._channel_names
-        names[index], names[target] = names[target], names[index]
-        self._show_error("")
-        self._render_channels(highlight=target)
 
     def _remove_highlighted_channel(self) -> None:
         index = self._highlighted_index()
@@ -2106,10 +2091,8 @@ class ChannelScreen(ModalScreen[list[str] | None]):
             self._move_highlight(1)
         elif event.key in {"k", "up"}:
             self._move_highlight(-1)
-        elif event.key == "ctrl+j":
-            self._move_channel(1)
-        elif event.key == "ctrl+k":
-            self._move_channel(-1)
+        elif event.key == "enter":
+            self.dismiss(list(self._channel_names))
         elif event.key == "n":
             self._start_adding()
         elif event.key == "backspace":
@@ -2126,9 +2109,10 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         self._add_channel(event.value)
 
     @on(OptionList.OptionSelected, "#channel-list")
-    def _apply(self, event: OptionList.OptionSelected) -> None:
+    def _ignore_selection(self, event: OptionList.OptionSelected) -> None:
+        # A mouse click selects the option it lands on. Only ``Enter`` applies
+        # the list, so a click merely moves the highlight.
         event.stop()
-        self.dismiss(list(self._channel_names))
 
 
 class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
