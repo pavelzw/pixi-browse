@@ -44,22 +44,27 @@ async def open_channel_screen(pilot: Pilot[None]) -> None:
 
 
 async def add_channel(pilot: Pilot[None], channel_name: str) -> None:
-    """Add ``channel_name`` through the ``n`` prompt of the open channel
-    popup; the new entry ends up highlighted."""
-    await pilot.press("n")
-    await pilot.pause()
+    """Type ``channel_name`` into the field of the open channel dialog and
+    add it with ``Enter``."""
     await type_text(pilot, channel_name)
     await pilot.press("enter")
     await pilot.pause()
+
+
+async def apply_channels(pilot: Pilot[None]) -> None:
+    """Press the ``Apply`` button of the open channel dialog and wait for the
+    channels to load."""
+    await pilot.click("#channel-apply")
+    await wait_for_idle(pilot)
 
 
 async def switch_channel(pilot: Pilot[None], channel_name: str) -> None:
     """Replace the single startup channel with ``channel_name``."""
     await open_channel_screen(pilot)
     await add_channel(pilot, channel_name)
-    # The new channel is highlighted; the old one sits right above it.
-    await pilot.press("k", "backspace", "enter")
-    await wait_for_idle(pilot)
+    await pilot.click("#channel-remove-0")
+    await pilot.pause()
+    await apply_channels(pilot)
 
 
 # --- package search -----------------------------------------------------------
@@ -570,8 +575,8 @@ def test_platform_change_reapplies_whoneeds_query(
 def test_channel_screen_lists_selected_channels(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``c`` opens the channel popup listing the channels in the order they
-    were added, with the first one highlighted."""
+    """``c`` opens the channel dialog: the channels in the order they were
+    added, each with a remove button, the field to add one, and ``Apply``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -584,17 +589,15 @@ def test_channel_screen_lists_selected_channels(
     )
 
 
-def test_channel_screen_add_prompt_takes_input(
+def test_channel_screen_field_takes_input(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``n`` shows the input for a new channel; shortcut keys are typed into
-    it rather than triggered."""
+    """The field has focus when the dialog opens; shortcut keys are typed
+    into it rather than triggered."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await pilot.press("n")
-        await pilot.pause()
         await type_text(pilot, "prefix.dev/kn-q")
         await pilot.pause()
 
@@ -604,8 +607,8 @@ def test_channel_screen_add_prompt_takes_input(
 def test_channel_screen_adds_channel_at_the_end(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Submitting the prompt appends the channel and highlights it; nothing
-    is loaded until the list is confirmed."""
+    """``Enter`` in the field appends the channel and clears the field;
+    nothing is loaded until ``Apply``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -615,28 +618,11 @@ def test_channel_screen_adds_channel_at_the_end(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-def test_channel_screen_escape_in_prompt_returns_to_list(
-    snap_compare: SnapCompare, make_app: AppFactory
-) -> None:
-    """``Escape`` in the add prompt drops the typed name and goes back to the
-    list without closing the popup."""
-
-    async def run_before(pilot: Pilot[None]) -> None:
-        await wait_for_idle(pilot)
-        await open_channel_screen(pilot)
-        await pilot.press("n")
-        await pilot.pause()
-        await type_text(pilot, "bio")
-        await pilot.press("escape")
-        await pilot.pause()
-
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
-
-
 def test_channel_screen_rejects_duplicate_channel(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Adding a channel that is already selected is refused."""
+    """Adding a channel that is already selected is refused and the typed
+    name stays in the field."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -649,7 +635,7 @@ def test_channel_screen_rejects_duplicate_channel(
 def test_channel_screen_rejects_empty_channel(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Submitting a blank prompt is refused."""
+    """Submitting a blank field is refused."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -662,26 +648,28 @@ def test_channel_screen_rejects_empty_channel(
 def test_channel_screen_keeps_last_channel(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Backspace`` cannot remove the only remaining channel."""
+    """The remove button of the only remaining channel is disabled; clicking
+    it changes nothing."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await pilot.press("backspace")
+        await pilot.click("#channel-remove-0")
         await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-def test_channel_screen_removes_highlighted_channel(
+def test_channel_screen_removes_clicked_channel(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``j`` moves down and ``Backspace`` removes the highlighted channel."""
+    """Clicking a channel's remove button takes it out of the list and
+    returns the focus to the field."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await pilot.press("j", "backspace")
+        await pilot.click("#channel-remove-1")
         await pilot.pause()
 
     assert snap_compare(
@@ -691,16 +679,15 @@ def test_channel_screen_removes_highlighted_channel(
     )
 
 
-def test_channel_screen_click_only_highlights(
+def test_channel_screen_channel_names_are_not_clickable(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Clicking a channel moves the highlight but does not apply the list;
-    only ``Enter`` does."""
+    """Clicking a channel name does nothing: no selection, no apply."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
-        await pilot.click("#channel-list", offset=(3, 1))
+        await pilot.click(".channel-name")
         await pilot.pause()
 
     assert snap_compare(
@@ -713,7 +700,7 @@ def test_channel_screen_click_only_highlights(
 def test_channel_screen_escape_discards_edits(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Escape`` closes the popup without applying; reopening it shows the
+    """``Escape`` closes the dialog without applying; reopening it shows the
     channels that are actually loaded."""
 
     async def run_before(pilot: Pilot[None]) -> None:
@@ -727,16 +714,31 @@ def test_channel_screen_escape_discards_edits(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_channel_screen_apply_via_keyboard(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Tab`` moves from the field to ``Apply``, and ``Enter`` there loads
+    the channels."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.press("tab", "enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_confirming_unchanged_channels_keeps_the_view(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Confirming the popup without edits does not reload anything."""
+    """``Apply`` without edits does not reload anything."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await open_channel_screen(pilot)
-        await pilot.press("enter")
-        await wait_for_idle(pilot)
+        await apply_channels(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -764,8 +766,7 @@ def test_adding_channel_lists_packages_of_both_channels(
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
         await add_channel(pilot, BIOCONDA_CHANNEL)
-        await pilot.press("enter")
-        await wait_for_idle(pilot)
+        await apply_channels(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -820,8 +821,7 @@ def test_adding_unreachable_channel_restores_previous_view(
         await open_versions(pilot, package_index=1)
         await open_channel_screen(pilot)
         await add_channel(pilot, MISSING_CHANNEL)
-        await pilot.press("enter")
-        await wait_for_idle(pilot)
+        await apply_channels(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 

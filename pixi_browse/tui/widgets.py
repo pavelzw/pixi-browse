@@ -17,10 +17,10 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, LoadingIndicator, OptionList, Static
+from textual.widgets import Button, Input, LoadingIndicator, OptionList, Static
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
@@ -1909,14 +1909,34 @@ class SidebarPanel(Vertical):
         event.stop()
 
 
+class ChannelRow(Horizontal):
+    """One selected channel: its name next to a button that removes it."""
+
+    def __init__(self, channel_name: str, *, index: int, removable: bool) -> None:
+        super().__init__(classes="channel-row")
+        self.channel_name = channel_name
+        self._index = index
+        self._removable = removable
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.channel_name, classes="channel-name", markup=False)
+        yield Button(
+            "✕",
+            id=f"channel-remove-{self._index}",
+            classes="channel-remove",
+            compact=True,
+            disabled=not self._removable,
+            tooltip=None if self._removable else "The last channel cannot be removed.",
+        )
+
+
 class ChannelScreen(ModalScreen[list[str] | None]):
     """Edit the list of channels the app browses.
 
-    The list is the selection as it will be applied, in the order the channels
-    were added: ``n`` adds a channel and ``Backspace`` removes the highlighted
-    one. Nothing is loaded until ``Enter`` confirms; a mouse click only moves
-    the highlight, and ``Escape`` drops every edit. At least one channel always
-    stays, so the app never ends up without anything to show.
+    The selected channels are listed with a ``✕`` button each; the field below
+    adds the typed channel to the list on ``Enter``. Nothing is loaded until
+    ``Apply`` is pressed, and ``Escape`` drops every edit. At least one channel
+    always stays, so the app never ends up without anything to show.
     """
 
     DEFAULT_CSS = """
@@ -1939,23 +1959,37 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         margin-bottom: 1;
     }
 
-    #channel-list {
-        border: none;
-        background: $background;
+    #channel-rows {
         height: auto;
-        max-height: 12;
-        padding: 0 0 0 1;
+        max-height: 10;
     }
 
-    #channel-list > .option-list--option-highlighted {
-        color: #ffffff;
+    .channel-row {
+        height: 1;
+    }
+
+    .channel-name {
+        width: 1fr;
+        padding: 0 1;
+    }
+
+    .channel-remove {
+        width: 3;
+        min-width: 3;
+        color: #ec4899;
+    }
+
+    .channel-remove:focus, .channel-remove:hover {
         background: #ec4899;
+        color: #ffffff;
         text-style: bold;
     }
 
-    #channel-list > .option-list--option-hover {
-        color: #f9a8d4;
-        background: #4a2233;
+    /* Textual's ANSI theme gives disabled buttons a tall border with
+       !important, which on a one-row compact button hides the label. */
+    #channel-rows .channel-remove:disabled {
+        border: none !important;
+        color: $text-disabled;
     }
 
     #channel-input {
@@ -1972,20 +2006,40 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         color: #ffffff;
     }
 
-    #channel-help {
-        color: $text-muted;
-        margin-top: 1;
-    }
-
     #channel-error {
         color: $error;
         min-height: 1;
         margin-top: 1;
     }
+
+    #channel-actions {
+        height: auto;
+        align-horizontal: right;
+    }
+
+    #channel-apply {
+        background: #ec4899;
+        color: #ffffff;
+        border-top: tall #f9a8d4;
+        border-bottom: tall #9d174d;
+    }
+
+    #channel-apply:focus, #channel-apply:hover {
+        background: #f472b6;
+        text-style: bold;
+    }
+
+    #channel-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
     """
 
-    LIST_HELP = "Move: j / k | Add: n | Remove: Backspace\nApply: Enter | Cancel: Esc"
-    INPUT_HELP = "Type a channel name or URL. Add: Enter | Back to the list: Esc"
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+    ]
+
+    HELP = "Enter adds the typed channel. Tab: Apply and the ✕ buttons | Esc: cancel"
 
     def __init__(self, channel_names: Sequence[str]) -> None:
         super().__init__()
@@ -1999,72 +2053,38 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="channel-dialog"):
             yield Static("Channels", id="channel-title")
-            yield OptionList(*self._channel_names, id="channel-list", markup=False)
-            yield Input(placeholder="bioconda", id="channel-input")
-            yield Static(self.LIST_HELP, id="channel-help")
+            yield VerticalScroll(
+                *self._channel_rows(), id="channel-rows", can_focus=False
+            )
+            yield Input(placeholder="Add a channel name or URL", id="channel-input")
             yield Static("", id="channel-error")
+            with Horizontal(id="channel-actions"):
+                yield Button("Apply", id="channel-apply")
+            yield Static(self.HELP, id="channel-help")
 
     def on_mount(self) -> None:
-        channel_input = self.query_one("#channel-input", Input)
-        channel_input.display = False
-        channel_list = self.query_one("#channel-list", OptionList)
-        channel_list.highlighted = 0
-        channel_list.focus()
+        self.query_one("#channel-input", Input).focus()
 
-    # -- state -----------------------------------------------------------------
+    # -- rendering -------------------------------------------------------------
 
-    def _is_adding(self) -> bool:
-        return self.query_one("#channel-input", Input).display
+    def _channel_rows(self) -> list[ChannelRow]:
+        removable = len(self._channel_names) > 1
+        return [
+            ChannelRow(channel_name, index=index, removable=removable)
+            for index, channel_name in enumerate(self._channel_names)
+        ]
 
-    def _highlighted_index(self) -> int | None:
-        return self.query_one("#channel-list", OptionList).highlighted
-
-    def _render_channels(self, *, highlight: int) -> None:
-        channel_list = self.query_one("#channel-list", OptionList)
-        channel_list.clear_options()
-        channel_list.add_options(self._channel_names)
-        channel_list.highlighted = max(0, min(highlight, len(self._channel_names) - 1))
+    async def _render_channels(self) -> None:
+        rows = self.query_one("#channel-rows", VerticalScroll)
+        await rows.remove_children()
+        await rows.mount(*self._channel_rows())
 
     def _show_error(self, message: str) -> None:
         self.query_one("#channel-error", Static).update(Text(message))
 
-    def _show_help(self, message: str) -> None:
-        self.query_one("#channel-help", Static).update(Text(message))
-
     # -- editing ---------------------------------------------------------------
 
-    def _move_highlight(self, offset: int) -> None:
-        index = self._highlighted_index()
-        if index is None:
-            return
-        self._render_channels(highlight=index + offset)
-
-    def _remove_highlighted_channel(self) -> None:
-        index = self._highlighted_index()
-        if index is None:
-            return
-        if len(self._channel_names) == 1:
-            self._show_error("At least one channel must remain.")
-            return
-        del self._channel_names[index]
-        self._show_error("")
-        self._render_channels(highlight=index)
-
-    def _start_adding(self) -> None:
-        channel_input = self.query_one("#channel-input", Input)
-        channel_input.value = ""
-        channel_input.display = True
-        self._show_error("")
-        self._show_help(self.INPUT_HELP)
-        channel_input.focus()
-
-    def _stop_adding(self) -> None:
-        channel_input = self.query_one("#channel-input", Input)
-        channel_input.display = False
-        self._show_help(self.LIST_HELP)
-        self.query_one("#channel-list", OptionList).focus()
-
-    def _add_channel(self, value: str) -> None:
+    async def _add_channel(self, value: str) -> None:
         channel_name = value.strip()
         if not channel_name:
             self._show_error("Channel cannot be empty.")
@@ -2074,45 +2094,40 @@ class ChannelScreen(ModalScreen[list[str] | None]):
             return
         self._channel_names.append(channel_name)
         self._show_error("")
-        self._stop_adding()
-        self._render_channels(highlight=len(self._channel_names) - 1)
+        self.query_one("#channel-input", Input).clear()
+        await self._render_channels()
+
+    async def _remove_channel(self, channel_name: str) -> None:
+        if len(self._channel_names) == 1:
+            self._show_error("At least one channel must remain.")
+            return
+        self._channel_names.remove(channel_name)
+        self._show_error("")
+        await self._render_channels()
+        # The pressed button is gone with its row; carry on in the field.
+        self.query_one("#channel-input", Input).focus()
 
     # -- events ----------------------------------------------------------------
 
-    def on_key(self, event: Key) -> None:
-        if self._is_adding():
-            # The input handles its own editing keys; only the way out is ours.
-            if event.key == "escape":
-                self._stop_adding()
-                event.stop()
-            return
-
-        if event.key in {"j", "down"}:
-            self._move_highlight(1)
-        elif event.key in {"k", "up"}:
-            self._move_highlight(-1)
-        elif event.key == "enter":
-            self.dismiss(list(self._channel_names))
-        elif event.key == "n":
-            self._start_adding()
-        elif event.key == "backspace":
-            self._remove_highlighted_channel()
-        elif event.key in {"escape", "q"}:
-            self.dismiss(None)
-        else:
-            return
-        event.stop()
-
     @on(Input.Submitted, "#channel-input")
-    def _submit_channel(self, event: Input.Submitted) -> None:
+    async def _submit_channel(self, event: Input.Submitted) -> None:
         event.stop()
-        self._add_channel(event.value)
+        await self._add_channel(event.value)
 
-    @on(OptionList.OptionSelected, "#channel-list")
-    def _ignore_selection(self, event: OptionList.OptionSelected) -> None:
-        # A mouse click selects the option it lands on. Only ``Enter`` applies
-        # the list, so a click merely moves the highlight.
+    @on(Button.Pressed, ".channel-remove")
+    async def _remove_pressed(self, event: Button.Pressed) -> None:
         event.stop()
+        row = event.button.parent
+        assert isinstance(row, ChannelRow)
+        await self._remove_channel(row.channel_name)
+
+    @on(Button.Pressed, "#channel-apply")
+    def _apply_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(list(self._channel_names))
+
+    async def action_dismiss(self, result: list[str] | None = None) -> None:
+        self.dismiss(result)
 
 
 class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):

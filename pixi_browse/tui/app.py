@@ -30,7 +30,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Resize
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -2765,6 +2765,11 @@ class CondaMetadataTui(App[None]):
             compare_screen = cast(CompareScreen, self.screen)
             compare_screen.action_next_section()
             return
+        if isinstance(self.screen, ModalScreen):
+            # Dialogs with several fields (the channel selector) rely on the
+            # regular focus chain, which this priority binding would swallow.
+            self.screen.focus_next()
+            return
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
@@ -2777,6 +2782,9 @@ class CondaMetadataTui(App[None]):
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
             compare_screen.action_previous_section()
+            return
+        if isinstance(self.screen, ModalScreen):
+            self.screen.focus_previous()
             return
         if self._mode != "versions":
             return

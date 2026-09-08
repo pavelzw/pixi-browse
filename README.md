@@ -123,16 +123,16 @@ pixi-browse --version
 
 ### Channel selector
 
-`c` opens a popup with the channels being browsed. The package list and the
+`c` opens a dialog with the channels being browsed. The package list and the
 MatchSpec and who-needs queries run against all of them.
 
-| Key         | Action                         |
-| ----------- | ------------------------------ |
-| `j` / `k`   | Move selection                 |
-| `n`         | Add a channel (name or URL)    |
-| `Backspace` | Remove the highlighted channel |
-| `Enter`     | Apply the selection            |
-| `Esc`       | Cancel                         |
+| Control             | Action                                               |
+| ------------------- | ---------------------------------------------------- |
+| Text field          | Type a channel name or URL, `Enter` adds it          |
+| `✕` button          | Remove that channel (the last one cannot be removed) |
+| `Apply` button      | Load the listed channels                             |
+| `Tab` / `Shift+Tab` | Move between the field and the buttons               |
+| `Esc`               | Cancel                                               |
 
 ## Development
 
