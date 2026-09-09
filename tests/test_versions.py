@@ -1132,7 +1132,7 @@ package:
   name: demo
 """
 
-    assert CondaMetadataTui._extract_rattler_build_version(rendered_recipe) == "0.38.0"
+    assert VersionDataLoader.extract_rattler_build_version(rendered_recipe) == "0.38.0"
 
 
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
