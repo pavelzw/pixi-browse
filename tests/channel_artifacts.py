@@ -114,10 +114,20 @@ async def _download_missing(manifest: ChannelManifest) -> int:
         return 0
 
     client = Client.default_client(user_agent="pixi-browse-tests")
+    fetched = 0
     for artifact in missing:
+        # Re-checked per artifact instead of trusting the scan above: parallel
+        # test workers (``pytest -n auto``) each walk the whole manifest in the
+        # same order, so a sibling worker may have produced this artifact in
+        # the meantime. Skipping it downloads each artifact once per run rather
+        # than once per worker, and leaves the shared destination to the worker
+        # that is already renaming its own copy onto it.
+        if _is_valid(artifact):
+            continue
         print(f"fetching  {manifest.url(artifact)}", file=sys.stderr)
         await _download(client, manifest, artifact)
-    return len(missing)
+        fetched += 1
+    return fetched
 
 
 def ensure_channel_artifacts() -> ChannelManifest:
