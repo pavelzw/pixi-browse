@@ -46,6 +46,11 @@ async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
 # Row of ``site-packages/polars/functions/lit.py`` in the compare file list,
 # which follows the order of the older build's ``paths.json``.
 POLARS_LIT_PY_ROW = 91
+# ``site-packages/polars/dataframe/frame.py`` (505 KiB, unchanged) and
+# ``site-packages/polars/lazyframe/frame.py`` (384 KiB, changed), both above the
+# in-app preview limit.
+POLARS_DATAFRAME_PY_ROW = 48
+POLARS_LAZYFRAME_PY_ROW = 164
 
 
 def test_compare_key_stores_first_selection(
@@ -348,12 +353,14 @@ def test_compare_screen_paging_keys_move_file_highlight(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
-@pytest.mark.parametrize("keys", [("G",), ("j", "j", "j")], ids=["G", "jjj"])
+@pytest.mark.parametrize(
+    "keys", [("G",), ("j", "j", "j"), ("G", "g", "g")], ids=["G", "jjj", "G-gg"]
+)
 def test_compare_screen_metadata_table_scrolls(
     snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
 ) -> None:
-    """The metadata table is taller than its section: ``j`` scrolls it and
-    ``G`` jumps to the end."""
+    """The metadata table is taller than its section: ``j`` scrolls it, ``G``
+    jumps to the end and ``gg`` back to the top."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
@@ -407,6 +414,42 @@ def test_compare_screen_diff_escape_returns_to_compare(
         await pilot.press("enter")
         await wait_for_screen(pilot, FileDiffScreen)
         await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_preview_rejects_large_file(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Preview left`` of a file above the size limit shows the too-large
+    notice instead of fetching it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_DATAFRAME_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        # The file is unchanged, so "Preview left" is the first action.
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.skipif(
+    not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
+)
+def test_compare_screen_diff_rejects_large_file(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Diff left / right`` of a changed file above the size limit warns
+    instead of opening the diff."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LAZYFRAME_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("enter")
         await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

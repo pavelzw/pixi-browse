@@ -9,8 +9,8 @@
 An interactive terminal UI for browsing conda package metadata.
 Explore packages, versions, dependencies, and more from any conda channel — right from your terminal.
 
-![pixi-browse demo](.github/assets/demo-dark.gif#gh-dark-mode-only)
-![pixi-browse demo](.github/assets/demo-light.gif#gh-light-mode-only)
+![pixi-browse demo](https://raw.githubusercontent.com/pavelzw/pixi-browse/refs/heads/main/.github/assets/demo-dark.gif#gh-dark-mode-only)
+![pixi-browse demo](https://raw.githubusercontent.com/pavelzw/pixi-browse/refs/heads/main/.github/assets/demo-light.gif#gh-light-mode-only)
 
 ## Features
 
@@ -62,11 +62,17 @@ package.
 ## Usage
 
 ```bash
-# Browse conda-forge across all platforms (default)
+# Browse configured default channels (conda-forge if unset) across all platforms
 pixi-browse
+
+# Read a specific config file
+pixi-browse --config ./config.toml
 
 # Browse a different channel
 pixi-browse -c https://prefix.dev/conda-forge
+
+# Browse several channels at once
+pixi-browse -c conda-forge -c bioconda
 
 # Restrict to specific platforms
 pixi-browse -p linux-64 -p osx-arm64
@@ -83,13 +89,42 @@ pixi-browse --version
 
 ### CLI Options
 
-| Option              | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `-c`, `--channel`   | Channel to load at startup (default: `conda-forge`) |
-| `-p`, `--platform`  | Platforms to include (repeat for multiple)          |
-| `-m`, `--matchspec` | MatchSpec query to apply at startup                 |
-| `--version`         | Show version and exit                               |
-| `--help`            | Show help and exit                                  |
+| Option              | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| `-c`, `--channel`   | Startup channels (repeat for multiple; overrides configured defaults) |
+| `--config`          | Config file to read instead of the default locations                  |
+| `-p`, `--platform`  | Platforms to include (repeat for multiple)                            |
+| `-m`, `--matchspec` | MatchSpec query to apply at startup                                   |
+| `--version`         | Show version and exit                                                 |
+| `--help`            | Show help and exit                                                    |
+
+### Configuration
+
+Without `--config`, pixi-browse loads Pixi's default configuration locations
+through rattler, including shared rattler configuration. These include system
+configuration, the platform's user configuration directory (and
+`XDG_CONFIG_HOME`), and `$PIXI_HOME/config.toml` or `~/.pixi/config.toml`.
+Later files override earlier ones; missing default files are skipped.
+`--config <path>` reads only that file and reports missing or invalid files.
+
+```toml
+default-channels = ["conda-forge", "bioconda"]
+
+[mirrors]
+"https://conda.anaconda.org/conda-forge" = ["https://prefix.dev/conda-forge"]
+
+[repodata-config]
+disable-sharded = true
+```
+
+The shared network client applies mirrors, S3 options, authentication, proxy,
+and TLS settings to repodata, package previews, and downloads. Repodata format
+settings (including per-channel overrides) and `concurrency.downloads` are
+applied to the gateway. Who-needs queries scan the full channel repodata,
+even when sharded repodata is enabled for browsing.
+
+Explicit `-c` flags replace `default-channels`. If neither is set, pixi-browse
+uses `conda-forge`.
 
 ## Keybindings
 
@@ -111,12 +146,25 @@ pixi-browse --version
 | `?`        | Show help                                     |
 | `/` or `f` | Start package filter                          |
 | `p`        | Open platform selector                        |
-| `c`        | Edit channel                                  |
+| `c`        | Select channels                               |
 | `C`        | Compare selected artifact (in versions view)  |
 | `m`        | Query packages with a MatchSpec               |
 | `w`        | Query packages that need a package            |
 | `d`        | Download selected artifact (in versions view) |
 | `q`        | Quit                                          |
+
+### Channel selector
+
+`c` opens a dialog with the channels being browsed. The package list and the
+MatchSpec and who-needs queries run against all of them.
+
+| Control              | Action                                               |
+| -------------------- | ---------------------------------------------------- |
+| Text field           | Type a channel name or URL, `Enter` adds it          |
+| `✕` button           | Remove that channel (the last one cannot be removed) |
+| `Apply` button       | Load the listed channels                             |
+| `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
+| `Esc`                | Cancel                                               |
 
 ## Development
 

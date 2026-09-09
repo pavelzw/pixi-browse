@@ -30,7 +30,7 @@ class AboutUrls:
 
 @dataclass(frozen=True)
 class ChannelStateSnapshot:
-    channel_name: str
+    channel_names: list[str]
     mode: ViewMode
     draft_selected_platform_names: set[Platform] | None
     current_versions: list[VersionEntry]

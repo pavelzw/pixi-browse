@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from rattler.config import Config
+from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
@@ -24,20 +26,29 @@ from pixi_browse.rendering import (
 from pixi_browse.repodata import (
     discover_available_platforms,
     fetch_package_names,
+    normalize_channel_names,
     query_matchspec_records,
     query_package_records,
     query_whoneeds_records,
 )
 from pixi_browse.tui import CondaMetadataTui
 from pixi_browse.tui.version_loader import VersionDataLoader
-from tests.helpers import CHANNEL_PLATFORMS, GatewayFactory
+from tests.helpers import (
+    BIOCONDA_CHANNEL,
+    CHANNEL_PLATFORMS,
+    MAIN_CHANNEL,
+    MISSING_CHANNEL,
+    GatewayFactory,
+)
 
 
 def test_discover_available_platforms_finds_indexed_subdirs(
     make_gateway: GatewayFactory,
 ) -> None:
     platforms = asyncio.run(
-        discover_available_platforms(gateway=make_gateway(), channel_name="conda-forge")
+        discover_available_platforms(
+            gateway=make_gateway(), channel_names=[MAIN_CHANNEL]
+        )
     )
 
     assert platforms == [
@@ -47,13 +58,60 @@ def test_discover_available_platforms_finds_indexed_subdirs(
     ]
 
 
+def test_discover_available_platforms_merges_the_channels(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``bioconda`` only ships noarch packages; the result is the union with
+    the platforms of ``conda-forge``."""
+    gateway = make_gateway()
+
+    assert asyncio.run(
+        discover_available_platforms(gateway=gateway, channel_names=[BIOCONDA_CHANNEL])
+    ) == [Platform("noarch")]
+    assert asyncio.run(
+        discover_available_platforms(
+            gateway=gateway, channel_names=[BIOCONDA_CHANNEL, MAIN_CHANNEL]
+        )
+    ) == [
+        Platform("linux-64"),
+        Platform("osx-arm64"),
+        Platform("noarch"),
+    ]
+
+
+def test_discover_available_platforms_rejects_channel_without_noarch(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``missing`` serves no repodata at all. rattler requires the noarch
+    subdir of every channel, so the whole selection is refused and rattler's
+    error names the channel."""
+    with pytest.raises(
+        GatewayError, match="could not find subdir 'noarch' in channel .*missing"
+    ):
+        asyncio.run(
+            discover_available_platforms(
+                gateway=make_gateway(),
+                channel_names=[MAIN_CHANNEL, MISSING_CHANNEL],
+            )
+        )
+
+
+def test_normalize_channel_names_strips_and_dedupes() -> None:
+    assert normalize_channel_names([" bioconda ", "conda-forge", "bioconda", ""]) == [
+        "bioconda",
+        "conda-forge",
+    ]
+    assert normalize_channel_names([]) == []
+    assert normalize_channel_names(["", "  "]) == []
+
+
 def test_fetch_package_names_lists_channel_packages(
     make_gateway: GatewayFactory,
 ) -> None:
     platforms, names = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=[MAIN_CHANNEL],
             selected_platforms=CHANNEL_PLATFORMS,
         )
     )
@@ -62,13 +120,57 @@ def test_fetch_package_names_lists_channel_packages(
     assert names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
 
 
+def test_fetch_package_names_merges_all_channels(
+    make_gateway: GatewayFactory,
+) -> None:
+    _platforms, names = asyncio.run(
+        fetch_package_names(
+            gateway=make_gateway(),
+            channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
+            selected_platforms=CHANNEL_PLATFORMS,
+        )
+    )
+
+    assert names == [
+        "libzlib",
+        "pixi-browse",
+        "polars",
+        "pyfaidx",
+        "six",
+        "snakemake-wrapper-utils",
+        "zlib",
+    ]
+
+
+def test_query_whoneeds_records_spans_all_channels(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``pyfaidx`` (bioconda) depends on ``six`` (conda-forge); the reverse
+    query sees the dependency across the channel boundary."""
+    result = asyncio.run(
+        query_whoneeds_records(
+            gateway=make_gateway(),
+            channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
+            platforms=list(CHANNEL_PLATFORMS),
+            target="six",
+            log=lambda _message: None,
+        )
+    )
+
+    assert result.package_names == ["pyfaidx"]
+    assert all(
+        str(record.url).startswith("https://conda.anaconda.org/bioconda/")
+        for record in result.records_by_package["pyfaidx"]
+    )
+
+
 def test_query_package_records_sorts_newest_first(
     make_gateway: GatewayFactory,
 ) -> None:
     records = asyncio.run(
         query_package_records(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=list(CHANNEL_PLATFORMS),
             package_name="libzlib",
         )
@@ -98,7 +200,7 @@ def test_query_matchspec_records_groups_matching_records(
     result = asyncio.run(
         query_matchspec_records(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=list(CHANNEL_PLATFORMS),
             matchspec=MatchSpec("libzlib >=1.3.2", exact_names_only=False),
         )
@@ -116,8 +218,8 @@ def test_query_whoneeds_records_finds_zlib_depending_on_libzlib(
     logs: list[str] = []
     result = asyncio.run(
         query_whoneeds_records(
-            gateway=make_gateway(sharded_enabled=False),
-            channel_name="conda-forge",
+            gateway=make_gateway(),
+            channel_names=["conda-forge"],
             platforms=list(CHANNEL_PLATFORMS),
             target="libzlib",
             log=logs.append,
@@ -144,7 +246,7 @@ def test_render_package_preview_from_real_records(
     records = asyncio.run(
         query_package_records(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=list(CHANNEL_PLATFORMS),
             package_name="libzlib",
         )
@@ -175,7 +277,7 @@ def test_load_version_artifact_data_reads_real_archives(
     async def load() -> tuple[list[str], list[str], list[str], list[str], list[str]]:
         records = await query_package_records(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=[Platform(subdir)],
             package_name=package_name,
         )
@@ -230,7 +332,7 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
     async def load_twice() -> tuple[VersionArtifactData, VersionArtifactData]:
         records = await query_package_records(
             gateway=make_gateway(),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=[Platform("noarch")],
             package_name="six",
         )
@@ -262,15 +364,14 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
     assert first.dependencies == ("python >=3.9",)
 
 
-def test_app_shares_the_client_with_its_version_loader(rattler_client: Client) -> None:
-    app = CondaMetadataTui(client=rattler_client)
+def test_app_shares_the_client_with_its_version_loader(rattler_config: Config) -> None:
+    app = CondaMetadataTui(default_channels=["conda-forge"], config=rattler_config)
 
-    assert app._client is rattler_client
-    assert app._version_loader._client is rattler_client
+    assert app._version_loader._client is app._client
 
 
-def test_app_creates_a_default_client_when_none_is_given() -> None:
-    app = CondaMetadataTui()
+def test_app_creates_a_default_client_without_config() -> None:
+    app = CondaMetadataTui(default_channels=["conda-forge"])
 
     assert isinstance(app._client, Client)
     assert app._version_loader._client is app._client

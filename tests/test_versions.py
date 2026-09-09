@@ -242,7 +242,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
     async def _query(target: str | PackageRecord) -> WhoNeedsQueryResult:
         return await query_whoneeds_records(
             gateway=cast(Gateway, _FakeGateway()),
-            channel_name="conda-forge",
+            channel_names=["conda-forge"],
             platforms=[Platform("linux-64"), Platform("noarch")],
             target=target,
             log=lambda _message: None,
@@ -263,7 +263,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
 
 
 def test_build_version_entries_preserves_artifacts_per_build() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     records = [
         _make_repo_data_record(
             version="1.2.3",
@@ -1324,7 +1324,10 @@ def test_extract_rattler_build_version_without_rattler_build(
 
 
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
-    app = CondaMetadataTui(default_platforms={Platform("linux-64"), Platform("osx-64")})
+    app = CondaMetadataTui(
+        default_channels=["conda-forge"],
+        default_platforms={Platform("linux-64"), Platform("osx-64")},
+    )
     app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
@@ -1333,7 +1336,9 @@ def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> 
 
 
 def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
-    app = CondaMetadataTui(default_platforms={Platform("osx-64")})
+    app = CondaMetadataTui(
+        default_channels=["conda-forge"], default_platforms={Platform("osx-64")}
+    )
     app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
@@ -1348,7 +1353,7 @@ def test_page_step_uses_visible_height() -> None:
 
 
 def test_help_text_includes_expected_keybinds() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
 
     help_text = app._help_text()
 
@@ -1408,7 +1413,7 @@ def test_whoneeds_screen_initial_value(
     target: str | None,
     expected: str,
 ) -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._mode = mode
     app._selected_package = selected_package
     app._whoneeds_target = target
@@ -1431,7 +1436,7 @@ def test_sidebar_title_names_active_query(
     target: str | None,
     expected: str,
 ) -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._mode = mode
     app._matchspec_query = matchspec_query
     app._whoneeds_target = target
@@ -1440,7 +1445,7 @@ def test_sidebar_title_names_active_query(
 
 
 def test_sidebar_title_shows_whoneeds_record_target() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._whoneeds_target = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -2151,31 +2156,37 @@ def test_clicking_dependency_tab_does_not_activate_section_click_handler() -> No
     assert event.stopped is True
 
 
-def test_whoneeds_gateway_tracks_and_releases_the_scanned_channel() -> None:
-    app = CondaMetadataTui()
+def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     gateway = _RecordingGateway()
-    app._whoneeds_gateway = cast(Gateway, gateway)
+    app._gateway = cast(Gateway, gateway)
     app._platforms = [Platform("noarch")]
 
+    app._channel_names = ["conda-forge", "bioconda"]
     asyncio.run(app._query_whoneeds_records("python"))
 
-    app._channel_name = "robostack"
+    app._channel_names = ["robostack"]
     app._release_whoneeds_repodata()
 
     assert gateway.queries == [
-        (["conda-forge"], [Platform("noarch")], "python"),
+        (["conda-forge", "bioconda"], [Platform("noarch")], "python"),
     ]
-    assert gateway.cleared == ["conda-forge"]
-    assert app._whoneeds_scanned_channel is None
+    assert gateway.cleared == ["conda-forge", "bioconda"]
+    assert app._whoneeds_scanned_channels is None
 
     # Nothing is cached anymore, so releasing again must not touch the gateway.
     app._release_whoneeds_repodata()
 
-    assert gateway.cleared == ["conda-forge"]
+    assert gateway.cleared == ["conda-forge", "bioconda"]
+
+
+def test_app_requires_at_least_one_channel() -> None:
+    with pytest.raises(ValueError, match="At least one channel is required."):
+        CondaMetadataTui(default_channels=["", "  "])
 
 
 def test_footer_text_matches_redesigned_shortcuts() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
 
     assert (
         app._footer_text()
@@ -2184,7 +2195,7 @@ def test_footer_text_matches_redesigned_shortcuts() -> None:
 
 
 def test_footer_text_shows_download_hint_in_versions_mode() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._mode = "versions"
 
     assert (
@@ -2194,7 +2205,7 @@ def test_footer_text_shows_download_hint_in_versions_mode() -> None:
 
 
 def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._mode = "versions"
     app._compare_selection = CompareSelection(
         "demo",
@@ -2229,7 +2240,7 @@ def test_footer_text_highlights_compare_hint_when_compare_a_is_stored() -> None:
 
 
 def test_footer_text_shows_compare_keybinds_when_compare_screen_is_open() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._compare_screen_open = True
 
     assert (
@@ -2239,23 +2250,15 @@ def test_footer_text_shows_compare_keybinds_when_compare_screen_is_open() -> Non
 
 
 def test_footer_text_shows_live_search_query_in_filter_mode() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._filter_mode = True
     app._search_query = "polars"
 
     assert app._footer_text() == "Search: polars_"
 
 
-def test_footer_text_shows_live_channel_draft_in_channel_edit_mode() -> None:
-    app = CondaMetadataTui()
-    app._channel_edit_mode = True
-    app._channel_draft = "prefix.dev/conda-forge"
-
-    assert app._footer_text() == "Channel: prefix.dev/conda-forge_"
-
-
 def test_footer_text_resets_in_versions_mode_even_with_active_search() -> None:
-    app = CondaMetadataTui()
+    app = CondaMetadataTui(default_channels=["conda-forge"])
     app._mode = "versions"
     app._filter_mode = True
     app._search_query = "polars"

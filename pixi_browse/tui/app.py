@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import webbrowser
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Literal, cast
 
+from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
@@ -29,8 +30,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
-from textual.events import Key, Paste, Resize
-from textual.screen import Screen
+from textual.events import Key, Resize
+from textual.screen import ModalScreen, Screen
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -59,9 +60,11 @@ from pixi_browse.rendering import (
 from pixi_browse.repodata import (
     MatchSpecQueryResult,
     WhoNeedsQueryResult,
+    channels_label,
     create_gateway,
     discover_available_platforms,
     fetch_package_names,
+    normalize_channel_names,
     query_matchspec_records,
     query_package_records,
     query_whoneeds_records,
@@ -76,6 +79,7 @@ from .widgets import (
     DIFF_VIEW_AVAILABLE,
     DIFF_VIEW_INSTALL_HINT,
     INACTIVE_SECTION_TITLE_STYLE,
+    ChannelScreen,
     CompareScreen,
     DownloadPathScreen,
     Empty,
@@ -118,34 +122,32 @@ class CondaMetadataTui(App[None]):
     def __init__(
         self,
         *,
-        default_channel: str = "conda-forge",
+        default_channels: Iterable[str],
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
-        client: Client | None = None,
+        config: Config | None = None,
         cache_dir: Path | None = None,
     ) -> None:
         super().__init__()
-        channel_name = default_channel.strip() or "conda-forge"
         selected_platforms = set(default_platforms or [])
         self.theme = "ansi-dark"
-        self._client = (
-            client
-            if client is not None
-            else Client.default_client(user_agent=f"pixi-browse/{__version__}")
+        config = config if config is not None else Config()
+        self._client = Client.from_config(
+            config, user_agent=f"pixi-browse/{__version__}"
         )
 
         self._gateway: Gateway = create_gateway(
-            client=self._client, cache_dir=cache_dir
-        )
-        self._whoneeds_gateway: Gateway = create_gateway(
-            client=self._client, sharded_enabled=False, cache_dir=cache_dir
+            client=self._client, config=config, cache_dir=cache_dir
         )
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
         self._draft_selected_platform_names: set[Platform] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
-        self._channel_name = channel_name
+        # The channels being browsed, in the order they were added; never empty.
+        self._channel_names: list[str] = normalize_channel_names(default_channels)
+        if not self._channel_names:
+            raise ValueError("At least one channel is required.")
         self._mode: ViewMode = "packages"
         self._search_query = ""
         self._channel_package_names: list[str] = []
@@ -154,7 +156,7 @@ class CondaMetadataTui(App[None]):
         self._startup_matchspec = default_matchspec
         self._matchspec_query = ""
         self._whoneeds_target: str | PackageRecord | None = None
-        self._whoneeds_scanned_channel: str | None = None
+        self._whoneeds_scanned_channels: list[str] | None = None
         self._query_records_by_package: dict[str, list[RepoDataRecord]] = {}
         self._query_selection_lock = asyncio.Lock()
         self._current_versions: list[VersionEntry] = []
@@ -182,8 +184,6 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package: str | None = None
         self._package_preview_request: tuple[str, Worker[None]] | None = None
         self._filter_mode = False
-        self._channel_edit_mode = False
-        self._channel_draft = self._channel_name
         self._download_indicator_override: str | None = None
         self._download_in_progress = False
         self._file_action_in_progress = False
@@ -208,22 +208,28 @@ class CondaMetadataTui(App[None]):
         package_list.disabled = True
         package_list.focus()
         self._update_filter_indicator()
-        loaded = await self._load_packages()
-        if loaded and self._startup_matchspec is not None:
+        load_error = await self._load_packages()
+        if load_error is None and self._startup_matchspec is not None:
             await self._apply_matchspec_query(self._startup_matchspec)
 
-    async def _load_packages(self) -> bool:
+    async def _load_packages(self) -> str | None:
+        """Load the package list of the selected channels and platforms.
+
+        Returns the error message when loading fails, ``None`` on success.
+        """
         status = self.query_one("#status", Static)
-        status.update("Discovering available platforms via sharded gateway...")
+        status.update("Discovering available platforms...")
         try:
             await self._ensure_available_platforms()
             status.update(
-                f"Downloading repodata for {self._selected_platforms_text()} (sharded)..."
+                f"Downloading repodata for {self._selected_platforms_text()}..."
             )
             self._channel_package_names = await self._fetch_package_names_with_gateway()
         except (GatewayError, RuntimeError) as exc:
             status.update(f"Failed to load repodata: {exc!s}")
-            return False
+            # Rattler appends the failing request as "Caused by" lines; the
+            # first line already says what went wrong and for which channel.
+            return str(exc).strip().splitlines()[0]
 
         self._all_package_names = list(self._channel_package_names)
         self._visible_package_names = list(self._all_package_names)
@@ -236,12 +242,12 @@ class CondaMetadataTui(App[None]):
         self._update_package_selection_status()
         if self._visible_package_names:
             self._request_package_preview(self._visible_package_names[0])
-        return True
+        return None
 
     async def _discover_available_platforms(self) -> list[Platform]:
         return await discover_available_platforms(
             gateway=self._gateway,
-            channel_name=self._channel_name,
+            channel_names=self._channel_names,
         )
 
     async def _ensure_available_platforms(self) -> None:
@@ -265,7 +271,7 @@ class CondaMetadataTui(App[None]):
 
         self._platforms, package_names = await fetch_package_names(
             gateway=self._gateway,
-            channel_name=self._channel_name,
+            channel_names=self._channel_names,
             selected_platforms=self._selected_platform_names,
         )
         return package_names
@@ -416,23 +422,24 @@ class CondaMetadataTui(App[None]):
         self._version_loader.clear_caches()
 
     def _release_whoneeds_repodata(self) -> None:
-        """Drop the repodata the who-needs gateway scanned.
+        """Drop the repodata the who-needs query scanned.
 
-        A who-needs query runs against unsharded repodata, so the gateway
-        retains the *complete* repodata of every platform it scanned - well
-        over a gigabyte for a channel the size of conda-forge. Nothing needs
-        it once the who-needs view is gone, and the on-disk cache is kept, so
-        a later query only has to re-read it.
+        A who-needs query runs against the complete repodata, so the gateway
+        retains the full repodata of every platform it scanned - well over a
+        gigabyte for a channel the size of conda-forge. Nothing needs it once
+        the who-needs view is gone, and the on-disk cache is kept, so a later
+        query only has to re-read it.
 
-        The scanned channel is tracked separately because the channel may
-        already have been switched by the time this runs.
+        The scanned channels are tracked separately because the selection may
+        already have been changed by the time this runs.
         """
-        channel_name = self._whoneeds_scanned_channel
-        if channel_name is None:
+        channel_names = self._whoneeds_scanned_channels
+        if channel_names is None:
             return
 
-        self._whoneeds_scanned_channel = None
-        self._whoneeds_gateway.clear_repodata_cache(channel_name)
+        self._whoneeds_scanned_channels = None
+        for channel_name in channel_names:
+            self._gateway.clear_repodata_cache(channel_name)
 
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
@@ -495,7 +502,7 @@ class CondaMetadataTui(App[None]):
     ) -> MatchSpecQueryResult:
         return await query_matchspec_records(
             gateway=self._gateway,
-            channel_name=self._channel_name,
+            channel_names=self._channel_names,
             platforms=self._platforms,
             matchspec=matchspec,
         )
@@ -512,11 +519,11 @@ class CondaMetadataTui(App[None]):
         self, target: str | PackageRecord
     ) -> WhoNeedsQueryResult:
         # Remember what the gateway is about to cache so the repodata can be
-        # released again even if the channel changes in the meantime.
-        self._whoneeds_scanned_channel = self._channel_name
+        # released again even if the channels change in the meantime.
+        self._whoneeds_scanned_channels = list(self._channel_names)
         return await query_whoneeds_records(
-            gateway=self._whoneeds_gateway,
-            channel_name=self._channel_name,
+            gateway=self._gateway,
+            channel_names=self._channel_names,
             platforms=self._platforms,
             target=target,
             log=self.log.info,
@@ -531,7 +538,7 @@ class CondaMetadataTui(App[None]):
     def _snapshot_channel_state(self) -> ChannelStateSnapshot:
         package_list = self.query_one("#sidebar-list", OptionList)
         return ChannelStateSnapshot(
-            channel_name=self._channel_name,
+            channel_names=list(self._channel_names),
             mode=self._mode,
             draft_selected_platform_names=(
                 set(self._draft_selected_platform_names)
@@ -582,7 +589,7 @@ class CondaMetadataTui(App[None]):
         )
 
     def _restore_channel_state(self, snapshot: ChannelStateSnapshot) -> None:
-        self._channel_name = snapshot.channel_name
+        self._channel_names = list(snapshot.channel_names)
         self._mode = snapshot.mode
         self._draft_selected_platform_names = snapshot.draft_selected_platform_names
         self._current_versions = snapshot.current_versions
@@ -691,38 +698,37 @@ class CondaMetadataTui(App[None]):
         self._update_filter_indicator()
         self.query_one("#sidebar-list", OptionList).focus()
 
-    async def _apply_channel_selection(self, channel_name: str) -> None:
-        channel_name = channel_name.strip()
-        if not channel_name:
-            return
-
-        if channel_name == self._channel_name:
+    async def _apply_channel_selection(self, channel_names: Sequence[str]) -> None:
+        channel_names = normalize_channel_names(channel_names)
+        if not channel_names or channel_names == self._channel_names:
             self._update_filter_indicator()
             return
 
         previous_state = self._snapshot_channel_state()
-        self._channel_name = channel_name
+        self._channel_names = list(channel_names)
         self._clear_channel_loaded_state()
 
+        label = channels_label(channel_names)
         package_list = self.query_one("#sidebar-list", OptionList)
         self._render_sidebar_loading_option("Loading packages...")
         package_list.disabled = True
-        self._show_main_placeholder(f"# {escape(channel_name)}\n\nLoading repodata...")
+        self._show_main_placeholder(f"# {escape(label)}\n\nLoading repodata...")
         self._update_filter_indicator()
 
-        loaded = await self._load_packages()
-        if not loaded:
+        load_error = await self._load_packages()
+        if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
             package_list.focus()
             self.notify(
-                f"Failed to load channel: {channel_name}",
-                title="Channel",
+                f"Failed to load channels: {load_error}",
+                title="Channels",
                 severity="error",
             )
             return
 
-        self.notify(f"Switched to channel: {channel_name}", title="Channel")
+        noun = "channel" if len(channel_names) == 1 else "channels"
+        self.notify(f"Switched to {noun}: {label}", title="Channels")
 
     def _toggle_platform_at_index(self, platform_index: int) -> None:
         if platform_index < 0 or platform_index >= len(self._available_platform_names):
@@ -763,7 +769,7 @@ class CondaMetadataTui(App[None]):
 
         records = await query_package_records(
             gateway=self._gateway,
-            channel_name=self._channel_name,
+            channel_names=self._channel_names,
             platforms=self._platforms,
             package_name=package_name,
         )
@@ -936,7 +942,7 @@ class CondaMetadataTui(App[None]):
                 ("?", "Show this help"),
                 ("/", "Start package filter"),
                 ("p", "Open platform selector"),
-                ("c", "Edit channel"),
+                ("c", "Select channels"),
                 ("C", "Compare selected artifact in versions view"),
                 ("m", "Query MatchSpec"),
                 ("w", "Query reverse dependencies"),
@@ -963,14 +969,19 @@ class CondaMetadataTui(App[None]):
     async def _package_url_for_version_entry(
         self, package_name: str, entry: VersionEntry
     ) -> str:
-        record = await self._get_record_for_version_entry(package_name, entry)
-        if record is not None:
-            return str(record.url)
+        """The download URL of ``entry`` from its repodata record.
 
-        channel_base = self._channel_name.rstrip("/")
-        if "://" not in channel_base:
-            channel_base = f"https://conda.anaconda.org/{channel_base}"
-        return f"{channel_base}/{entry.subdir}/{entry.file_name}"
+        The version rows are built from the very records searched here, so a
+        record is normally found. Without one the URL cannot be known: the
+        entry could come from any of the selected channels, so guessing a
+        channel would download the wrong file or nothing at all.
+        """
+        record = await self._get_record_for_version_entry(package_name, entry)
+        if record is None:
+            raise RuntimeError(
+                f"No repodata record found for {package_name} {entry.file_name}."
+            )
+        return str(record.url)
 
     @staticmethod
     def _file_destination_path(file_path: str) -> Path:
@@ -2211,7 +2222,7 @@ class CondaMetadataTui(App[None]):
         # it, so the view behind it is left untouched: a failed query needs no
         # undoing, and nothing half-updated is ever on screen.
         loading_screen = WhoNeedsLoadingScreen(
-            query=query, channel_name=self._channel_name
+            query=query, channel_names=self._channel_names
         )
         self.push_screen(loading_screen)
         try:
@@ -2337,9 +2348,6 @@ class CondaMetadataTui(App[None]):
         return list(versions_by_key.values())
 
     def _footer_text(self) -> str | Text:
-        if self._channel_edit_mode:
-            return f"Channel: {self._channel_draft}_"
-
         if self._mode == "packages" and self._filter_mode:
             return f"Search: {self._search_query}_"
 
@@ -2468,38 +2476,23 @@ class CondaMetadataTui(App[None]):
         self._filter_packages()
         self._update_filter_indicator()
 
-    def _set_channel_edit_mode(self, enabled: bool, *, reset_draft: bool) -> None:
-        self._channel_edit_mode = enabled
-        if reset_draft:
-            self._channel_draft = self._channel_name
-        self._update_filter_indicator()
+    def _open_channel_screen(self) -> None:
+        self.push_screen(
+            ChannelScreen(self._channel_names),
+            self._handle_channel_result,
+        )
 
-    def _append_channel_char(self, char: str) -> None:
-        self._channel_draft += char
-        self._update_filter_indicator()
-
-    def _confirm_channel_edit(self) -> None:
-        channel_name = self._channel_draft.strip()
-        if not channel_name:
-            self.notify(
-                "Channel cannot be empty.",
-                title="Channel",
-                severity="warning",
-            )
+    def _handle_channel_result(self, result: list[str] | None) -> None:
+        if result is None:
             return
-        self._set_channel_edit_mode(False, reset_draft=False)
         self.run_worker(
-            self._apply_channel_selection(channel_name),
+            self._apply_channel_selection(result),
             group="channel-selection",
             exclusive=True,
             exit_on_error=False,
         )
 
     def action_filter_key_slash(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("/")
-            return
-
         if self._mode != "packages":
             return
 
@@ -2510,31 +2503,18 @@ class CondaMetadataTui(App[None]):
         self._append_filter_char("/")
 
     def action_platform_key_p(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("p")
-            return
-
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("p")
             return
         self._open_platform_selector()
 
     def action_channel_key_c(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("c")
-            return
-
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("c")
             return
-        self._set_channel_edit_mode(True, reset_draft=True)
-        self._update_filter_indicator()
+        self._open_channel_screen()
 
     def action_compare_key_c(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("C")
-            return
-
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("C")
             return
@@ -2590,7 +2570,7 @@ class CondaMetadataTui(App[None]):
 
     def action_matchspec_key_m(self) -> None:
         # Same input handover as action_whoneeds_key_w.
-        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
+        if self._mode == "packages" and self._filter_mode:
             return
 
         self._open_matchspec_screen(self._matchspec_query)
@@ -2677,7 +2657,6 @@ class CondaMetadataTui(App[None]):
             f"mode={self._mode!r} pane={self._selected_pane!r} "
             f"selected_package={self._selected_package!r} "
             f"filter_mode={self._filter_mode} "
-            f"channel_edit_mode={self._channel_edit_mode} "
             f"screens=[{screens}] focused={focused} "
             f"sidebar_highlight={highlighted} version_rows={len(self._version_rows)} "
             f"highlighted_kind={row_kind}"
@@ -2687,11 +2666,11 @@ class CondaMetadataTui(App[None]):
         # Logged unconditionally: if this line is missing from the log the key
         # never reached the action, so the binding itself was blocked.
         self.log.info(f"who-needs: key w pressed {self._whoneeds_key_context()}")
-        # While the package search or the channel prompt is taking input, on_key
-        # has already typed this key into it, so the binding must stand down. The
-        # search only takes input in the package list: filter mode outlives
-        # opening a package, and there the key belongs to who-needs again.
-        if self._channel_edit_mode or (self._mode == "packages" and self._filter_mode):
+        # While the package search is taking input, on_key has already typed
+        # this key into it, so the binding must stand down. The search only
+        # takes input in the package list: filter mode outlives opening a
+        # package, and there the key belongs to who-needs again.
+        if self._mode == "packages" and self._filter_mode:
             self.log.info("who-needs: key w ignored, the key was typed into a prompt")
             return
 
@@ -2726,6 +2705,11 @@ class CondaMetadataTui(App[None]):
             compare_screen = cast(CompareScreen, self.screen)
             compare_screen.action_next_section()
             return
+        if isinstance(self.screen, ModalScreen):
+            # Dialogs with several fields (the channel selector) rely on the
+            # regular focus chain, which this priority binding would swallow.
+            self.screen.focus_next()
+            return
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
@@ -2739,6 +2723,9 @@ class CondaMetadataTui(App[None]):
             compare_screen = cast(CompareScreen, self.screen)
             compare_screen.action_previous_section()
             return
+        if isinstance(self.screen, ModalScreen):
+            self.screen.focus_previous()
+            return
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
@@ -2748,20 +2735,12 @@ class CondaMetadataTui(App[None]):
         self._cycle_active_main_section(-1)
 
     def action_quit_or_type_q(self) -> None:
-        if self._channel_edit_mode:
-            self._append_channel_char("q")
-            return
-
         if self._mode == "packages" and self._filter_mode:
             self._append_filter_char("q")
             return
         self.exit()
 
     def action_escape(self) -> None:
-        if self._channel_edit_mode:
-            self._set_channel_edit_mode(False, reset_draft=True)
-            return
-
         if self._main_panel_is_focused():
             self._focus_sidebar()
             return
@@ -2791,38 +2770,6 @@ class CondaMetadataTui(App[None]):
                     self._request_file_action_for_selected_compare_file()
                 event.stop()
                 return
-
-        if self._channel_edit_mode:
-            self._reset_sidebar_vim_pending()
-            if event.key in {"p", "c", "C", "slash", "q"}:
-                return
-
-            if event.key == "enter":
-                # Bindings run after this handler: without preventing the
-                # default, the package list's own Enter binding would still
-                # select the highlighted package once the draft is confirmed.
-                event.prevent_default()
-                self._confirm_channel_edit()
-                event.stop()
-                return
-
-            if event.key == "backspace":
-                self._channel_draft = self._channel_draft[:-1]
-                self._update_filter_indicator()
-                event.stop()
-                return
-
-            if event.key == "space":
-                self._append_channel_char(" ")
-                event.stop()
-                return
-
-            if event.character and event.character.isprintable():
-                self._append_channel_char(event.character)
-                event.stop()
-                return
-
-            return
 
         if self._sidebar_is_focused() and not (
             self._mode == "packages" and self._filter_mode
@@ -2973,15 +2920,6 @@ class CondaMetadataTui(App[None]):
             self._filter_packages()
             self._update_filter_indicator()
             event.stop()
-
-    def on_paste(self, event: Paste) -> None:
-        if not self._channel_edit_mode:
-            return
-        sanitized = event.text.replace("\r", "").replace("\n", "")
-        if not sanitized:
-            return
-        self._append_channel_char(sanitized)
-        event.stop()
 
     def on_resize(self, event: Resize) -> None:
         del event

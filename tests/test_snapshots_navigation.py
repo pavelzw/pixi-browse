@@ -656,3 +656,31 @@ def test_q_exits_app(make_app: AppFactory) -> None:
             assert app.return_code == 0
 
     asyncio.run(run())
+
+
+def test_numeric_shortcut_from_focused_main_panel_switches_section(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``2`` also switches the section while the details panel itself is
+    focused."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", "2")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_enter_on_metadata_section_does_nothing(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Enter`` on the metadata section has no action, unlike the dependency
+    and file lists."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", "enter")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

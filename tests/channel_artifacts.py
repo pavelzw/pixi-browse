@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -89,14 +90,22 @@ async def _download(
 ) -> None:
     path = artifact.local_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    partial_path = path.with_name(path.name + ".part")
+    # The partial file is process-specific so that parallel test workers
+    # (``pytest -n auto``) downloading the same artifact cannot delete or
+    # rename each other's in-progress download. The final rename is atomic and
+    # every writer produces the same, hash-verified bytes.
+    partial_path = path.with_name(f"{path.name}.{os.getpid()}.part")
     url = manifest.url(artifact)
-    await download_to_path(client, url, partial_path)
-    digest = _sha256_of(partial_path)
-    if digest != artifact.sha256:
-        partial_path.unlink()
-        raise RuntimeError(f"{url}: expected sha256 {artifact.sha256}, got {digest}")
-    partial_path.replace(path)
+    try:
+        await download_to_path(client, url, partial_path)
+        digest = _sha256_of(partial_path)
+        if digest != artifact.sha256:
+            raise RuntimeError(
+                f"{url}: expected sha256 {artifact.sha256}, got {digest}"
+            )
+        partial_path.replace(path)
+    finally:
+        partial_path.unlink(missing_ok=True)
 
 
 async def _download_missing(manifest: ChannelManifest) -> int:
