@@ -197,3 +197,17 @@ def notification_messages(app: CondaMetadataTui) -> list[str]:
 async def type_text(pilot: Pilot[None], text: str) -> None:
     """Type ``text`` key by key, translating characters Textual names."""
     await pilot.press(*("space" if char == " " else char for char in text))
+
+
+async def clear_notifications(pilot: Pilot[None]) -> None:
+    """Drop the toasts raised so far, so a snapshot only shows the ones raised
+    by the step under test.
+
+    A toast disappears five seconds after it was raised, which makes it a
+    function of how fast the machine is rather than of what the app did. Setup
+    steps that take a noticeable share of those five seconds - loading the two
+    large polars archives, walking a long file list - therefore have to clear
+    their own toasts before the snapshot is taken.
+    """
+    pilot.app.clear_notifications()
+    await pilot.pause()

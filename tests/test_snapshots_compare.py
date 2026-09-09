@@ -17,6 +17,7 @@ from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
+    clear_notifications,
     open_versions,
     wait_for_idle,
     wait_for_screen,
@@ -35,12 +36,18 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
 
 async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
     """Compare ``polars 1.44.1`` (compare A) with ``polars 1.44.0`` on noarch;
-    the screen orders the older build on the left."""
+    the screen orders the older build on the left.
+
+    Reading the two archives takes seconds, so the "stored as compare A" toast
+    is dropped here: whether it is still on screen when a test takes its
+    snapshot would otherwise depend on the speed of the machine.
+    """
     await open_versions(pilot, package_index=2)
     await pilot.press("C", "j")
     await wait_for_idle(pilot)
     await pilot.press("C")
     await wait_for_idle(pilot)
+    await clear_notifications(pilot)
 
 
 # Row of ``site-packages/polars/functions/lit.py`` in the compare file list,
