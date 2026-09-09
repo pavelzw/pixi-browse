@@ -17,6 +17,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from filelock import FileLock
 from rattler.networking import Client
 from rattler.package_streaming import download_to_path
 
@@ -24,6 +25,8 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 MANIFEST_PATH = FIXTURES_DIR / "channel_artifacts.toml"
 # Git-ignored download location, one subdirectory per channel name.
 CHANNELS_DIR = FIXTURES_DIR / "channels"
+# Serializes the download across processes; inside the git-ignored directory.
+LOCK_PATH = CHANNELS_DIR / ".lock"
 
 
 @dataclass(frozen=True)
@@ -114,32 +117,43 @@ async def _download_missing(manifest: ChannelManifest) -> int:
         return 0
 
     client = Client.default_client(user_agent="pixi-browse-tests")
-    fetched = 0
     for artifact in missing:
-        # Re-checked per artifact instead of trusting the scan above: parallel
-        # test workers (``pytest -n auto``) each walk the whole manifest in the
-        # same order, so a sibling worker may have produced this artifact in
-        # the meantime. Skipping it downloads each artifact once per run rather
-        # than once per worker, and leaves the shared destination to the worker
-        # that is already renaming its own copy onto it.
-        if _is_valid(artifact):
-            continue
         print(f"fetching  {manifest.url(artifact)}", file=sys.stderr)
         await _download(client, manifest, artifact)
-        fetched += 1
-    return fetched
+    return len(missing)
+
+
+def _download_missing_exclusively(manifest: ChannelManifest) -> int:
+    """Run :func:`_download_missing` as the only process doing so.
+
+    Under ``pytest -n auto`` every worker is its own process and runs this, so
+    without the lock they all produce the same artifacts at the same time and
+    then rename their own copy onto the same destination. POSIX lets both
+    renames through, but on Windows renaming onto a path that another process
+    holds open is denied, and the workers hold each other's destinations open
+    both to hash them and to copy them into their channel directories. The
+    loser's rename then fails with ``PermissionError``, which takes its
+    session-scoped fixture and therefore every test in that worker with it.
+
+    Holding the lock across the whole scan-and-download makes the first
+    process in do the work while the others wait, and they then find every
+    artifact already valid and download nothing.
+    """
+    CHANNELS_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(LOCK_PATH):
+        return asyncio.run(_download_missing(manifest))
 
 
 def ensure_channel_artifacts() -> ChannelManifest:
     """Download every manifest artifact that is missing or has a wrong hash."""
     manifest = load_manifest()
-    asyncio.run(_download_missing(manifest))
+    _download_missing_exclusively(manifest)
     return manifest
 
 
 def main() -> int:
     manifest = load_manifest()
-    fetched = asyncio.run(_download_missing(manifest))
+    fetched = _download_missing_exclusively(manifest)
     print(
         f"{len(manifest.artifacts)} artifacts of {len(manifest.channels)} channels "
         f"in {CHANNELS_DIR} ({fetched} downloaded, "
