@@ -1008,34 +1008,6 @@ class MainPanel(Vertical):
             "#version-details-view", VersionDetailsView
         ).selected_file_sha256()
 
-    def file_path_at(self, index: int) -> str | None:
-        return self.query_one("#version-details-view", VersionDetailsView).file_path_at(
-            index
-        )
-
-    def file_size_at(self, index: int) -> int | None:
-        return self.query_one("#version-details-view", VersionDetailsView).file_size_at(
-            index
-        )
-
-    def file_sha256_at(self, index: int) -> bytes | None:
-        return self.query_one(
-            "#version-details-view", VersionDetailsView
-        ).file_sha256_at(index)
-
-    def set_metadata_tab(self, tab: MetadataTab) -> None:
-        self.query_one("#version-details-view", VersionDetailsView).set_metadata_tab(
-            tab
-        )
-
-    def set_dependency_tab(self, tab: DependencyTab) -> None:
-        self.query_one("#version-details-view", VersionDetailsView).set_dependency_tab(
-            tab
-        )
-
-    def set_file_tab(self, tab: FileTab) -> None:
-        self.query_one("#version-details-view", VersionDetailsView).set_file_tab(tab)
-
     def cycle_active_section(self, direction: int) -> None:
         self.query_one(
             "#version-details-view", VersionDetailsView
@@ -1102,20 +1074,12 @@ class MainPanel(Vertical):
         page_height = self.current_page_step()
         character = event.character
 
+        # Tab and Shift+Tab never arrive here: the app's priority bindings cycle
+        # the sections before the focused widget sees the key. The section
+        # shortcuts 1/2/3 bubble up to the app, which handles them for the
+        # focused and the unfocused panel alike.
         if self._showing_version_details():
             dependency_section_is_active = self.dependency_section_is_active()
-            if event.key == "tab":
-                self.cycle_active_section(1)
-                event.stop()
-                return
-            if event.key in {"shift+tab", "backtab"}:
-                self.cycle_active_section(-1)
-                event.stop()
-                return
-            if character in {"1", "2", "3"}:
-                self.set_active_section(int(character) - 1)
-                event.stop()
-                return
             if character == "[" and self.metadata_section_is_active():
                 self.cycle_metadata_tab(-1)
                 event.stop()
@@ -1473,10 +1437,6 @@ class CompareDetailsView(Vertical):
         )
 
     @staticmethod
-    def _row_style(row: CompareRow) -> tuple[str, str]:
-        return compare_row_styles(row)
-
-    @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
         if not row.comparison_known:
             return "#7a5c00"
@@ -1653,14 +1613,7 @@ class CompareDetailsView(Vertical):
         page_height = self.active_page_step()
         character = event.character
 
-        if event.key == "tab":
-            self.cycle_active_section(1)
-            event.stop()
-            return
-        if event.key in {"shift+tab", "backtab"}:
-            self.cycle_active_section(-1)
-            event.stop()
-            return
+        # Tab and Shift+Tab are handled by the compare screen's priority bindings.
         if character in {"1", "2", "3"}:
             self.set_active_section(int(character) - 1)
             event.stop()
@@ -1896,9 +1849,6 @@ class CompareScreen(Screen[None]):
         )
         self.query_one("#compare-details-view", CompareDetailsView).focus()
 
-    async def action_dismiss(self, result: None = None) -> None:
-        self.dismiss(result)
-
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
@@ -2051,11 +2001,6 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     def __init__(self, channel_names: Sequence[str]) -> None:
         super().__init__()
         self._channel_names = list(channel_names)
-
-    @property
-    def channel_names(self) -> list[str]:
-        """The selection as currently edited."""
-        return list(self._channel_names)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="channel-dialog"):
@@ -2270,9 +2215,6 @@ class MatchSpecScreen(ModalScreen[MatchSpec | Empty | None]):
 
         self.dismiss(result)
 
-    async def action_dismiss(self, result: MatchSpec | Empty | None = None) -> None:
-        self.dismiss(result)
-
 
 class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
     DEFAULT_CSS = """
@@ -2381,9 +2323,6 @@ class WhoNeedsScreen(ModalScreen[PackageName | Empty | None]):
 
         self.dismiss(result)
 
-    async def action_dismiss(self, result: PackageName | Empty | None = None) -> None:
-        self.dismiss(result)
-
 
 class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
     """Confirm a who-needs query for one concrete repodata entry.
@@ -2480,9 +2419,6 @@ class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
     def _select_action(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.dismiss(self.CHOICES[event.option_index][1])
-
-    async def action_dismiss(self, result: WhoNeedsConfirmChoice | None = None) -> None:
-        self.dismiss(result)
 
 
 class WhoNeedsLoadingScreen(ModalScreen[None]):
@@ -2654,9 +2590,6 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
         action = self._actions[event.option_index]
         self.dismiss(action)
 
-    async def action_dismiss(self, result: FileActionOption | None = None) -> None:
-        self.dismiss(result)
-
 
 class DownloadPathScreen(ModalScreen[str | None]):
     DEFAULT_CSS = """
@@ -2755,9 +2688,6 @@ class DownloadPathScreen(ModalScreen[str | None]):
             return
         self.dismiss(destination)
 
-    async def action_dismiss(self, result: str | None = None) -> None:
-        self.dismiss(result)
-
 
 class ScrollableModalScreen(ModalScreen[None]):
     """A modal whose body is a ``VerticalScroll`` driven by vim-style keys.
@@ -2809,10 +2739,6 @@ class ScrollableModalScreen(ModalScreen[None]):
 
     def action_scroll_end(self) -> None:
         self._scroll().scroll_end(animate=False)
-
-    async def action_dismiss(self, result: None = None) -> None:
-        del result
-        self.dismiss(None)
 
 
 class FilePreviewScreen(ScrollableModalScreen):
@@ -2982,6 +2908,3 @@ class HelpScreen(ModalScreen[None]):
         with Vertical(id="help-dialog"):
             yield Static(self._title_text(), id="help-title")
             yield Static(self._help_text, id="help-body")
-
-    async def action_dismiss(self, result: None = None) -> None:
-        self.dismiss(result)

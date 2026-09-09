@@ -4,7 +4,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any
 from urllib.parse import urlparse
 
 from rattler.exceptions import InvalidMatchSpecError
@@ -137,6 +136,10 @@ def _clickable_recipe_maintainers_value(handles: Sequence[str]) -> str:
     return ", ".join(format_clickable_github_handle(handle) for handle in handles)
 
 
+def _url_list_value(urls: Sequence[str]) -> str:
+    return ", ".join(escape(url) for url in urls)
+
+
 def _clickable_provenance_value(remote_url: str | None, sha: str | None) -> str | None:
     provenance_link = _provenance_link(remote_url, sha)
     if provenance_link is None:
@@ -145,30 +148,7 @@ def _clickable_provenance_value(remote_url: str | None, sha: str | None) -> str 
     return format_clickable_link(escape(label), commit_url)
 
 
-def _format_url_value(url: str, *, clickable: bool) -> str:
-    if clickable:
-        return format_clickable_url(url)
-    return escape(url)
-
-
-def _format_url_list_value(urls: Sequence[str], *, clickable: bool) -> str:
-    if clickable:
-        return _clickable_url_list_value(urls)
-    return ", ".join(escape(url) for url in urls)
-
-
-def _format_recipe_maintainers_value(handles: Sequence[str], *, clickable: bool) -> str:
-    if clickable:
-        return _clickable_recipe_maintainers_value(handles)
-    return ", ".join(escape(handle) for handle in handles)
-
-
-def _format_provenance_value(
-    remote_url: str | None, sha: str | None, *, clickable: bool
-) -> str | None:
-    if clickable:
-        return _clickable_provenance_value(remote_url, sha)
-
+def _provenance_value(remote_url: str | None, sha: str | None) -> str | None:
     provenance_link = _provenance_link(remote_url, sha)
     if provenance_link is None:
         return None
@@ -176,7 +156,7 @@ def _format_provenance_value(
     return escape(label)
 
 
-def format_record_value(value: Any) -> str:
+def format_record_value(value: object) -> str:
     if value is None:
         return "not available"
     if isinstance(value, bytes):
@@ -185,23 +165,15 @@ def format_record_value(value: Any) -> str:
         if not value:
             return "none"
         return ", ".join(str(item) for item in value)
-    if hasattr(value, "isoformat"):
-        try:
-            return value.isoformat()
-        except TypeError:
-            pass
+    if isinstance(value, datetime):
+        return value.isoformat()
     text = str(value)
     if text == "NoArchType(None)":
         return "none"
     return escape(text)
 
 
-def format_byte_size(value: Any) -> str:
-    if value is None:
-        return "not available"
-    if not isinstance(value, int) or value < 0:
-        return format_record_value(value)
-
+def _scale_byte_size(value: int) -> tuple[float, str]:
     units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
     size = float(value)
     unit = units[0]
@@ -210,27 +182,22 @@ def format_byte_size(value: Any) -> str:
         if size < 1024.0 or candidate == units[-1]:
             break
         size /= 1024.0
+    return size, unit
 
+
+def format_byte_size(value: int | None) -> str:
+    """Render a repodata size with the exact byte count, e.g. ``1.5 KiB (1,536 bytes)``."""
+    if value is None:
+        return "not available"
+    size, unit = _scale_byte_size(value)
     if unit == "B":
         return f"{value:,} B"
     return f"{size:.1f} {unit} ({value:,} bytes)"
 
 
-def format_human_byte_size(value: Any) -> str:
-    if value is None:
-        return "not available"
-    if not isinstance(value, int) or value < 0:
-        return format_record_value(value)
-
-    units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
-    size = float(value)
-    unit = units[0]
-    for candidate in units:
-        unit = candidate
-        if size < 1024.0 or candidate == units[-1]:
-            break
-        size /= 1024.0
-
+def format_human_byte_size(value: int) -> str:
+    """Render a file size compactly, e.g. ``1.5 KiB``."""
+    size, unit = _scale_byte_size(value)
     if unit == "B":
         return f"{value:,} B"
     return f"{size:.1f} {unit}"
@@ -316,7 +283,6 @@ def _metadata_rows_for_record(
     package_name: str,
     record: RepoDataRecord,
     *,
-    clickable: bool = False,
     repository_urls: Sequence[str] = (),
     documentation_urls: Sequence[str] = (),
     homepage_urls: Sequence[str] = (),
@@ -351,40 +317,22 @@ def _metadata_rows_for_record(
         ("SHA256", format_record_value(record.sha256)),
         ("Legacy .tar.bz2 MD5", format_record_value(record.legacy_bz2_md5)),
         ("Legacy .tar.bz2 Size", format_byte_size(record.legacy_bz2_size)),
-        ("Package URL", _format_url_value(str(record.url), clickable=clickable)),
+        ("Package URL", escape(str(record.url))),
     ]
     if repository_urls:
-        metadata_rows.append(
-            (
-                "Repository",
-                _format_url_list_value(repository_urls, clickable=clickable),
-            )
-        )
+        metadata_rows.append(("Repository", _url_list_value(repository_urls)))
     if documentation_urls:
-        metadata_rows.append(
-            (
-                "Documentation",
-                _format_url_list_value(documentation_urls, clickable=clickable),
-            )
-        )
+        metadata_rows.append(("Documentation", _url_list_value(documentation_urls)))
     if homepage_urls:
-        metadata_rows.append(
-            ("Homepage", _format_url_list_value(homepage_urls, clickable=clickable))
-        )
+        metadata_rows.append(("Homepage", _url_list_value(homepage_urls)))
     if recipe_maintainers:
         metadata_rows.append(
             (
                 "Recipe maintainers",
-                _format_recipe_maintainers_value(
-                    recipe_maintainers, clickable=clickable
-                ),
+                ", ".join(escape(handle) for handle in recipe_maintainers),
             )
         )
-    provenance_value = _format_provenance_value(
-        provenance_remote_url,
-        provenance_sha,
-        clickable=clickable,
-    )
+    provenance_value = _provenance_value(provenance_remote_url, provenance_sha)
     if provenance_value is not None:
         metadata_rows.append(("Provenance", provenance_value))
     if rattler_build_version:

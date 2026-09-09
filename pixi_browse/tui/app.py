@@ -39,9 +39,6 @@ from pixi_browse import __version__
 from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
-    DependencyTab,
-    FileTab,
-    MetadataTab,
     PackageFile,
     VersionArtifactData,
     VersionEntry,
@@ -79,12 +76,9 @@ from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
-    DEPENDENCY_TABS,
     DIFF_VIEW_AVAILABLE,
     DIFF_VIEW_INSTALL_HINT,
-    FILE_TABS,
     INACTIVE_SECTION_TITLE_STYLE,
-    METADATA_TABS,
     ChannelScreen,
     CompareScreen,
     DownloadPathScreen,
@@ -802,24 +796,6 @@ class CondaMetadataTui(App[None]):
     def _cycle_active_main_section(self, direction: int) -> None:
         self.query_one("#main-panel", MainPanel).cycle_active_section(direction)
 
-    def _set_main_metadata_tab(self, tab: MetadataTab) -> None:
-        self.query_one("#main-panel", MainPanel).set_metadata_tab(tab)
-
-    def _cycle_main_metadata_tab(self, direction: int) -> None:
-        self.query_one("#main-panel", MainPanel).cycle_metadata_tab(direction)
-
-    def _set_main_dependency_tab(self, tab: DependencyTab) -> None:
-        self.query_one("#main-panel", MainPanel).set_dependency_tab(tab)
-
-    def _cycle_main_dependency_tab(self, direction: int) -> None:
-        self.query_one("#main-panel", MainPanel).cycle_dependency_tab(direction)
-
-    def _set_main_file_tab(self, tab: FileTab) -> None:
-        self.query_one("#main-panel", MainPanel).set_file_tab(tab)
-
-    def _cycle_main_file_tab(self, direction: int) -> None:
-        self.query_one("#main-panel", MainPanel).cycle_file_tab(direction)
-
     def _selected_dependency_matchspec(self) -> str | None:
         return self.query_one("#main-panel", MainPanel).selected_dependency_matchspec()
 
@@ -834,15 +810,6 @@ class CondaMetadataTui(App[None]):
 
     def _selected_file_sha256(self) -> bytes | None:
         return self.query_one("#main-panel", MainPanel).selected_file_sha256()
-
-    def _file_path_at(self, index: int) -> str | None:
-        return self.query_one("#main-panel", MainPanel).file_path_at(index)
-
-    def _file_size_at(self, index: int) -> int | None:
-        return self.query_one("#main-panel", MainPanel).file_size_at(index)
-
-    def _file_sha256_at(self, index: int) -> bytes | None:
-        return self.query_one("#main-panel", MainPanel).file_sha256_at(index)
 
     def _open_matchspec_screen(
         self, initial_value: str, *, select_on_focus: bool = True
@@ -984,10 +951,6 @@ class CondaMetadataTui(App[None]):
             ],
         )
         return "\n".join([*navigation, "", *app])
-
-    @staticmethod
-    def _extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
-        return VersionDataLoader.extract_rattler_build_version(rendered_recipe_text)
 
     async def _get_record_for_version_entry(
         self, package_name: str, entry: VersionEntry
@@ -2737,33 +2700,6 @@ class CondaMetadataTui(App[None]):
     def action_open_external_url(self, url: str) -> None:
         webbrowser.open(url)
 
-    def action_select_metadata_tab(self, tab: str) -> None:
-        if self._mode != "versions":
-            return
-        if tab not in METADATA_TABS:
-            return
-        self._set_active_main_section(0)
-        self._set_main_metadata_tab(cast(MetadataTab, tab))
-        self._focus_main_panel()
-
-    def action_select_dependency_tab(self, tab: str) -> None:
-        if self._mode != "versions":
-            return
-        if tab not in DEPENDENCY_TABS:
-            return
-        self._set_active_main_section(1)
-        self._set_main_dependency_tab(cast(DependencyTab, tab))
-        self._focus_main_panel()
-
-    def action_select_file_tab(self, tab: str) -> None:
-        if self._mode != "versions":
-            return
-        if tab not in FILE_TABS:
-            return
-        self._set_active_main_section(2)
-        self._set_main_file_tab(cast(FileTab, tab))
-        self._focus_main_panel()
-
     def action_tab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
@@ -2825,16 +2761,10 @@ class CondaMetadataTui(App[None]):
                 f"who-needs: key w reached the app {self._whoneeds_key_context()}"
             )
 
+        # Tab and Shift+Tab never arrive here: the priority bindings on the app
+        # (and on the compare screen) consume them before ``on_key`` runs.
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             compare_screen = cast(CompareScreen, self.screen)
-            if event.key == "tab":
-                compare_screen.action_next_section()
-                event.stop()
-                return
-            if event.key in {"shift+tab", "backtab"}:
-                compare_screen.action_previous_section()
-                event.stop()
-                return
             if event.key == "enter":
                 if compare_screen.file_section_is_active():
                     self._request_file_action_for_selected_compare_file()
@@ -2912,37 +2842,6 @@ class CondaMetadataTui(App[None]):
         if (
             self._mode == "versions"
             and self._main_panel_shows_version_details()
-            and self._main_panel_is_focused()
-            and event.key == "tab"
-        ):
-            self._cycle_active_main_section(1)
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and self._main_panel_shows_version_details()
-            and self._main_panel_is_focused()
-            and event.key in {"shift+tab", "backtab"}
-        ):
-            self._cycle_active_main_section(-1)
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and (
-                not self._main_panel_shows_version_details()
-                or not self._main_panel_is_focused()
-            )
-            and event.key in {"tab", "shift+tab", "backtab"}
-        ):
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and self._main_panel_shows_version_details()
             and event.character in {"1", "2", "3"}
         ):
             self._set_active_main_section(int(event.character) - 1)
@@ -2956,61 +2855,6 @@ class CondaMetadataTui(App[None]):
             return
 
         if event.character == "1" and self._mode in {"packages", "versions"}:
-            self._focus_main_panel()
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and event.character == "["
-            and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
-        ):
-            self._cycle_main_dependency_tab(-1)
-            self._focus_main_panel()
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and event.character == "["
-            and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).file_section_is_active()
-        ):
-            self._cycle_main_file_tab(-1)
-            self._focus_main_panel()
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and event.character == "]"
-            and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).dependency_section_is_active()
-        ):
-            self._cycle_main_dependency_tab(1)
-            self._focus_main_panel()
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and event.character == "]"
-            and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).file_section_is_active()
-        ):
-            self._cycle_main_file_tab(1)
-            self._focus_main_panel()
-            event.stop()
-            return
-
-        if (
-            self._mode == "versions"
-            and event.character in {"[", "]"}
-            and self._selected_pane == "main"
-            and self.query_one("#main-panel", MainPanel).metadata_section_is_active()
-        ):
-            self._cycle_main_metadata_tab(-1 if event.character == "[" else 1)
             self._focus_main_panel()
             event.stop()
             return
