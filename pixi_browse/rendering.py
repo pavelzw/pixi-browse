@@ -11,8 +11,11 @@ from rattler.match_spec import MatchSpec
 from rattler.package import IndexJson, NoArchType, RunExportsJson
 from rattler.repo_data import RepoDataRecord
 from rich.markup import escape
+from rich.text import Text
 
 from pixi_browse.models import (
+    ChannelNoticeItem,
+    ChannelNoticeLevel,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -201,6 +204,48 @@ def format_human_byte_size(value: int) -> str:
     if unit == "B":
         return f"{value:,} B"
     return f"{size:.1f} {unit}"
+
+
+# Marker and colour of a channel notice, by CEP-6 level.
+CHANNEL_NOTICE_STYLES: dict[ChannelNoticeLevel, tuple[str, str]] = {
+    "critical": ("!!", "bold red"),
+    "warning": ("!", "yellow"),
+    "info": ("i", "cyan"),
+}
+
+
+def format_channel_notice_date(timestamp: str | None) -> str | None:
+    """The calendar date of a CEP-6 timestamp, or ``None`` if it has none."""
+    if timestamp is None:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp).date().isoformat()
+    except ValueError:
+        return timestamp
+
+
+def render_channel_notice_heading(item: ChannelNoticeItem) -> Text:
+    """Render the heading line of a channel notice for the channel dialog.
+
+    It names the level, the channel and the publication date in the level's
+    colour. The message is shown separately, indented under the heading, so a
+    long or multi-line message wraps without hiding where it came from.
+    """
+    marker, style = CHANNEL_NOTICE_STYLES[item.level]
+    text = Text()
+    text.append(f"{marker:>2} ", style=style)
+    text.append(item.level.upper(), style=style)
+    text.append(" · ", style="dim")
+    text.append(item.channel_name, style=style)
+    created = format_channel_notice_date(item.notice.created_at)
+    if created is not None:
+        text.append(f" · {created}", style="dim")
+    return text
+
+
+def render_channel_notice_message(item: ChannelNoticeItem) -> Text:
+    """The message of a channel notice, as plain text (never Rich markup)."""
+    return Text(item.notice.message.strip())
 
 
 def render_package_preview(

@@ -576,7 +576,8 @@ def test_channel_screen_lists_selected_channels(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
     """``c`` opens the channel dialog: the channels in the order they were
-    added, each with a remove button, the field to add one, and ``Apply``."""
+    added, each with a remove button, the notices ``bioconda`` published, the
+    field to add one, and ``Apply``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -587,6 +588,41 @@ def test_channel_screen_lists_selected_channels(
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
     )
+
+
+def test_channel_screen_shows_channel_notices(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``bioconda``'s ``notices.json`` has a critical, a warning and an info
+    notice plus an expired one: the dialog lists the three live notices most
+    urgent first, with the multi-line message indented under its heading."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+
+    assert snap_compare(
+        make_app(default_channels=[BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_shows_notices_after_adding_channel(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """The notices belong to the channels as loaded: adding ``bioconda`` shows
+    nothing yet (see ``test_channel_screen_adds_channel_at_the_end``), but
+    once ``Apply`` loaded it, reopening the dialog lists its notices."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await apply_channels(pilot)
+        await open_channel_screen(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
 def test_channel_screen_field_takes_input(

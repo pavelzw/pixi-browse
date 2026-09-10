@@ -15,6 +15,11 @@ The manifest lists artifacts of more than one channel (``bioconda`` next to
 ``conda-forge``), each served under its own name, so channel switching runs
 for real. ``missing`` is mirrored too but has no repodata at all, so loading
 it fails.
+
+Real channels rarely publish CEP-6 notices, so the test channels get their
+``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
+such a file exists (``bioconda`` has one, ``conda-forge`` has none). Rattler
+fetches it next to the repodata exactly as it would from a real channel.
 """
 
 from __future__ import annotations
@@ -38,7 +43,11 @@ from rattler.repo_data import Gateway
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
-from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
+from tests.channel_artifacts import (
+    CHANNEL_NOTICES_DIR,
+    ChannelManifest,
+    ensure_channel_artifacts,
+)
 from tests.helpers import (
     ANACONDA_CHANNELS_URL,
     MAIN_CHANNEL,
@@ -69,6 +78,9 @@ def fixture_channels_dir(
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact.local_path, destination)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
+        notices_path = CHANNEL_NOTICES_DIR / f"{channel_name}.json"
+        if notices_path.exists():
+            shutil.copyfile(notices_path, channel_dir / "notices.json")
     return channels_dir
 
 

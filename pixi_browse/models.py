@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from rattler.package import RunExportsJson
+from rattler.repo_data import ChannelNotice
 from rattler.version import Version
 
 ViewMode = Literal["packages", "versions", "platforms"]
@@ -14,6 +15,24 @@ DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 MetadataRow = tuple[str, str]
+ChannelNoticeLevel = Literal["info", "warning", "critical"]
+
+
+@dataclass(frozen=True)
+class ChannelNoticeItem:
+    """A CEP-6 channel notice paired with the channel name the user browses.
+
+    Rattler reports the channel of a notice as its base URL. The app shows
+    channels under the name (or URL) they were added with, so the URL is
+    resolved back to that name once when the notices are fetched.
+    """
+
+    channel_name: str
+    notice: ChannelNotice
+
+    @property
+    def level(self) -> ChannelNoticeLevel:
+        return self.notice.level
 
 
 @dataclass(frozen=True)

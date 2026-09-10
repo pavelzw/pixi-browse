@@ -24,6 +24,8 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 MANIFEST_PATH = FIXTURES_DIR / "channel_artifacts.toml"
 # Git-ignored download location, one subdirectory per channel name.
 CHANNELS_DIR = FIXTURES_DIR / "channels"
+# Committed CEP-6 ``notices.json`` files, one per channel name that has notices.
+CHANNEL_NOTICES_DIR = FIXTURES_DIR / "channel_notices"
 
 
 @dataclass(frozen=True)

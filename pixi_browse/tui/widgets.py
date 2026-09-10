@@ -25,6 +25,7 @@ from textual.widgets import Button, Input, LoadingIndicator, OptionList, Static
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
+    ChannelNoticeItem,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -40,6 +41,8 @@ from pixi_browse.rendering import (
     format_human_byte_size,
     format_version_details_metadata_lines,
     format_version_details_run_exports,
+    render_channel_notice_heading,
+    render_channel_notice_message,
 )
 
 try:
@@ -1881,6 +1884,22 @@ class ChannelRow(Horizontal):
         )
 
 
+class ChannelNoticeView(Vertical):
+    """One CEP-6 channel notice: its heading with the message indented below."""
+
+    def __init__(self, item: ChannelNoticeItem) -> None:
+        super().__init__(classes="channel-notice")
+        self._item = item
+
+    def compose(self) -> ComposeResult:
+        yield Static(render_channel_notice_heading(self._item), markup=False)
+        yield Static(
+            render_channel_notice_message(self._item),
+            classes="channel-notice-message",
+            markup=False,
+        )
+
+
 class ChannelScreen(ModalScreen[list[str] | None]):
     """Edit the list of channels the app browses.
 
@@ -1888,6 +1907,12 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     adds the typed channel to the list on ``Enter``. Nothing is loaded until
     ``Apply`` is pressed, and ``Escape`` drops every edit. At least one channel
     always stays, so the app never ends up without anything to show.
+
+    When the loaded channels published CEP-6 notices (``notices.json`` at the
+    channel root, e.g. a security advisory or a deprecation), they are listed
+    under the channels, most urgent first. The notices belong to the channels
+    as loaded: adding a channel in the dialog shows its notices only after
+    ``Apply`` loaded it.
 
     ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
     field, ``Apply``. ``Tab`` cycles the same widgets.
@@ -1916,6 +1941,26 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     #channel-rows {
         height: auto;
         max-height: 10;
+    }
+
+    #channel-notices {
+        height: auto;
+        max-height: 12;
+        margin-top: 1;
+    }
+
+    #channel-notices-title {
+        text-style: bold;
+    }
+
+    .channel-notice {
+        height: auto;
+        padding: 0 1;
+        margin-top: 1;
+    }
+
+    .channel-notice-message {
+        padding-left: 3;
     }
 
     .channel-row {
@@ -1998,9 +2043,15 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     HELP = "Enter adds the typed channel. Up/Down: move between fields | Esc: cancel"
 
-    def __init__(self, channel_names: Sequence[str]) -> None:
+    def __init__(
+        self,
+        channel_names: Sequence[str],
+        *,
+        notices: Sequence[ChannelNoticeItem] = (),
+    ) -> None:
         super().__init__()
         self._channel_names = list(channel_names)
+        self._notices = list(notices)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="channel-dialog"):
@@ -2008,6 +2059,13 @@ class ChannelScreen(ModalScreen[list[str] | None]):
             yield VerticalScroll(
                 *self._channel_rows(), id="channel-rows", can_focus=False
             )
+            if self._notices:
+                yield VerticalScroll(
+                    Static(self._notices_title(), id="channel-notices-title"),
+                    *(ChannelNoticeView(item) for item in self._notices),
+                    id="channel-notices",
+                    can_focus=False,
+                )
             yield Input(placeholder="Add a channel name or URL", id="channel-input")
             yield Static("", id="channel-error")
             with Horizontal(id="channel-actions"):
@@ -2018,6 +2076,10 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         self.query_one("#channel-input", Input).focus()
 
     # -- rendering -------------------------------------------------------------
+
+    def _notices_title(self) -> str:
+        count = len(self._notices)
+        return f"{count} channel notice{'s' if count != 1 else ''}"
 
     def _channel_rows(self) -> list[ChannelRow]:
         removable = len(self._channel_names) > 1
