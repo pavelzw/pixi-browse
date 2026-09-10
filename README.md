@@ -51,9 +51,12 @@ differs between them. This uses
 AGPL-3.0 licensed and therefore not installed by default:
 
 ```bash
-pixi global install pixi-browse --with textual-diff-view
+pixi global install 'pixi-browse[extras=diff]'
+pixi exec -s 'pixi-browse[extras=diff]' pixi-browse
+
 # or from PyPI
-uv tool install "pixi-browse[diff]"
+uv tool install 'pixi-browse[diff]'
+uvx 'pixi-browse[diff]'
 ```
 
 Without it, the `Diff left / right` action in the compare view asks for this
