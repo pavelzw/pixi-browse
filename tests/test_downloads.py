@@ -28,7 +28,7 @@ from tests.helpers import (
     wait_for_screen,
 )
 
-PIXI_BROWSE_FILE_NAME = "pixi-browse-0.0.14-pyhc364b38_0.conda"
+PIXI_BROWSE_FILE_NAME = "pixi-browse-0.0.15-pyhc364b38_0.conda"
 
 
 def test_d_downloads_highlighted_artifact_to_cwd(

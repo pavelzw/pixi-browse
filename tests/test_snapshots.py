@@ -55,7 +55,7 @@ def test_versions_view_groups_subdirs_by_latest_version(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         # Focus the main panel and switch the dependency section to run exports.
-        await pilot.press("l", "tab", "]", "]")
+        await pilot.press("l", "tab", "[")
         await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

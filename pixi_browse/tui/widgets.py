@@ -61,6 +61,7 @@ VERSION_DETAIL_SECTION_COUNT = 3
 METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
+    "extra_depends",
     "constraints",
     "run_exports",
 )
@@ -621,6 +622,18 @@ class VersionDetailsView(Vertical):
     def _dependency_entries_for_tab(
         self, tab: DependencyTab
     ) -> tuple[DependencyListEntry, ...]:
+        if tab == "extra_depends":
+            assert self._details is not None
+            entries: list[DependencyListEntry] = []
+            for group, dependencies in self._details.extra_depends:
+                entries.append(DependencyListEntry(label=f"{group}:", matchspec=None))
+                entries.extend(
+                    DependencyListEntry(label=f"  {dependency}", matchspec=dependency)
+                    for dependency in dependencies
+                )
+            return tuple(entries) or (
+                DependencyListEntry(label="No extra dependencies.", matchspec=None),
+            )
         lines = self._dependency_lines(tab)
         if tab == "run_exports":
             return tuple(
@@ -738,12 +751,17 @@ class VersionDetailsView(Vertical):
         if self._details is None:
             labels = {
                 "dependencies": "Dependencies",
+                "extra_depends": "Extra depends",
                 "constraints": "Constraints",
                 "run_exports": "Run exports",
             }
         else:
             labels = {
                 "dependencies": f"Dependencies ({len(self._details.dependencies)})",
+                "extra_depends": (
+                    "Extra depends "
+                    f"({sum(len(dependencies) for _, dependencies in self._details.extra_depends)})"
+                ),
                 "constraints": f"Constraints ({len(self._details.constraints)})",
                 "run_exports": (
                     "Run exports "
@@ -1356,6 +1374,7 @@ class CompareDetailsView(Vertical):
     def _render_dependency_tabs(self) -> Text:
         labels = {
             "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
+            "extra_depends": f"Extra depends ({len(self._compare_data.extra_depends)})",
             "constraints": f"Constraints ({len(self._compare_data.constraints)})",
             "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
         }
@@ -1417,6 +1436,8 @@ class CompareDetailsView(Vertical):
     def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareRow, ...]:
         if tab == "dependencies":
             return self._compare_data.dependencies
+        if tab == "extra_depends":
+            return self._compare_data.extra_depends
         if tab == "constraints":
             return self._compare_data.constraints
         return self._compare_data.run_exports
@@ -1433,7 +1454,8 @@ class CompareDetailsView(Vertical):
         return self._render_compare_table(
             self._dependency_lines(tab),
             empty_message="No dependency data.",
-            show_label_column=False,
+            show_label_column=tab == "extra_depends",
+            label_title="Extra",
         )
 
     @staticmethod
@@ -1765,6 +1787,7 @@ class CompareScreen(Screen[None]):
             right_selection=self._compare_data.right_selection,
             metadata_rows=self._compare_data.metadata_rows,
             dependencies=self._compare_data.dependencies,
+            extra_depends=self._compare_data.extra_depends,
             constraints=self._compare_data.constraints,
             run_exports=self._compare_data.run_exports,
             files=self._compare_data.files,
@@ -1810,6 +1833,7 @@ class CompareScreen(Screen[None]):
             right_selection=compare_data.left_selection,
             metadata_rows=cls._swap_rows(compare_data.metadata_rows),
             dependencies=cls._swap_rows(compare_data.dependencies),
+            extra_depends=cls._swap_rows(compare_data.extra_depends),
             constraints=cls._swap_rows(compare_data.constraints),
             run_exports=cls._swap_rows(compare_data.run_exports),
             files=cls._swap_file_rows(compare_data.files),

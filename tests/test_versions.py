@@ -1710,7 +1710,7 @@ def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
     view = VersionDetailsView()
     view._active_section = 0
-    view._dependency_tab_index = 1
+    view.set_dependency_tab("constraints")
     view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
