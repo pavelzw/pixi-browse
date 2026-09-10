@@ -1,4 +1,4 @@
-"""Snapshot tests of comparing two real ``libzlib`` artifacts."""
+"""Snapshot tests of comparing real package artifacts."""
 
 from __future__ import annotations
 
@@ -97,12 +97,12 @@ def test_compare_screen_shows_metadata_diff(
 def test_compare_screen_tab_activates_dependencies(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Tab`` activates the dependency pane; ``]`` twice switches it to the run
+    """``Tab`` activates the dependency pane; ``[`` switches it to the run
     exports."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
-        await pilot.press("tab", "]", "]")
+        await pilot.press("tab", "[")
         await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
@@ -274,5 +274,25 @@ def test_compare_screen_diff_escape_returns_to_compare(
         await wait_for_screen(pilot, FileDiffScreen)
         await pilot.press("escape")
         await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["added", "removed"])
+def test_compare_extra_depends(
+    snap_compare: SnapCompare, make_app: AppFactory, swap: bool
+) -> None:
+    """0.0.15 adds the diff extra relative to 0.0.14; swapping reverses it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("C", "j")
+        await wait_for_idle(pilot)
+        await pilot.press("C")
+        await wait_for_idle(pilot)
+        await pilot.press("2", "]")
+        if swap:
+            await pilot.press("x")
+        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

@@ -330,11 +330,11 @@ def test_metadata_tab_persists_across_artifacts(
 def test_bracket_switches_dependency_tab_to_constraints(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``]`` in the dependency section switches to the (empty) constraints tab."""
+    """``]`` in the dependency section switches past extra dependencies to the constraints tab."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
-        await pilot.press("2", "]")
+        await pilot.press("2", "]", "]")
         await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
@@ -406,5 +406,17 @@ def test_resize_rerenders_versions_view(
         await open_versions(pilot, package_index=0)
         await pilot.resize_terminal(90, 30)
         await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize("package_index", [0, 1], ids=["empty", "grouped"])
+def test_extra_depends_tab(
+    snap_compare: SnapCompare, make_app: AppFactory, package_index: int
+) -> None:
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=package_index)
+        await pilot.press("2", "]")
+        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
