@@ -56,7 +56,6 @@ pixi exec -s 'pixi-browse[extras=diff]' pixi-browse
 
 # or from PyPI
 uv tool install 'pixi-browse[diff]'
-# or use without installation
 uvx 'pixi-browse[diff]'
 ```
 
