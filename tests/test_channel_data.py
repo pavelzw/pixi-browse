@@ -21,6 +21,8 @@ from pixi_browse.models import VersionArtifactData
 from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
+    render_channel_notice_heading,
+    render_channel_notice_message,
     render_package_preview,
 )
 from pixi_browse.repodata import (
@@ -108,7 +110,8 @@ def test_normalize_channel_names_strips_and_dedupes() -> None:
 def test_fetch_package_names_lists_channel_packages(
     make_gateway: GatewayFactory,
 ) -> None:
-    platforms, names = asyncio.run(
+    """``conda-forge`` has no ``notices.json``; that is not an error."""
+    result = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL],
@@ -116,14 +119,15 @@ def test_fetch_package_names_lists_channel_packages(
         )
     )
 
-    assert platforms == list(CHANNEL_PLATFORMS)
-    assert names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
+    assert result.platforms == list(CHANNEL_PLATFORMS)
+    assert result.package_names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
+    assert result.notices == []
 
 
 def test_fetch_package_names_merges_all_channels(
     make_gateway: GatewayFactory,
 ) -> None:
-    _platforms, names = asyncio.run(
+    result = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
@@ -131,7 +135,7 @@ def test_fetch_package_names_merges_all_channels(
         )
     )
 
-    assert names == [
+    assert result.package_names == [
         "libzlib",
         "pixi-browse",
         "polars",
@@ -140,6 +144,45 @@ def test_fetch_package_names_merges_all_channels(
         "snakemake-wrapper-utils",
         "zlib",
     ]
+
+
+def test_fetch_package_names_returns_channel_notices(
+    make_gateway: GatewayFactory, snapshot: SnapshotAssertion
+) -> None:
+    """The notices of ``bioconda``'s ``notices.json`` come back attributed to
+    the channel name, most urgent first, without the expired one."""
+    result = asyncio.run(
+        fetch_package_names(
+            gateway=make_gateway(),
+            channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
+            selected_platforms=CHANNEL_PLATFORMS,
+        )
+    )
+
+    assert [
+        (item.channel_name, item.level, item.notice.id) for item in result.notices
+    ] == [
+        (BIOCONDA_CHANNEL, "critical", "pyfaidx-security"),
+        (BIOCONDA_CHANNEL, "warning", "python-3.9-eol"),
+        (BIOCONDA_CHANNEL, "info", "mirror"),
+    ]
+    assert [
+        {
+            "channel": item.notice.channel,
+            "created_at": item.notice.created_at,
+            "expires_at": item.notice.expires_at,
+            "interval": item.notice.interval,
+            "message": item.notice.message,
+        }
+        for item in result.notices
+    ] == snapshot
+    assert [
+        (
+            render_channel_notice_heading(item).plain,
+            render_channel_notice_message(item).plain,
+        )
+        for item in result.notices
+    ] == snapshot
 
 
 def test_query_whoneeds_records_spans_all_channels(

@@ -38,6 +38,7 @@ from textual.worker import Worker
 
 from pixi_browse import __version__
 from pixi_browse.models import (
+    ChannelNoticeItem,
     CompareFileRow,
     CompareSelection,
     PackageFile,
@@ -162,6 +163,8 @@ class CondaMetadataTui(App[None]):
         self._channel_names: list[str] = normalize_channel_names(default_channels)
         if not self._channel_names:
             raise ValueError("At least one channel is required.")
+        # The CEP-6 notices of the loaded channels, most urgent first.
+        self._channel_notices: list[ChannelNoticeItem] = []
         self._mode: ViewMode = "packages"
         self._search_query = ""
         self._channel_package_names: list[str] = []
@@ -344,12 +347,14 @@ class CondaMetadataTui(App[None]):
     async def _fetch_package_names_with_gateway(self) -> list[str]:
         await self._ensure_available_platforms()
 
-        self._platforms, package_names = await fetch_package_names(
+        result = await fetch_package_names(
             gateway=self._gateway,
             channel_names=self._channel_names,
             selected_platforms=self._selected_platform_names,
         )
-        return package_names
+        self._platforms = result.platforms
+        self._channel_notices = result.notices
+        return result.package_names
 
     def _render_package_options(self, *, preserve_position: bool = False) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -609,6 +614,7 @@ class CondaMetadataTui(App[None]):
         self._clear_compare_state()
         self._platforms = []
         self._available_platform_names = []
+        self._channel_notices = []
         self._channel_package_names = []
         self._all_package_names = []
         self._visible_package_names = []
@@ -672,6 +678,7 @@ class CondaMetadataTui(App[None]):
         package_list = self.query_one("#sidebar-list", OptionList)
         return ChannelStateSnapshot(
             channel_names=list(self._channel_names),
+            channel_notices=list(self._channel_notices),
             mode=self._mode,
             draft_selected_platform_names=(
                 set(self._draft_selected_platform_names)
@@ -723,6 +730,7 @@ class CondaMetadataTui(App[None]):
 
     def _restore_channel_state(self, snapshot: ChannelStateSnapshot) -> None:
         self._channel_names = list(snapshot.channel_names)
+        self._channel_notices = list(snapshot.channel_notices)
         self._mode = snapshot.mode
         self._draft_selected_platform_names = snapshot.draft_selected_platform_names
         self._current_versions = snapshot.current_versions
@@ -2726,7 +2734,8 @@ class CondaMetadataTui(App[None]):
     def _open_channel_screen(self, channel_names: Sequence[str] | None = None) -> None:
         self.push_screen(
             ChannelScreen(
-                self._channel_names if channel_names is None else channel_names
+                self._channel_names if channel_names is None else channel_names,
+                notices=self._channel_notices,
             ),
             self._handle_channel_result,
         )

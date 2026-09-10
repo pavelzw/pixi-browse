@@ -1,4 +1,51 @@
 # serializer version: 1
+# name: test_fetch_package_names_returns_channel_notices
+  list([
+    dict({
+      'channel': 'https://conda.anaconda.org/bioconda/',
+      'created_at': '2025-12-15T00:00:00Z',
+      'expires_at': '2099-01-01T00:00:00Z',
+      'interval': None,
+      'message': '''
+        pyfaidx <0.8 has a known security issue.
+        Update to pyfaidx 0.8.1 or later.
+      ''',
+    }),
+    dict({
+      'channel': 'https://conda.anaconda.org/bioconda/',
+      'created_at': '2025-11-03T09:00:00Z',
+      'expires_at': '2099-01-01T00:00:00Z',
+      'interval': 168,
+      'message': 'Builds for Python 3.9 stop on 2026-01-01. Pin a newer Python before then.',
+    }),
+    dict({
+      'channel': 'https://conda.anaconda.org/bioconda/',
+      'created_at': None,
+      'expires_at': None,
+      'interval': None,
+      'message': 'The channel is also mirrored at https://prefix.dev/bioconda.',
+    }),
+  ])
+# ---
+# name: test_fetch_package_names_returns_channel_notices.1
+  list([
+    tuple(
+      '!! CRITICAL · bioconda · 2025-12-15',
+      '''
+        pyfaidx <0.8 has a known security issue.
+        Update to pyfaidx 0.8.1 or later.
+      ''',
+    ),
+    tuple(
+      ' ! WARNING · bioconda · 2025-11-03',
+      'Builds for Python 3.9 stop on 2026-01-01. Pin a newer Python before then.',
+    ),
+    tuple(
+      ' i INFO · bioconda',
+      'The channel is also mirrored at https://prefix.dev/bioconda.',
+    ),
+  ])
+# ---
 # name: test_load_version_artifact_data_reads_real_archives[libzlib-linux-64-1.3.2]
   dict({
     'dependencies': list([
