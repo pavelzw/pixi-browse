@@ -7,15 +7,19 @@ offline channel; see ``test_snapshots.py`` for how snapshots are reviewed.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from textual.pilot import Pilot
 
+from pixi_browse.tui import DetailSection, MatchSpecScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
     open_versions,
     wait_for_idle,
+    wait_for_screen,
 )
 
 
@@ -406,5 +410,277 @@ def test_resize_rerenders_versions_view(
         await open_versions(pilot, package_index=0)
         await pilot.resize_terminal(90, 30)
         await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_tab_in_packages_view_does_nothing(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Tab`` has no sections to cycle in the package list."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("tab", "shift+tab")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_tab_is_ignored_while_details_show_a_platform_section(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """With the section placeholder in the focused main panel, ``Tab`` and
+    ``Shift+Tab`` have no detail sections to cycle."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("k", "l", "tab", "shift+tab")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_bracket_on_platform_section_does_not_change_hidden_tabs(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``]`` on the section placeholder must not switch the tab of the hidden
+    details: the next artifact still opens on the metadata tab."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("k", "l", "]", "h", "j")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_enter_on_back_row_returns_to_packages(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Enter`` on ``< Back to packages`` leaves the versions view."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("k", "k", "enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_enter_twice_on_platform_section_expands_it_again(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A second ``Enter`` on a collapsed platform section expands it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("k", "enter", "enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_slash_in_versions_view_does_not_start_search(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """The package search is only available in the package list."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("slash")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_left_bracket_wraps_metadata_tab_to_patches(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the first metadata tab wraps around to the repodata patches."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_left_bracket_wraps_file_tab_to_info(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the ``pkg/`` tab wraps around to ``info/``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("3", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    ("section_index", "column"),
+    [(0, 20), (1, 30), (2, 22)],
+    ids=["patches", "constraints", "info"],
+)
+def test_clicking_tab_label_switches_tab(
+    snap_compare: SnapCompare,
+    make_app: AppFactory,
+    section_index: int,
+    column: int,
+) -> None:
+    """Clicking the second tab label in a section header activates that
+    section, switches its tab and focuses the details panel."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        # The labels start after "╭─[n] " on the top border of each section.
+        section = list(pilot.app.screen.query(DetailSection))[section_index]
+        await pilot.click(section, offset=(column, 0))
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_clicking_dependency_row_opens_matchspec_screen(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Clicking a dependency queries it, like ``Enter`` does."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.click("#detail-option-list-1", offset=(2, 1))
+        await wait_for_screen(pilot, MatchSpecScreen)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_j_and_gg_move_highlight_in_dependency_list(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``j`` and ``k`` move the dependency highlight, ``G`` jumps to the last
+    dependency and ``gg`` back to the first."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "j", "j", "k", "G", "g", "g", "j")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        ("ctrl+d",),
+        ("end", "ctrl+u", "j"),
+        ("G", "g", "g", "j"),
+        ("pagedown", "pageup", "home", "j"),
+    ],
+    ids=["ctrl+d", "end-ctrl+u", "gg", "pagedown-pageup-home"],
+)
+def test_paging_keys_move_file_highlight(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """Paging and jump keys move the highlight in the file list by a page or to
+    either end; a trailing ``j`` shows the highlight did land on the first file."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("3", *keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize("keys", [("G",), ("j", "j", "j")], ids=["G", "jjj"])
+def test_metadata_section_scrolls_its_text(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """The metadata text is taller than its section: ``j`` scrolls it line by
+    line and ``G`` jumps to the end."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", *keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys", [("j", "j"), ("G",), ("G", "g", "g")], ids=["jj", "G", "G-gg"]
+)
+def test_package_preview_scrolls_in_a_short_terminal(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """With the details panel focused, the scroll keys also move the package
+    preview once it does not fit the terminal."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("l", *keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=(100, 12))
+
+
+def test_resize_rerenders_platform_selector(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Resizing while the platform selector is open keeps the highlighted
+    platform."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("p", "j")
+        await pilot.pause()
+        await pilot.resize_terminal(90, 30)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_q_exits_app(make_app: AppFactory) -> None:
+    """``q`` quits the app from the package list."""
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await wait_for_idle(pilot)
+            assert app.return_code is None
+            await pilot.press("q")
+            await pilot.pause()
+            assert app.return_code == 0
+
+    asyncio.run(run())
+
+
+def test_numeric_shortcut_from_focused_main_panel_switches_section(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``2`` also switches the section while the details panel itself is
+    focused."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", "2")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_enter_on_metadata_section_does_nothing(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Enter`` on the metadata section has no action, unlike the dependency
+    and file lists."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("l", "enter")
+        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

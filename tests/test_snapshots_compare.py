@@ -7,11 +7,17 @@ import asyncio
 import pytest
 from textual.pilot import Pilot
 
-from pixi_browse.tui import DIFF_VIEW_AVAILABLE, FileActionScreen, FileDiffScreen
+from pixi_browse.tui import (
+    DIFF_VIEW_AVAILABLE,
+    DetailSection,
+    FileActionScreen,
+    FileDiffScreen,
+)
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapCompare,
+    clear_notifications,
     open_versions,
     wait_for_idle,
     wait_for_screen,
@@ -30,17 +36,28 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
 
 async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
     """Compare ``polars 1.44.1`` (compare A) with ``polars 1.44.0`` on noarch;
-    the screen orders the older build on the left."""
+    the screen orders the older build on the left.
+
+    Reading the two archives takes seconds, so the "stored as compare A" toast
+    is dropped here: whether it is still on screen when a test takes its
+    snapshot would otherwise depend on the speed of the machine.
+    """
     await open_versions(pilot, package_index=2)
     await pilot.press("C", "j")
     await wait_for_idle(pilot)
     await pilot.press("C")
     await wait_for_idle(pilot)
+    await clear_notifications(pilot)
 
 
 # Row of ``site-packages/polars/functions/lit.py`` in the compare file list,
 # which follows the order of the older build's ``paths.json``.
 POLARS_LIT_PY_ROW = 91
+# ``site-packages/polars/dataframe/frame.py`` (505 KiB, unchanged) and
+# ``site-packages/polars/lazyframe/frame.py`` (384 KiB, changed), both above the
+# in-app preview limit.
+POLARS_DATAFRAME_PY_ROW = 48
+POLARS_LAZYFRAME_PY_ROW = 164
 
 
 def test_compare_key_stores_first_selection(
@@ -237,6 +254,19 @@ def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
     asyncio.run(run())
 
 
+def test_compare_key_in_packages_view_is_ignored(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``C`` only stores artifacts in the versions view."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("C")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
@@ -258,6 +288,124 @@ def test_compare_screen_diff_of_python_file(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_compare_screen_left_bracket_wraps_dependency_tab(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the dependencies tab wraps around to the run exports."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("tab", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_left_bracket_wraps_file_tab(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``[`` on the ``pkg/`` tab wraps around to ``info/``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("3", "[")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    ("section_index", "column"),
+    [(1, 30), (2, 20)],
+    ids=["constraints", "info"],
+)
+def test_compare_screen_clicking_tab_label_switches_tab(
+    snap_compare: SnapCompare,
+    make_app: AppFactory,
+    section_index: int,
+    column: int,
+) -> None:
+    """Clicking the second tab label of a compare section switches its tab."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        section = list(pilot.app.screen.query(DetailSection))[section_index]
+        await pilot.click(section, offset=(column, 0))
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        ("3", "ctrl+d"),
+        ("3", "end", "k"),
+        ("3", "G", "g", "g", "j"),
+        ("3", "pagedown", "pageup", "home", "j"),
+    ],
+    ids=["ctrl+d", "end-k", "gg", "pagedown-pageup-home"],
+)
+def test_compare_screen_paging_keys_move_file_highlight(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """Paging and jump keys move the file highlight of the compare screen; a
+    trailing ``j`` shows the highlight did land on the first row."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press(*keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.parametrize(
+    "keys", [("G",), ("j", "j", "j"), ("G", "g", "g")], ids=["G", "jjj", "G-gg"]
+)
+def test_compare_screen_metadata_table_scrolls(
+    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+) -> None:
+    """The metadata table is taller than its section: ``j`` scrolls it, ``G``
+    jumps to the end and ``gg`` back to the top."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press(*keys)
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_clicking_file_row_opens_file_actions(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """Clicking a compare file row opens the file actions, like ``Enter``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        # Row 2 is lib/libz.so.1.3.2, which only the right build has.
+        await pilot.click("#compare-option-list-2", offset=(2, 2))
+        await wait_for_screen(pilot, FileActionScreen)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_file_actions_escape_returns_to_compare(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` on the file actions returns to the compare screen unchanged."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("3", "j", "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
@@ -273,6 +421,42 @@ def test_compare_screen_diff_escape_returns_to_compare(
         await pilot.press("enter")
         await wait_for_screen(pilot, FileDiffScreen)
         await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_compare_screen_preview_rejects_large_file(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Preview left`` of a file above the size limit shows the too-large
+    notice instead of fetching it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_DATAFRAME_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        # The file is unchanged, so "Preview left" is the first action.
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+@pytest.mark.skipif(
+    not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
+)
+def test_compare_screen_diff_rejects_large_file(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Diff left / right`` of a changed file above the size limit warns
+    instead of opening the diff."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_polars_compare_screen(pilot)
+        await pilot.press("3", *(["j"] * POLARS_LAZYFRAME_PY_ROW), "enter")
+        await wait_for_screen(pilot, FileActionScreen)
+        await pilot.press("enter")
         await wait_for_idle(pilot)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

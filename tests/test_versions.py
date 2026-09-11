@@ -2,13 +2,18 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
-from rattler.package import IndexJson, NoArchLiteral, PackageName, RunExportsJson
+from rattler.package import (
+    IndexJson,
+    NoArchLiteral,
+    PackageName,
+    PathsJson,
+    RunExportsJson,
+)
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
@@ -17,6 +22,7 @@ from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from syrupy.assertion import SnapshotAssertion
 from textual.app import App
 from textual.widgets import OptionList, Static
 
@@ -154,6 +160,7 @@ def _make_repo_data_record(
     legacy_bz2_size: int | None = None,
     depends: list[str] | None = None,
     constrains: list[str] | None = None,
+    extra_depends: dict[str, list[str]] | None = None,
     url: str | None = None,
 ) -> RepoDataRecord:
     resolved_file_name = file_name or f"{name}-{version}-{build}.conda"
@@ -169,6 +176,7 @@ def _make_repo_data_record(
             noarch=noarch,
             depends=depends,
             constrains=constrains,
+            extra_depends=extra_depends,
             sha256=sha256,
             md5=md5,
             size=size,
@@ -291,6 +299,8 @@ def _make_index_json(
     license_family: str | None = None,
     track_features: list[str] | None = None,
     subdir: str | None = "keep",
+    noarch: NoArchLiteral | None = None,
+    extra_depends: dict[str, list[str]] | None = None,
 ) -> IndexJson:
     """Build an ``info/index.json`` that matches ``record`` unless overridden."""
     data: dict[str, object] = {
@@ -307,6 +317,10 @@ def _make_index_json(
         "arch": record.arch,
         "platform": record.platform,
     }
+    if noarch is not None:
+        data["noarch"] = noarch
+    if extra_depends is not None:
+        data["extra_depends"] = extra_depends
     resolved_license_family = (
         record.license_family if license_family is None else license_family
     )
@@ -419,6 +433,36 @@ def test_build_repodata_patch_diff_ignores_missing_subdir_in_index_json() -> Non
     ).metadata == (
         CompareRow(label="subdir", left="noarch", right="linux-64", changed=True),
     )
+
+
+def test_build_repodata_patch_diff_reports_patched_noarch_and_extra_depends() -> None:
+    """Patches can change the noarch kind and the per-extra dependency groups."""
+    record = _make_repo_data_record(
+        noarch="python",
+        extra_depends={"plot": ["matplotlib >=3.8"], "test": ["pytest"]},
+    )
+    index_json = _make_index_json(
+        record,
+        noarch="generic",
+        extra_depends={"plot": ["matplotlib"], "docs": ["sphinx"]},
+    )
+
+    diff = build_repodata_patch_diff(record, index_json)
+
+    assert diff.metadata == (
+        CompareRow(label="noarch", left="generic", right="python", changed=True),
+    )
+    assert diff.dependencies == (
+        CompareRow(label="extra_depends[docs]", left="sphinx", right="", changed=True),
+        CompareRow(
+            label="extra_depends[plot]",
+            left="matplotlib",
+            right="matplotlib >=3.8",
+            changed=True,
+        ),
+        CompareRow(label="extra_depends[test]", left="", right="pytest", changed=True),
+    )
+    assert diff.constraints == ()
 
 
 def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> None:
@@ -725,6 +769,86 @@ def test_build_version_compare_data_ignores_missing_optional_file_metadata() -> 
     assert file_row.changed is False
 
 
+def _make_compare_selection(record: RepoDataRecord) -> CompareSelection:
+    return CompareSelection(
+        record.name.normalized,
+        VersionEntry(
+            version=record.version,
+            build=record.build,
+            build_number=record.build_number,
+            subdir=record.subdir,
+            file_name=record.file_name,
+        ),
+    )
+
+
+def test_build_version_compare_data_keeps_unparsable_dependency_lines() -> None:
+    """Lines that are not valid MatchSpecs cannot be grouped by package name, so
+    they are matched verbatim after the parsable ones."""
+    record = _make_repo_data_record()
+    left_artifact = build_version_artifact_data(
+        "demo",
+        _make_repo_data_record(depends=["numpy[", "python >=3.13", "broken ["]),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        _make_repo_data_record(depends=["python >=3.14", "numpy[", "also ["]),
+    )
+
+    compare_data = build_version_compare_data(
+        _make_compare_selection(record),
+        left_artifact,
+        _make_compare_selection(record),
+        right_artifact,
+    )
+
+    assert compare_data.dependencies == (
+        CompareRow(
+            label="python", left="python >=3.13", right="python >=3.14", changed=True
+        ),
+        CompareRow(label="numpy[", left="numpy[", right="numpy[", changed=False),
+        CompareRow(label="broken [", left="broken [", right="", changed=True),
+        CompareRow(label="also [", left="", right="also [", changed=True),
+    )
+
+
+def test_build_version_compare_data_flags_symlink_changes() -> None:
+    """A file that turns into a symlink, or a symlink that changes its target,
+    counts as changed even when sizes and hashes are unavailable."""
+    record = _make_repo_data_record()
+    left_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(
+            PackageFile("lib/libdemo.so", path_type="softlink", link_target="a.so"),
+            PackageFile("lib/libdemo.so.1", path_type="softlink", link_target="x"),
+            PackageFile("lib/libdemo.so.2", path_type="softlink", link_target="y"),
+        ),
+    )
+    right_artifact = build_version_artifact_data(
+        "demo",
+        record,
+        package_paths=(
+            PackageFile("lib/libdemo.so", size_in_bytes=1234, path_type="hardlink"),
+            PackageFile("lib/libdemo.so.1", path_type="softlink", link_target="x"),
+            PackageFile("lib/libdemo.so.2", path_type="softlink", link_target="z"),
+        ),
+    )
+
+    compare_data = build_version_compare_data(
+        _make_compare_selection(record),
+        left_artifact,
+        _make_compare_selection(record),
+        right_artifact,
+    )
+
+    assert [(row.label, row.changed) for row in compare_data.files] == [
+        ("lib/libdemo.so", True),
+        ("lib/libdemo.so.1", False),
+        ("lib/libdemo.so.2", True),
+    ]
+
+
 def test_build_version_compare_data_uses_sizes_for_initial_info_status() -> None:
     record = _make_repo_data_record()
     selection = CompareSelection(
@@ -884,6 +1008,30 @@ def test_format_version_details_metadata_lines_include_about_urls() -> None:
     )
 
 
+def test_format_version_details_metadata_lines_for_a_tiny_legacy_record(
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Sub-kibibyte sizes are shown in bytes, list fields are comma separated
+    and a non-GitHub provenance stays a plain link to the remote."""
+    record = _make_repo_data_record(
+        size=512,
+        legacy_bz2_size=900,
+        legacy_bz2_md5=bytes.fromhex("ffeeddccbbaa99887766554433221100"),
+        track_features=["nomkl", "debug"],
+        features="nomkl",
+        python_site_packages_path="lib/python3.13/site-packages",
+    )
+
+    details = build_version_artifact_data(
+        "demo",
+        record,
+        provenance_remote_url="https://gitlab.com/example/demo-feedstock.git",
+        provenance_sha="0123456789abcdef",
+    )
+
+    assert format_version_details_metadata_lines(details) == snapshot
+
+
 def test_format_clickable_url_uses_textual_click_action() -> None:
     rendered = format_clickable_url("https://example.com/demo")
 
@@ -932,6 +1080,10 @@ def test_render_package_preview_shows_version_selector_preview() -> None:
     assert "Dependencies" not in rendered
 
 
+def test_render_package_preview_without_records_explains_the_empty_state() -> None:
+    assert render_package_preview("demo", []) == "# demo\n\nNo metadata records found."
+
+
 def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> None:
     records = [
         _make_repo_data_record(version="1.33.1", subdir="osx-arm64"),
@@ -950,48 +1102,32 @@ def test_render_package_preview_orders_subdirs_by_latest_version_then_name() -> 
 
 
 def test_get_package_paths_caches_archive_paths() -> None:
+    """``paths.json`` entries of every path type become ``PackageFile``s; symlink
+    targets are read from the archive once and the result is cached."""
     loader = VersionDataLoader(client=cast(Client, object()))
     preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
     calls: list[str] = []
-
-    class _FakePathType:
-        def __init__(self, name: str) -> None:
-            self.hardlink = name == "hardlink"
-            self.softlink = name == "softlink"
-            self.directory = name == "directory"
-
-    class _FakePathEntry:
-        def __init__(
-            self,
-            relative_path: str,
-            size_in_bytes: int | None,
-            sha256: bytes | None,
-            no_link: bool,
-            path_type: str,
-        ) -> None:
-            self.relative_path = PurePosixPath(relative_path)
-            self.size_in_bytes = size_in_bytes
-            self.sha256 = sha256
-            self.no_link = no_link
-            self.path_type = _FakePathType(path_type)
-
-    class _FakePathsJson:
-        paths = [
-            _FakePathEntry(
-                "bin/demo",
-                1234,
-                bytes.fromhex("00" * 32),
-                False,
-                "hardlink",
-            ),
-            _FakePathEntry(
-                "lib/python3.13/site-packages/demo.py",
-                None,
-                None,
-                True,
-                "softlink",
-            ),
-        ]
+    paths_json = PathsJson.from_str(
+        json.dumps(
+            {
+                "paths_version": 1,
+                "paths": [
+                    {
+                        "_path": "bin/demo",
+                        "path_type": "hardlink",
+                        "size_in_bytes": 1234,
+                        "sha256": "00" * 32,
+                    },
+                    {
+                        "_path": "lib/python3.13/site-packages/demo.py",
+                        "path_type": "softlink",
+                        "no_link": True,
+                    },
+                    {"_path": "etc/conda/activate.d", "path_type": "directory"},
+                ],
+            }
+        )
+    )
 
     class _FakeEntry:
         name = "lib/python3.13/site-packages/demo.py"
@@ -999,9 +1135,9 @@ def test_get_package_paths_caches_archive_paths() -> None:
         link_target = "demo.py"
 
     class _FakeArchive:
-        async def paths_json(self) -> _FakePathsJson:
+        async def paths_json(self) -> PathsJson:
             calls.append("paths_json")
-            return _FakePathsJson()
+            return paths_json
 
         async def stream(self, section: str):
             calls.append(section)
@@ -1027,6 +1163,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
             "softlink",
             "demo.py",
         ),
+        PackageFile("etc/conda/activate.d", None, None, False, "directory"),
     ]
     assert cached_paths == paths
     assert calls == ["paths_json", "pkg"]
@@ -1121,6 +1258,41 @@ def test_get_about_urls_caches_archive_about_json() -> None:
     assert calls == ["about_json", "info/recipe/rendered_recipe.yaml"]
 
 
+@pytest.mark.parametrize(
+    ("recipe_maintainers", "expected"),
+    [
+        ("pavelzw", ("pavelzw",)),
+        (["@pavelzw", 42, "xhochy"], ("@pavelzw", "xhochy")),
+        ({"not": "a list"}, ()),
+    ],
+    ids=["single-string", "list-with-non-string", "mapping"],
+)
+def test_get_about_urls_normalizes_recipe_maintainers(
+    recipe_maintainers: object, expected: tuple[str, ...]
+) -> None:
+    """``extra.recipe-maintainers`` is free-form JSON; only strings survive."""
+    loader = VersionDataLoader(client=cast(Client, object()))
+    preview_key = ("demo", "1.2.3", "py313h123_0", 0, "noarch", "demo.conda")
+
+    class _FakeAboutJson:
+        dev_url: list[str] = []
+        doc_url: list[str] = []
+        home: list[str] = []
+        extra = {"recipe-maintainers": recipe_maintainers}
+
+    class _FakeArchive:
+        async def about_json(self) -> _FakeAboutJson:
+            return _FakeAboutJson()
+
+        async def read_file(self, path: str) -> bytes | None:
+            return None
+
+    archive = cast(PackageArchive, _FakeArchive())
+    about_urls = asyncio.run(loader.get_about_urls(preview_key, archive))
+
+    assert about_urls == AboutUrls(recipe_maintainers=expected)
+
+
 def test_extract_rattler_build_version_from_rendered_recipe() -> None:
     rendered_recipe = """
 context:
@@ -1133,6 +1305,22 @@ package:
 """
 
     assert VersionDataLoader.extract_rattler_build_version(rendered_recipe) == "0.38.0"
+
+
+@pytest.mark.parametrize(
+    "rendered_recipe",
+    [
+        "- just\n- a list\n",
+        "package:\n  name: demo\n",
+        "system_tools: not-a-mapping\n",
+        "system_tools:\n  micromamba: 2.3.2\n",
+    ],
+    ids=["not-a-mapping", "no-system-tools", "system-tools-scalar", "no-rattler-build"],
+)
+def test_extract_rattler_build_version_without_rattler_build(
+    rendered_recipe: str,
+) -> None:
+    assert VersionDataLoader.extract_rattler_build_version(rendered_recipe) is None
 
 
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
@@ -2141,10 +2329,16 @@ def test_syntax_lexer_for_path_returns_none_for_unknown_file() -> None:
     assert syntax_lexer_for_path("share/demo/LICENSE") is None
 
 
-def test_preview_title_uses_human_readable_size() -> None:
-    rendered = CondaMetadataTui._preview_title("lib/libstdc++.so", b"x" * 10_800_000)
-
-    assert rendered == "lib/libstdc++.so (10.3 MiB)"
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (b"x" * 10_800_000, "lib/libstdc++.so (10.3 MiB)"),
+        (b"x" * 600, "lib/libstdc++.so (600 B)"),
+    ],
+    ids=["mebibytes", "bytes"],
+)
+def test_preview_title_uses_human_readable_size(content: bytes, expected: str) -> None:
+    assert CondaMetadataTui._preview_title("lib/libstdc++.so", content) == expected
 
 
 def test_file_preview_screen_uses_plain_static_text() -> None:

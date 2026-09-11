@@ -148,6 +148,19 @@ def test_filter_survives_opening_a_package(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_filter_with_only_whitespace_lists_every_package(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A search query of only spaces matches everything."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("slash", "space")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 # --- MatchSpec ----------------------------------------------------------------
 
 
@@ -444,6 +457,40 @@ def test_whoneeds_for_artifact_lists_its_exact_dependents(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_whoneeds_screen_escape_keeps_result(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Escape`` on the who-needs prompt leaves the current result alone."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "libzlib")
+        await pilot.press("w")
+        await pilot.pause()
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_whoneeds_prompt_prefills_the_name_of_a_build_target(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """After a who-needs query for an exact build, ``w`` offers the package
+    name of that build for editing."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("w")
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+        await pilot.press("w")
+        await pilot.pause()
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 # --- platform selector --------------------------------------------------------
 
 
@@ -565,6 +612,19 @@ def test_platform_change_reapplies_whoneeds_query(
         await run_whoneeds_query(pilot, "libzlib")
         await pilot.press("p", "j", "space", "enter")
         await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_platform_selector_space_twice_restores_platform(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Space`` on an unticked platform ticks it again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("p", "space", "space")
+        await pilot.pause()
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
@@ -734,6 +794,25 @@ def test_channel_screen_enter_on_focused_remove_button(
     )
 
 
+def test_channel_screen_shift_tab_moves_focus_backwards(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``Shift+Tab`` walks the dialog's focus chain backwards from the field to
+    the last channel's ``✕`` button, like ``Up`` does."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await pilot.press("shift+tab")
+        await pilot.pause()
+
+    assert snap_compare(
+        make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
 def test_channel_screen_down_reaches_apply(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
@@ -858,6 +937,21 @@ def test_adding_unreachable_channel_restores_previous_view(
         await open_channel_screen(pilot)
         await add_channel(pilot, MISSING_CHANNEL)
         await apply_channels(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_switching_to_unreachable_channel_from_packages_restores_list(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A failed channel switch from the package list restores the list and the
+    highlighted package (the versions-view case is covered above)."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("j")
+        await wait_for_idle(pilot)
+        await switch_channel(pilot, MISSING_CHANNEL)
 
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 

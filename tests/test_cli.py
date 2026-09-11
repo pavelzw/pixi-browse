@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -169,3 +171,15 @@ def test_cli_rejects_empty_configured_channels(tmp_path: Path) -> None:
     result = CliRunner().invoke(entrypoint.cli, ["--config", str(path)])
     assert result.exit_code == 1
     assert "At least one channel is required." in result.output
+
+
+def test_module_entry_point_prints_version() -> None:
+    """``python -m pixi_browse`` runs the same Typer app as the console script."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pixi_browse", "--version"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == f"pixi-browse {__version__}"
