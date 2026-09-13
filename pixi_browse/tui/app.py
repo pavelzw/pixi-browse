@@ -32,6 +32,7 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Resize
 from textual.screen import ModalScreen, Screen
+from textual.widget import Widget
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -72,6 +73,13 @@ from pixi_browse.repodata import (
 )
 from pixi_browse.search import substring_filter, substring_position
 
+from .list_search import ListSearchScope, ListSearchState
+from .messages import (
+    FilterIndicatorChanged,
+    ListSearchEnded,
+    PaneSelected,
+    SidebarFocusRequested,
+)
 from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
 from .widgets import (
@@ -101,10 +109,6 @@ from .widgets import (
 )
 
 _PREVIEW_MAX_BYTES = 256 * 1024
-
-# Which list the ``/`` search narrows: the sidebar's version list, the version
-# details in the main panel or the compare screen's file list.
-type ListSearchScope = Literal["versions", "details", "compare"]
 
 
 class CondaMetadataTui(App[None]):
@@ -191,10 +195,9 @@ class CondaMetadataTui(App[None]):
         self._package_preview_request: tuple[str, Worker[None]] | None = None
         self._filter_mode = False
         # The ``/`` search of the version list, the version details and the
-        # compare file lists, kept here because it also owns the footer.
-        self._list_search_mode = False
-        self._list_search_query = ""
-        self._list_search_scope: ListSearchScope | None = None
+        # compare file lists. Owned here because the footer shows its query, and
+        # shared with the list views, which type keys into it.
+        self._list_search = ListSearchState(self._apply_list_search)
         # The query narrowing the version list, mirrored here because that list
         # is rendered from the app rather than from a view.
         self._version_search_query: str | None = None
@@ -214,7 +217,7 @@ class CondaMetadataTui(App[None]):
             with SidebarPanel(id="sidebar"):
                 yield OptionList(id="sidebar-list")
                 yield Static("Loading repodata...", id="status")
-            yield MainPanel(id="main-panel")
+            yield MainPanel(id="main-panel", list_search=self._list_search)
         yield Static(self._footer_text(), id="footer")
 
     async def on_mount(self) -> None:
@@ -251,7 +254,7 @@ class CondaMetadataTui(App[None]):
 
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = False
-        package_list.focus()
+        self._move_focus(package_list)
         self._update_platform_indicator()
         self._update_package_selection_status()
         if self._visible_package_names:
@@ -515,7 +518,7 @@ class CondaMetadataTui(App[None]):
         self._compare_selection = None
         self._compare_screen_open = False
         # The compare screen owned the search; it is gone with the screen.
-        self._reset_list_search_state()
+        self._list_search.reset()
         self.query_one("#footer", Static).update(self._footer_text())
 
     def _reset_preview_state(self) -> None:
@@ -768,7 +771,7 @@ class CondaMetadataTui(App[None]):
             return
 
         self._update_filter_indicator()
-        self.query_one("#sidebar-list", OptionList).focus()
+        self._move_focus(self.query_one("#sidebar-list", OptionList))
 
     async def _apply_channel_selection(self, channel_names: Sequence[str]) -> None:
         channel_names = normalize_channel_names(channel_names)
@@ -791,7 +794,7 @@ class CondaMetadataTui(App[None]):
         if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
-            package_list.focus()
+            self._move_focus(package_list)
             self.notify(
                 f"Failed to load channels: {load_error}",
                 title="Channels",
@@ -920,25 +923,63 @@ class CondaMetadataTui(App[None]):
         self._selected_pane = pane
         self._update_filter_indicator()
 
+    def on_pane_selected(self, event: PaneSelected) -> None:
+        # Every pane that claims the selection also takes the focus, and the
+        # message is handled a cycle later. Dropping the claim of a pane that no
+        # longer has the focus keeps a click or a restored focus from overriding
+        # what the app did in between (a query result focusing the sidebar).
+        # ``_move_focus`` is what makes that check reliable.
+        if not self._pane_has_focus(event.pane):
+            return
+        self._set_selected_pane(event.pane)
+
+    def on_sidebar_focus_requested(self, event: SidebarFocusRequested) -> None:
+        del event
+        self._focus_sidebar()
+
+    def on_filter_indicator_changed(self, event: FilterIndicatorChanged) -> None:
+        del event
+        self._update_filter_indicator()
+
+    def on_list_search_ended(self, event: ListSearchEnded) -> None:
+        del event
+        self._list_search.stop()
+
     def _stop_details_search(self) -> None:
         """Leave a search of the main panel's lists; a version list search is
         the sidebar's own and survives."""
-        if self._list_search_scope == "details":
-            self._stop_list_search()
+        if self._list_search.scope == "details":
+            self._list_search.stop()
 
     def _focus_main_panel(self) -> None:
         # The version list search belongs to the sidebar and ends with its focus.
-        if self._list_search_scope == "versions":
-            self._stop_list_search()
+        if self._list_search.scope == "versions":
+            self._list_search.stop()
         self._selected_pane = "main"
-        self.query_one("#main-panel", MainPanel).focus()
+        self._move_focus(self.query_one("#main-panel", MainPanel))
         self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
         self._stop_details_search()
         self._selected_pane = "sidebar"
-        self.query_one("#sidebar-list", OptionList).focus()
+        self._move_focus(self.query_one("#sidebar-list", OptionList))
         self._update_filter_indicator()
+
+    def _move_focus(self, widget: Widget) -> None:
+        """Focus ``widget`` right away instead of after the next message batch.
+
+        ``Widget.focus()`` only schedules the move, so until it runs the focus
+        still points at the widget the app moved away from. A pane that lost the
+        focus in the meantime (the main panel takes it whenever the sidebar list
+        is disabled for a query) would then still look focused to
+        ``on_pane_selected``, so its stale claim would win over this move.
+        """
+        widget.screen.set_focus(widget)
+
+    def _pane_has_focus(self, pane: Literal["sidebar", "main"]) -> bool:
+        if pane == "sidebar":
+            return self._sidebar_is_focused()
+        return self._main_panel_is_focused()
 
     def _sidebar_is_focused(self) -> bool:
         return self.focused is self.query_one("#sidebar-list", OptionList)
@@ -1288,7 +1329,7 @@ class CondaMetadataTui(App[None]):
         self._compare_screen_open = True
         self.query_one("#footer", Static).update(self._footer_text())
         self.push_screen(
-            CompareScreen(compare_data),
+            CompareScreen(compare_data, list_search=self._list_search),
             self._handle_compare_screen_dismissed,
         )
 
@@ -2240,7 +2281,7 @@ class CondaMetadataTui(App[None]):
         except (GatewayError, RuntimeError) as exc:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
-            package_list.focus()
+            self._move_focus(package_list)
             self.notify(
                 f"Failed to query MatchSpec: {exc!s}",
                 title="MatchSpec",
@@ -2354,7 +2395,7 @@ class CondaMetadataTui(App[None]):
         await self._apply_whoneeds_query(target)
 
     def _back_to_packages(self) -> None:
-        self._stop_list_search()
+        self._list_search.stop()
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -2374,7 +2415,7 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _open_versions(self, package_name: str) -> None:
-        self._stop_list_search()
+        self._list_search.stop()
         package_list = self.query_one("#sidebar-list", OptionList)
         self._last_package_highlight = package_list.highlighted
         self._last_package_scroll_y = package_list.scroll_y
@@ -2430,8 +2471,8 @@ class CondaMetadataTui(App[None]):
         if self._mode == "packages" and self._filter_mode:
             return f"Search: {self._search_query}_"
 
-        if self._list_search_mode:
-            return f"Search: {self._list_search_query}_"
+        if self._list_search.active:
+            return f"Search: {self._list_search.query}_"
 
         if self._compare_screen_open:
             return (
@@ -2580,8 +2621,8 @@ class CondaMetadataTui(App[None]):
     def _start_list_search(self) -> bool:
         """Start searching the version, dependency or file list; ``False`` when
         the current view has no such list, so ``/`` keeps its other meanings."""
-        if self._list_search_mode:
-            self._append_list_search_char("/")
+        if self._list_search.active:
+            self._list_search.append("/")
             return True
         scope = self._list_search_scope_for_focus()
         if scope is None:
@@ -2590,28 +2631,25 @@ class CondaMetadataTui(App[None]):
             target = self._list_search_target()
             if target is None or not target.filterable_section_is_active():
                 return False
-        self._list_search_mode = True
-        self._list_search_query = ""
-        self._list_search_scope = scope
-        self._apply_list_search()
+        self._list_search.start(scope)
         return True
 
     def _apply_list_search(self) -> None:
-        if not self._list_search_mode:
+        if not self._list_search.active:
             self._clear_list_search_query()
-        elif self._list_search_scope == "versions":
+        elif self._list_search.scope == "versions":
             self._apply_version_search()
         else:
             target = self._list_search_target()
             if target is not None:
-                target.set_filter_query(self._list_search_query)
+                target.set_filter_query(self._list_search.query)
         self.query_one("#footer", Static).update(self._footer_text())
 
     def _apply_version_search(self) -> None:
         """Narrow the sidebar's version list, keeping the highlighted build as
         long as it matches so its details stay in the main panel."""
         highlighted = self._highlighted_version_entry()
-        self._version_search_query = self._list_search_query
+        self._version_search_query = self._list_search.query
         self._render_version_options(prefer_entry=highlighted)
 
     def _clear_list_search_query(self) -> None:
@@ -2624,47 +2662,6 @@ class CondaMetadataTui(App[None]):
             highlighted = self._highlighted_version_entry()
             self._version_search_query = None
             self._render_version_options(prefer_entry=highlighted)
-
-    def _append_list_search_char(self, char: str) -> None:
-        self._list_search_query += char
-        self._apply_list_search()
-
-    def _reset_list_search_state(self) -> None:
-        self._list_search_mode = False
-        self._list_search_query = ""
-        self._list_search_scope = None
-
-    def _stop_list_search(self) -> None:
-        """Leave the list search and show the full list again."""
-        if not self._list_search_mode:
-            return
-        self._reset_list_search_state()
-        self._apply_list_search()
-
-    def _consume_list_search_key(self, event: Key, scope: ListSearchScope) -> bool:
-        """Feed a key of the focused list view into the ``/`` search.
-
-        Mirrors the package search: printable characters extend the query,
-        backspace shortens it and escape leaves the search. Everything else
-        (the arrow keys, paging, ``Enter``) is left to the list itself. Only the
-        list the search runs on may type into it, hence ``scope``.
-        """
-        if not self._list_search_mode or self._list_search_scope != scope:
-            return False
-        if event.key == "escape":
-            self._stop_list_search()
-            return True
-        if event.key == "backspace":
-            self._list_search_query = self._list_search_query[:-1]
-            self._apply_list_search()
-            return True
-        if event.key == "space":
-            self._append_list_search_char(" ")
-            return True
-        if event.character is not None and event.character.isprintable():
-            self._append_list_search_char(event.character)
-            return True
-        return False
 
     def _open_channel_screen(self) -> None:
         self.push_screen(
@@ -2969,7 +2966,7 @@ class CondaMetadataTui(App[None]):
         # Unlike the searches of a focused list widget, this handler runs before
         # ``App._on_key``, so the app's own bindings (``q``, ``p``, escape, ...)
         # have to be prevented explicitly instead of only stopping the bubbling.
-        if self._sidebar_is_focused() and self._consume_list_search_key(
+        if self._sidebar_is_focused() and self._list_search.consume_key(
             event, "versions"
         ):
             event.prevent_default()

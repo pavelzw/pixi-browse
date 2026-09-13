@@ -10,6 +10,7 @@ from rattler.package_streaming import fetch_raw_package_file_from_url
 from pixi_browse.repodata import create_gateway
 
 from .app import CondaMetadataTui
+from .list_search import ListSearchState
 from .widgets import (
     ACTIVE_SECTION_TITLE_STYLE,
     ACTIVE_TAB_STYLE,
@@ -66,6 +67,7 @@ __all__ = [
     "INACTIVE_SECTION_TITLE_STYLE",
     "INACTIVE_SELECTED_TAB_STYLE",
     "INACTIVE_TAB_STYLE",
+    "ListSearchState",
     "MainPanel",
     "METADATA_TABS",
     "MatchSpecScreen",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import Literal, Protocol
 
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
@@ -42,11 +42,13 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 from pixi_browse.search import substring_filter
-
-if TYPE_CHECKING:
-    # The app imports this module, so its own type is only available to the
-    # type checker; the ``cast``s below name it as a string.
-    from pixi_browse.tui.app import CondaMetadataTui
+from pixi_browse.tui.list_search import ListSearchState
+from pixi_browse.tui.messages import (
+    FilterIndicatorChanged,
+    ListSearchEnded,
+    PaneSelected,
+    SidebarFocusRequested,
+)
 
 try:
     from textual_diff_view import DiffView
@@ -405,12 +407,16 @@ class VersionDetailsView(Vertical):
 
     def _end_search_if_scope_changed(self) -> bool:
         """Leave the ``/`` search when the list it narrows is no longer showing,
-        so a search never outlives the tab it was started on."""
+        so a search never outlives the tab it was started on.
+
+        Shows the full lists right away and lets the app catch up with the
+        footer, which is a cycle behind because the message is posted."""
         if self._filter_query is None or self._current_filter_scope() == (
             self._filter_scope
         ):
             return False
-        cast("CondaMetadataTui", self.app)._stop_list_search()
+        self.set_filter_query(None)
+        self.post_message(ListSearchEnded())
         return True
 
     def _search_query_for_dependency_tab(self, tab: DependencyTab) -> str | None:
@@ -1067,9 +1073,10 @@ class MainPanel(Vertical):
     can_focus = True
     _vim_g_pending = False
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, list_search: ListSearchState, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._pane_selected = False
+        self._list_search = list_search
 
     @staticmethod
     def _page_step(height: int) -> int:
@@ -1090,7 +1097,7 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
-        cast("CondaMetadataTui", self.app)._set_selected_pane("main")
+        self.post_message(PaneSelected("main"))
         self.focus()
         event.stop()
 
@@ -1128,12 +1135,14 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        app = cast("CondaMetadataTui", self.app)
-        app._set_selected_pane("main")
-        app._update_filter_indicator()
+        # The redraw is asked for separately from the selection, because the app
+        # drops a selection the focus has already moved on from while the titles
+        # and the footer still have to be redrawn for that move.
+        self.post_message(PaneSelected("main"))
+        self.post_message(FilterIndicatorChanged())
 
     def on_blur(self) -> None:
-        cast("CondaMetadataTui", self.app)._update_filter_indicator()
+        self.post_message(FilterIndicatorChanged())
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -1273,8 +1282,7 @@ class MainPanel(Vertical):
     def on_key(self, event: Key) -> None:
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the list and app shortcuts.
-        app = cast("CondaMetadataTui", self.app)
-        if app._consume_list_search_key(event, "details"):
+        if self._list_search.consume_key(event, "details"):
             event.stop()
             return
 
@@ -1362,7 +1370,7 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            cast("CondaMetadataTui", self.app)._focus_sidebar()
+            self.post_message(SidebarFocusRequested())
             event.stop()
 
 
@@ -1373,11 +1381,14 @@ class CompareDetailsView(Vertical):
     def __init__(
         self,
         compare_data: VersionCompareData,
+        *,
+        list_search: ListSearchState,
     ) -> None:
         super().__init__(
             id="compare-details-view", classes="detail-view -pane-selected"
         )
         self._compare_data = compare_data
+        self._list_search = list_search
         self._active_section = 0
         self._dependency_tab_index = 0
         self._file_tab_index = 0
@@ -1449,12 +1460,16 @@ class CompareDetailsView(Vertical):
 
     def _end_search_if_scope_changed(self) -> bool:
         """Leave the ``/`` search when the list it narrows is no longer showing,
-        so a search never outlives the tab it was started on."""
+        so a search never outlives the tab it was started on.
+
+        Shows the full lists right away and lets the app catch up with the
+        footer, which is a cycle behind because the message is posted."""
         if self._filter_query is None or self._current_filter_scope() == (
             self._filter_scope
         ):
             return False
-        cast("CondaMetadataTui", self.app)._stop_list_search()
+        self.set_filter_query(None)
+        self.post_message(ListSearchEnded())
         return True
 
     def _search_query_for_file_tab(self, tab: FileTab) -> str | None:
@@ -1860,8 +1875,7 @@ class CompareDetailsView(Vertical):
     def on_key(self, event: Key) -> None:
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the pane shortcuts.
-        app = cast("CondaMetadataTui", self.app)
-        if app._consume_list_search_key(event, "compare"):
+        if self._list_search.consume_key(event, "compare"):
             event.stop()
             return
 
@@ -1958,16 +1972,22 @@ class CompareScreen(Screen[None]):
         Binding("q", "quit", show=False),
     ]
 
-    def __init__(self, compare_data: VersionCompareData) -> None:
+    def __init__(
+        self,
+        compare_data: VersionCompareData,
+        *,
+        list_search: ListSearchState,
+    ) -> None:
         super().__init__()
         self._compare_data = compare_data
+        self._list_search = list_search
         # ``None`` while the ``/`` search is off, so the footer keeps its hints.
         self._filter_query: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="compare-root"):
             yield Static(self._title_text(), id="compare-title", markup=False)
-            yield CompareDetailsView(self._compare_data)
+            yield CompareDetailsView(self._compare_data, list_search=self._list_search)
             yield Static(self._footer_text(), id="compare-footer", markup=False)
 
     def on_mount(self) -> None:
@@ -2125,9 +2145,9 @@ class CompareScreen(Screen[None]):
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        app = cast("CondaMetadataTui", self.app)
-        app._set_selected_pane("sidebar")
-        app.query_one("#sidebar-list").focus()
+        # The package list has no focus handler of its own to claim the pane, so
+        # the app both selects the sidebar and focuses the list.
+        self.post_message(SidebarFocusRequested())
         event.stop()
 
 
