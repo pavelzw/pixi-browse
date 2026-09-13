@@ -1,0 +1,61 @@
+name: Chore
+on:
+  # Runs with write permissions: process PR metadata only; never execute PR code.
+  # Needed so the jobs can comment and label on pull requests from forks.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    branches: [main]
+    types: [opened, reopened, edited, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-pr-title:
+    name: Check PR Title
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check valid conventional commit message
+        id: lint
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        with:
+          subjectPattern: ^[A-Za-z].+[^. ]$ # subject must start with a letter and may not end with a dot/space
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Post comment about invalid PR title
+        if: failure()
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: conventional-commit-pr-title
+          message: |
+            Thank you for opening this pull request! 👋🏼
+
+            This repository requires pull request titles to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/) and it looks like your proposed title needs to be adjusted.
+
+            <details><summary><b>Details</b></summary>
+
+            ```
+            ${{ steps.lint.outputs.error_message }}
+            ```
+            </details>
+      - name: Delete comment about invalid PR title
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: conventional-commit-pr-title
+          delete: true
+
+  assign-labels:
+    name: Assign Labels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Assign labels
+        uses: release-drafter/release-drafter/autolabeler@34d80673e067bdc0c24568d3af899c216adcfaa9 # v7.7.0
+        with:
+          token: ${{ github.token }}
