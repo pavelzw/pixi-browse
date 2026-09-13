@@ -18,7 +18,7 @@ from textual.pilot import Pilot
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
-    SnapCompare,
+    SnapComparePalettes,
     open_versions,
     type_text,
     wait_for_idle,
@@ -26,16 +26,16 @@ from tests.helpers import (
 
 
 def test_packages_view_lists_channel_packages(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Startup: the sidebar lists the packages and previews the first one."""
-    assert snap_compare(
+    assert snap_compare_palettes(
         make_app(), run_before=wait_for_idle, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_versions_view_shows_real_artifact_details(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Opening ``pixi-browse`` shows metadata, dependencies and files read
     from the real ``.conda`` archive."""
@@ -43,11 +43,13 @@ def test_versions_view_shows_real_artifact_details(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_versions_view_marks_prefix_replacement_files(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``zlib`` ships ``lib/pkgconfig/zlib.pc`` with the build prefix baked in;
     the file list marks it as needing text prefix replacement."""
@@ -58,11 +60,13 @@ def test_versions_view_marks_prefix_replacement_files(
         await pilot.press("l", "3")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_versions_view_groups_subdirs_by_latest_version(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``libzlib`` has linux-64 and osx-arm64 builds; the highlighted 1.3.2
     build shows its run exports and symlinked files."""
@@ -73,11 +77,13 @@ def test_versions_view_groups_subdirs_by_latest_version(
         await pilot.press("l", "tab", "[")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_filter_narrows_package_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Typing ``six`` into the ``/`` search narrows the package list to the
     packages containing it and previews the best match."""
@@ -88,11 +94,13 @@ def test_filter_narrows_package_list(
         await type_text(pilot, "six")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_matchspec_query_filters_records(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A MatchSpec that matches a single package opens its versions, limited to
     the matching builds."""
@@ -105,11 +113,13 @@ def test_matchspec_query_filters_records(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_matchspec_query_lists_matching_packages(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A query matching ``libzlib`` and ``zlib`` stays in the package list and
     names the MatchSpec in the sidebar heading."""
@@ -122,11 +132,13 @@ def test_matchspec_query_lists_matching_packages(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_whoneeds_query_lists_dependents(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``zlib`` depends on ``libzlib``; the who-needs scan runs against the
     complete repodata of the fixture channel."""
@@ -139,10 +151,14 @@ def test_whoneeds_query_lists_dependents(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
-def test_platform_selector(snap_compare: SnapCompare, make_app: AppFactory) -> None:
+def test_platform_selector(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
     """``p`` turns the sidebar into the platform selector with the current
     selection ticked."""
 
@@ -151,10 +167,14 @@ def test_platform_selector(snap_compare: SnapCompare, make_app: AppFactory) -> N
         await pilot.press("p")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
-def test_help_screen(snap_compare: SnapCompare, make_app: AppFactory) -> None:
+def test_help_screen(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
     """``?`` opens the help overlay listing every keybinding."""
 
     async def run_before(pilot: Pilot[None]) -> None:
@@ -162,11 +182,13 @@ def test_help_screen(snap_compare: SnapCompare, make_app: AppFactory) -> None:
         await pilot.press("question_mark")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_file_preview_renders_info_about_json(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Previewing ``info/about.json`` streams the file out of the real archive
     and renders it with JSON syntax highlighting."""
@@ -181,4 +203,6 @@ def test_file_preview_renders_info_about_json(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )

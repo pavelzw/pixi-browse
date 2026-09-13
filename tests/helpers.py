@@ -3,17 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 import os
+import pickle
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
+from pathlib import Path
 from typing import Any, BinaryIO
 
+import pytest
+from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
+    PseudoApp,
+    PseudoConsole,
+    SVGImageExtension,
+    node_to_report_path,
+)
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from rich.color import Color
+from rich.console import Console
+from rich.terminal_theme import TerminalTheme
+from syrupy.assertion import SnapshotAssertion
+from syrupy.data import Snapshot, SnapshotCollection
+from syrupy.location import PyTestLocation
 from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import OptionList, Static
@@ -35,7 +51,96 @@ CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noar
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
-SnapCompare = Callable[..., bool]
+SnapComparePalettes = Callable[..., bool]
+
+# The app draws in ANSI colors (its theme is `ansi-dark`), so the terminal
+# palette alone decides how it ends up looking. Every screen is therefore
+# snapshotted with two palettes, and with the very ones `pixi run demo` records
+# the dark and the light demo with, so a snapshot shows what a real terminal
+# with that theme shows.
+DARK_PALETTE = "dark"
+LIGHT_PALETTE = "light"
+
+
+def vhs_theme(
+    *,
+    background: str,
+    foreground: str,
+    normal: Sequence[str],
+    bright: Sequence[str],
+) -> TerminalTheme:
+    """A Rich export palette built from the hex colors of a VHS theme.
+
+    ``normal`` and ``bright`` are the eight ANSI colors in the order VHS' theme
+    database lists them: black, red, green, yellow, blue, magenta, cyan, white
+    (https://github.com/charmbracelet/vhs/blob/main/themes.json).
+    """
+
+    def triplet(color: str) -> tuple[int, int, int]:
+        parsed = Color.parse(color).triplet
+        assert parsed is not None, f"Not a hex color: {color}"
+        return parsed
+
+    return TerminalTheme(
+        triplet(background),
+        triplet(foreground),
+        [triplet(color) for color in normal],
+        [triplet(color) for color in bright],
+    )
+
+
+SVG_PALETTES: dict[str, TerminalTheme] = {
+    # `rose-pine-moon`, set by `.github/assets/demo-dark.tape`.
+    DARK_PALETTE: vhs_theme(
+        background="#232136",
+        foreground="#e0def4",
+        normal=(
+            "#393552",
+            "#eb6f92",
+            "#9ccfd8",
+            "#f6c177",
+            "#3e8fb0",
+            "#c4a7e7",
+            "#ea9a97",
+            "#e0def4",
+        ),
+        bright=(
+            "#6e6a86",
+            "#eb6f92",
+            "#9ccfd8",
+            "#f6c177",
+            "#3e8fb0",
+            "#c4a7e7",
+            "#ea9a97",
+            "#e0def4",
+        ),
+    ),
+    # `rose-pine-dawn`, set by `.github/assets/demo-light.tape`.
+    LIGHT_PALETTE: vhs_theme(
+        background="#faf4ed",
+        foreground="#575279",
+        normal=(
+            "#f2e9e1",
+            "#b4637a",
+            "#56949f",
+            "#ea9d34",
+            "#286983",
+            "#907aa9",
+            "#d7827e",
+            "#575279",
+        ),
+        bright=(
+            "#9893a5",
+            "#b4637a",
+            "#56949f",
+            "#ea9d34",
+            "#286983",
+            "#907aa9",
+            "#d7827e",
+            "#575279",
+        ),
+    ),
+}
 
 
 class RangeRequestHandler(SimpleHTTPRequestHandler):
@@ -98,6 +203,120 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Last-Modified", self.date_time_string(int(modified)))
         self.end_headers()
         return io.BytesIO(body)
+
+
+class PaletteScreenshotApp(CondaMetadataTui):
+    """The app under test, screenshotted with every palette in a single run.
+
+    ``pytest-textual-snapshot`` takes its screenshot through
+    ``App.export_screenshot``, which records the screen and exports it as an SVG
+    with Rich's dark default palette. Recording is the expensive half -- it
+    needs the whole app run -- while turning the recording into an SVG only maps
+    the recorded ANSI colors to a palette's hex colors. This override therefore
+    exports one SVG per palette from a single recording and keeps them all in
+    ``palette_screenshots``.
+    """
+
+    # Textual titles a window after its app class, and that title is drawn into
+    # the screenshot, so keep the name of the app under test.
+    TITLE = CondaMetadataTui.__name__
+
+    palette_screenshots: dict[str, str]
+    """The SVGs of the last screenshot, one per palette in ``SVG_PALETTES``."""
+
+    def export_screenshot(
+        self, *, title: str | None = None, simplify: bool = False
+    ) -> str:
+        # Mirrors `App.export_screenshot` of Textual 8, except that the recorded
+        # console is exported once per palette instead of once in total.
+        assert self._driver is not None, "App must be running"
+        width, height = self.size
+        console = Console(
+            width=width,
+            height=height,
+            file=io.StringIO(),
+            force_terminal=True,
+            color_system="truecolor",
+            record=True,
+            legacy_windows=False,
+            safe_box=False,
+        )
+        console.print(
+            self.screen._compositor.render_update(
+                full=True, screen_stack=self._background_screens, simplify=simplify
+            )
+        )
+        self.palette_screenshots = {
+            palette: console.export_svg(
+                title=title or self.title, theme=theme, clear=False
+            )
+            for palette, theme in SVG_PALETTES.items()
+        }
+        return self.palette_screenshots[DARK_PALETTE]
+
+
+class PaletteSVGImageExtension(SVGImageExtension):  # type: ignore[misc]
+    """One SVG file per palette, both next to each other.
+
+    The palette is passed as syrupy's snapshot index (``snapshot(name=palette)``
+    in the ``snap_compare_palettes`` fixture), which syrupy would spell
+    ``<test>[<palette>].svg``. Only the file name is spelled differently here,
+    as ``<test>.<palette>.svg``, so that a test's palettes read as variants of
+    one screen and sort next to each other; syrupy still manages them like any
+    other snapshot (writing new ones, updating changed ones and deleting the
+    snapshots of deleted tests).
+    """
+
+    @classmethod
+    def get_file_basename(
+        cls, *, test_location: PyTestLocation, index: str | int
+    ) -> str:
+        palette_name = super().get_file_basename(test_location=test_location, index=0)
+        return f"{palette_name}.{index}"
+
+    def read_snapshot_collection(self, *, snapshot_location: str) -> SnapshotCollection:
+        # Undo `get_file_basename`: syrupy takes the name of a single-file
+        # snapshot from its file name, and has to arrive back at the name the
+        # comparison used, or it reports the snapshot as belonging to no test.
+        test_name, _, palette = Path(snapshot_location).stem.rpartition(".")
+        collection = SnapshotCollection(location=snapshot_location)
+        collection.add(Snapshot(name=f"{test_name}[{palette}]"))
+        return collection
+
+
+def report_palette_comparison(
+    node: pytest.Function,
+    snapshot: SnapshotAssertion,
+    palette: str,
+    svg: str,
+    *,
+    matches: bool,
+) -> None:
+    """List a palette's comparison in ``snapshot_report.html``.
+
+    ``pytest-textual-snapshot`` builds that report at the end of the session out
+    of one pickled comparison per test; pickling one comparison per palette the
+    same way puts the palettes of a screen next to each other in the report.
+    """
+    execution = snapshot.executions.get(snapshot.num_executions - 1)
+    console = Console(legacy_windows=False, force_terminal=True)
+    full_path, line_number, name = node.reportinfo()
+    comparison = (
+        matches,
+        str(snapshot),
+        svg,
+        PseudoApp(PseudoConsole(console.legacy_windows, console.size)),
+        full_path,
+        line_number,
+        f"{name} ({palette})",
+        inspect.getdoc(node.function) or "",
+        "",
+        execution is not None and execution.final_data is not None,
+    )
+    report_path = node_to_report_path(node)
+    report_path.with_name(f"{report_path.name}_{palette}").write_bytes(
+        pickle.dumps(comparison)
+    )
 
 
 async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
