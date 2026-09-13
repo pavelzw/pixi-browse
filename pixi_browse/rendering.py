@@ -123,9 +123,17 @@ def format_clickable_link(label: str, url: str) -> str:
 def format_clickable_github_handle(handle: str) -> str:
     normalized = handle.lstrip("@")
     return format_clickable_link(
-        f"@{escape(normalized)}",
-        f"https://github.com/{normalized}",
+        f"@{escape(normalized)}", _github_handle_url(normalized)
     )
+
+
+def _github_handle_url(handle: str) -> str:
+    # ``org/team`` handles name a GitHub team, whose page lives under the
+    # organization rather than at ``github.com/org/team``.
+    organization, separator, team = handle.partition("/")
+    if separator and organization and team:
+        return f"https://github.com/orgs/{organization}/teams/{team}"
+    return f"https://github.com/{handle}"
 
 
 def _clickable_url_list_value(urls: Sequence[str]) -> str:
