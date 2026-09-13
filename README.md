@@ -18,7 +18,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **Fuzzy search** to quickly filter through thousands of packages
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
-- **Inspect package contents** — file listings and `about.json` extracted directly from artifacts, with `[prefix:text]` / `[prefix:binary]` marking the files whose install prefix is rewritten on install
+- **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
 - **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
 - **Compare artifacts** — metadata, dependencies, and file lists of two builds side by side, with optional file diffs
 - **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
