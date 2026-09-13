@@ -69,6 +69,11 @@ VERSION_DETAIL_SECTION_COUNT = 3
 # Shown instead of the list rows when the ``/`` search matches nothing.
 NO_SEARCH_MATCHES_MESSAGE = "No matches."
 
+# Shown by the sections whose body is a table, in place of an empty one.
+NO_REPODATA_PATCHES_MESSAGE = "No repodata patches."
+NO_COMPARE_METADATA_MESSAGE = "No metadata available."
+NO_COMPARE_DEPENDENCIES_MESSAGE = "No dependency data."
+
 METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
@@ -162,15 +167,13 @@ def compare_row_styles(row: CompareRow) -> tuple[str, str]:
 def render_compare_table(
     rows: tuple[CompareRow, ...],
     *,
-    empty_message: str,
     show_label_column: bool,
     label_title: str = "",
     left_title: str = "Left",
     right_title: str = "Right",
-) -> RenderableType:
-    if not rows:
-        return Text(empty_message, style="dim")
-
+) -> Table:
+    """Render ``rows`` side by side. Sections without any row show their empty
+    message instead of a table, through ``DetailSection.show_empty_message``."""
     table = Table(
         box=box.SIMPLE,
         expand=True,
@@ -194,11 +197,10 @@ def render_compare_table(
     return table
 
 
-def render_repodata_patches_body(patches: RepodataPatchDiff) -> RenderableType:
+def render_repodata_patches_body(patches: RepodataPatchDiff) -> Table:
     """Render the unpatched (index.json) vs patched (repodata) diff table."""
     return render_compare_table(
         patches.rows,
-        empty_message="No repodata patches.",
         show_label_column=True,
         label_title="Field",
         left_title="Unpatched (index.json)",
@@ -243,6 +245,12 @@ class DetailSection(Vertical):
                 classes="detail-option-list",
                 markup=False,
             )
+            # Takes the list's place when there is nothing to list, so an empty
+            # section reads as a message instead of a one-row list.
+            yield Static(
+                id=f"{self._id_prefix}-empty-{self._index}",
+                classes="detail-empty",
+            )
             return
 
         with VerticalScroll(
@@ -282,18 +290,48 @@ class DetailSection(Vertical):
         self.border_title = title
 
     def update_body(self, body: RenderableType) -> None:
-        self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
+        body_static = self._body_static()
+        body_static.remove_class("detail-empty")
+        body_static.update(body)
 
     def update_options(
         self, labels: list[str | Text | Option], *, highlighted: int = 0
     ) -> None:
-        option_list = self.query_one(
-            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
-        )
+        option_list = self._option_list()
+        self._empty_message_static().display = False
+        option_list.display = True
         option_list.clear_options()
         option_list.add_options(labels)
         if labels:
             option_list.highlighted = max(0, min(highlighted, len(labels) - 1))
+
+    def show_empty_message(self, message: str) -> None:
+        """Report a section with nothing to show as a dimmed message: a list
+        section hides its list for it, a body section shows it as its body. Both
+        wear the same class, so every empty section reads the same."""
+        text = Text(message, style="dim")
+        if not self._use_option_list:
+            body_static = self._body_static()
+            body_static.add_class("detail-empty")
+            body_static.update(text)
+            return
+        option_list = self._option_list()
+        option_list.clear_options()
+        option_list.display = False
+        empty = self._empty_message_static()
+        empty.update(text)
+        empty.display = True
+
+    def _option_list(self) -> DetailOptionList:
+        return self.query_one(
+            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
+        )
+
+    def _body_static(self) -> Static:
+        return self.query_one(f"#{self._id_prefix}-body-{self._index}", Static)
+
+    def _empty_message_static(self) -> Static:
+        return self.query_one(f"#{self._id_prefix}-empty-{self._index}", Static)
 
     def set_active(self, active: bool) -> None:
         self.set_class(active, "-active")
@@ -655,9 +693,11 @@ class VersionDetailsView(Vertical):
         metadata_section = self._section(0)
         metadata_section.update_header(self._render_metadata_header())
         if self._active_metadata_tab() == "patches":
-            metadata_section.update_body(
-                render_repodata_patches_body(self._details.repodata_patches)
-            )
+            patches = self._details.repodata_patches
+            if not patches.rows:
+                metadata_section.show_empty_message(NO_REPODATA_PATCHES_MESSAGE)
+                return
+            metadata_section.update_body(render_repodata_patches_body(patches))
             return
         metadata_section.update_body(
             "\n".join(format_version_details_metadata_lines(self._details))
@@ -675,8 +715,8 @@ class VersionDetailsView(Vertical):
         dependency_section.update_header(self._render_dependency_header())
         entries = self._dependency_entries[active_tab]
         if not entries:
-            dependency_section.update_options(
-                [self._empty_dependency_message(active_tab)]
+            dependency_section.show_empty_message(
+                self._empty_dependency_message(active_tab)
             )
             return
         dependency_section.update_options(
@@ -696,7 +736,7 @@ class VersionDetailsView(Vertical):
         file_section.update_header(self._render_file_header())
         entries = self._file_entries[active_tab]
         if not entries:
-            file_section.update_options([Text(self._empty_file_message(active_tab))])
+            file_section.show_empty_message(self._empty_file_message(active_tab))
             return
         file_section.update_options(
             [entry.label for entry in entries],
@@ -1573,16 +1613,28 @@ class CompareDetailsView(Vertical):
         self._section(2).update_header(self._render_file_header())
 
     def _refresh_sections(self) -> None:
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body(self._render_metadata_body())
+        self._refresh_metadata_section()
         self._refresh_dependency_section()
         self._refresh_file_section()
         self._apply_section_state()
 
+    def _refresh_metadata_section(self) -> None:
+        section = self._section(0)
+        section.update_header(self._render_section_header(0, "Metadata"))
+        rows = self._compare_data.metadata_rows
+        if not rows:
+            section.show_empty_message(NO_COMPARE_METADATA_MESSAGE)
+            return
+        section.update_body(self._render_metadata_body())
+
     def _refresh_dependency_section(self) -> None:
+        active_tab = self._active_dependency_tab()
         section = self._section(1)
         section.update_header(self._render_dependency_header())
-        section.update_body(self._render_dependency_body(self._active_dependency_tab()))
+        if not self._dependency_lines(active_tab):
+            section.show_empty_message(NO_COMPARE_DEPENDENCIES_MESSAGE)
+            return
+        section.update_body(self._render_dependency_body(active_tab))
 
     def _refresh_file_section(self) -> None:
         active_tab = self._active_file_tab()
@@ -1593,12 +1645,11 @@ class CompareDetailsView(Vertical):
         section.update_header(self._render_file_header())
         entries = self._file_entries[active_tab]
         if not entries:
-            message = (
+            section.show_empty_message(
                 NO_SEARCH_MATCHES_MESSAGE
                 if self._search_query_for_file_tab(active_tab) is not None
                 else "No files listed."
             )
-            section.update_options([Option(Text(message, style="dim"))])
             return
         section.update_options(
             [Option(entry.option) for entry in entries],
@@ -1701,18 +1752,16 @@ class CompareDetailsView(Vertical):
             return self._compare_data.constraints
         return self._compare_data.run_exports
 
-    def _render_metadata_body(self) -> RenderableType:
-        return self._render_compare_table(
+    def _render_metadata_body(self) -> Table:
+        return render_compare_table(
             self._compare_data.metadata_rows,
             label_title="Field",
-            empty_message="No metadata available.",
             show_label_column=True,
         )
 
-    def _render_dependency_body(self, tab: DependencyTab) -> RenderableType:
-        return self._render_compare_table(
+    def _render_dependency_body(self, tab: DependencyTab) -> Table:
+        return render_compare_table(
             self._dependency_lines(tab),
-            empty_message="No dependency data.",
             show_label_column=tab == "extra_depends",
             label_title="Extra",
         )
@@ -1856,21 +1905,6 @@ class CompareDetailsView(Vertical):
         self.query_one(
             "#compare-option-list-2", DetailOptionList
         ).highlighted = highlighted
-
-    def _render_compare_table(
-        self,
-        rows: tuple[CompareRow, ...],
-        *,
-        empty_message: str,
-        show_label_column: bool,
-        label_title: str = "",
-    ) -> RenderableType:
-        return render_compare_table(
-            rows,
-            empty_message=empty_message,
-            show_label_column=show_label_column,
-            label_title=label_title,
-        )
 
     def on_key(self, event: Key) -> None:
         # While the ``/`` search is on it gets the printable keys first, so the

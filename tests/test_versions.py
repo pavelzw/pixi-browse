@@ -462,13 +462,6 @@ def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> N
     assert cast(Text, table.columns[2]._cells[1]).plain == "requests"
 
 
-def test_render_repodata_patches_body_explains_empty_state() -> None:
-    unpatched = cast(Text, render_repodata_patches_body(RepodataPatchDiff()))
-
-    assert unpatched.plain == "No repodata patches."
-    assert unpatched.style == "dim"
-
-
 def test_build_version_artifact_data_includes_package_paths() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
