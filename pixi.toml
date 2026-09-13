@@ -13,6 +13,7 @@ console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 [exclude-newer]
 py-rattler = "0d"
 typer = "0d"
+pytest-textual-snapshot = "0d"
 
 [package]
 name = "pixi-browse"
@@ -45,9 +46,6 @@ mypy = "*"
 ty = "*"
 types-pyyaml = "*"
 vhs = "*"
-[feature.test.pypi-dependencies]
-# TODO: get from conda-forge
-# https://github.com/conda-forge/pytest-textual-snapshot-feedstock/pull/2
 pytest-textual-snapshot = ">=1.1.0"
 [feature.test.tasks]
 test = "pytest -n auto"
