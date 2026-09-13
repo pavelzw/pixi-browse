@@ -70,7 +70,7 @@ from pixi_browse.repodata import (
     query_whoneeds_records,
     whoneeds_target_label,
 )
-from pixi_browse.search import fuzzy_filter
+from pixi_browse.search import substring_filter
 
 from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
@@ -2098,7 +2098,7 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or not self._search_query:
             self._visible_package_names = list(self._all_package_names)
         else:
-            self._visible_package_names = fuzzy_filter(
+            self._visible_package_names = substring_filter(
                 self._search_query, self._all_package_names, key=lambda name: name
             )
         self._render_package_options()

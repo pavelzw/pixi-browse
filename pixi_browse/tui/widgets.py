@@ -41,7 +41,7 @@ from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
 )
-from pixi_browse.search import fuzzy_filter
+from pixi_browse.search import substring_filter
 
 try:
     from textual_diff_view import DiffView
@@ -703,7 +703,7 @@ class VersionDetailsView(Vertical):
                 if extra_query is not None:
                     # Only the dependencies are searched; a group is kept as the
                     # header of whatever matched inside it.
-                    group_entries = fuzzy_filter(
+                    group_entries = substring_filter(
                         extra_query, group_entries, key=lambda entry: entry.label
                     )
                     if not group_entries:
@@ -733,7 +733,7 @@ class VersionDetailsView(Vertical):
         query = self._search_query_for_section(1)
         if query is None:
             return entries
-        return tuple(fuzzy_filter(query, entries, key=lambda entry: entry.label))
+        return tuple(substring_filter(query, entries, key=lambda entry: entry.label))
 
     def _move_dependency_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-1", DetailOptionList)
@@ -774,7 +774,9 @@ class VersionDetailsView(Vertical):
         query = self._search_query_for_section(2)
         if query is None:
             return entries
-        return tuple(fuzzy_filter(query, entries, key=lambda entry: entry.search_text))
+        return tuple(
+            substring_filter(query, entries, key=lambda entry: entry.search_text)
+        )
 
     @staticmethod
     def _displayed_file_path(path: str, tab: FileTab) -> str:
@@ -1687,7 +1689,7 @@ class CompareDetailsView(Vertical):
         rows = self._file_rows(tab)
         query = self._search_query_for_files()
         if query is not None:
-            rows = tuple(fuzzy_filter(query, rows, key=lambda row: row.label))
+            rows = tuple(substring_filter(query, rows, key=lambda row: row.label))
         return tuple(
             CompareFileListEntry(
                 option=self._render_compare_file_option(row),

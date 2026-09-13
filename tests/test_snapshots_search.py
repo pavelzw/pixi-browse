@@ -27,8 +27,8 @@ from tests.test_snapshots_compare import open_polars_compare_screen
 def test_search_narrows_the_package_file_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``/`` in the file section of ``polars`` ranks the files matching
-    ``lit.py`` first and counts the matches in the tab labels."""
+    """``/`` in the file section of ``polars`` keeps the files containing
+    ``lit.py`` and counts them in the tab labels."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=2)
@@ -73,7 +73,7 @@ def test_search_escape_restores_the_full_file_list(
 def test_search_backspace_widens_the_file_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """``Backspace`` shortens the query and re-ranks the matches."""
+    """``Backspace`` shortens the query, so more files match it again."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=2)

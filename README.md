@@ -15,7 +15,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 ## Features
 
 - **Browse packages** from any conda channel (conda-forge, prefix.dev, etc.)
-- **Fuzzy search** to quickly filter through thousands of packages, as well as through a package's dependencies and files
+- **Substring search** to quickly filter through thousands of packages, as well as through a package's dependencies and files
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
