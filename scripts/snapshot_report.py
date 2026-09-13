@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 
 SNAPSHOT_DIRECTORY = PurePosixPath("tests/__snapshots__")
+# Git's status for a rename whose content is byte for byte the same.
+RENAMED_UNCHANGED = "R100"
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,10 @@ def changed_svg_snapshots(base: str, head: str) -> list[SnapshotChange]:
             after_path = None if change_type == "D" else path
 
         paths = (before_path, after_path)
+        if status == RENAMED_UNCHANGED:
+            # A snapshot that only moved renders the same screen on both sides
+            # of the report, so listing it would be noise.
+            continue
         if any(path is not None and path.suffix == ".svg" for path in paths):
             changes.append(SnapshotChange(status, before_path, after_path))
 
