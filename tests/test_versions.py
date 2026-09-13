@@ -909,6 +909,15 @@ def test_format_clickable_github_handle_uses_github_profile() -> None:
     )
 
 
+def test_format_clickable_github_handle_links_teams_to_their_org_page() -> None:
+    rendered = format_clickable_github_handle("@conda-forge/go")
+
+    assert rendered == (
+        "[@click=app.open_external_url('https://github.com/orgs/conda-forge/teams/go')]"
+        "@conda-forge/go[/]"
+    )
+
+
 def test_render_package_preview_shows_version_selector_preview() -> None:
     records = [
         _make_repo_data_record(
