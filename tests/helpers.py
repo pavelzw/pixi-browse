@@ -46,6 +46,8 @@ BIOCONDA_CHANNEL = "bioconda"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
+# A window too narrow for a detail section to show its whole tab strip.
+NARROW_TERMINAL_SIZE = (76, 30)
 CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]

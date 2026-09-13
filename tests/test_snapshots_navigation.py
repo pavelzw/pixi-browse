@@ -11,6 +11,7 @@ import pytest
 from textual.pilot import Pilot
 
 from tests.helpers import (
+    NARROW_TERMINAL_SIZE,
     TERMINAL_SIZE,
     AppFactory,
     SnapComparePalettes,
@@ -384,6 +385,39 @@ def test_bracket_switches_dependency_tab_to_constraints(
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "]", "]")
         await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_narrow_window_clips_dependency_tabs_to_the_active_tab(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """In a window too narrow for the whole tab strip, ``]`` clips the tabs from
+    the left so that the constraints tab it switched to is readable."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "]", "]")
+        await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=NARROW_TERMINAL_SIZE
+    )
+
+
+def test_shrinking_the_window_clips_the_tabs_of_the_active_section(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Shrinking the terminal re-clips the tab strips to the width the sections
+    are left with, so the run exports tab stays visible in the narrow window."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "]", "]", "]")
+        await pilot.resize_terminal(*NARROW_TERMINAL_SIZE)
+        await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
