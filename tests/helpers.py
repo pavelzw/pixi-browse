@@ -9,7 +9,7 @@ import os
 import pickle
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
@@ -24,11 +24,11 @@ from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
 )
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from rich.color import Color
 from rich.console import Console
-from rich.terminal_theme import SVG_EXPORT_THEME, TerminalTheme
+from rich.terminal_theme import TerminalTheme
 from syrupy.assertion import SnapshotAssertion
 from syrupy.location import PyTestLocation
-from textual._ansi_theme import ALABASTER
 from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import OptionList, Static
@@ -54,15 +54,91 @@ SnapCompare = Callable[..., bool]
 
 # The app draws in ANSI colors (its theme is `ansi-dark`), so the terminal
 # palette alone decides how it ends up looking. Every screen is therefore
-# snapshotted with a dark and a light palette, the same two looks the dark and
-# light recordings of `pixi run demo` show.
+# snapshotted with two palettes, and with the very ones `pixi run demo` records
+# the dark and the light demo with, so a snapshot shows what a real terminal
+# with that theme shows.
 DARK_PALETTE = "dark"
 LIGHT_PALETTE = "light"
+
+
+def vhs_theme(
+    *,
+    background: str,
+    foreground: str,
+    normal: Sequence[str],
+    bright: Sequence[str],
+) -> TerminalTheme:
+    """A Rich export palette built from the hex colors of a VHS theme.
+
+    ``normal`` and ``bright`` are the eight ANSI colors in the order VHS' theme
+    database lists them: black, red, green, yellow, blue, magenta, cyan, white
+    (https://github.com/charmbracelet/vhs/blob/main/themes.json).
+    """
+
+    def triplet(color: str) -> tuple[int, int, int]:
+        parsed = Color.parse(color).triplet
+        assert parsed is not None, f"Not a hex color: {color}"
+        return parsed
+
+    return TerminalTheme(
+        triplet(background),
+        triplet(foreground),
+        [triplet(color) for color in normal],
+        [triplet(color) for color in bright],
+    )
+
+
 SVG_PALETTES: dict[str, TerminalTheme] = {
-    # Rich's SVG export default, the palette of the dark snapshots.
-    DARK_PALETTE: SVG_EXPORT_THEME,
-    # Textual's light ANSI mapping, the default of `App.ansi_theme_light`.
-    LIGHT_PALETTE: ALABASTER,
+    # `rose-pine-moon`, set by `.github/assets/demo-dark.tape`.
+    DARK_PALETTE: vhs_theme(
+        background="#232136",
+        foreground="#e0def4",
+        normal=(
+            "#393552",
+            "#eb6f92",
+            "#9ccfd8",
+            "#f6c177",
+            "#3e8fb0",
+            "#c4a7e7",
+            "#ea9a97",
+            "#e0def4",
+        ),
+        bright=(
+            "#6e6a86",
+            "#eb6f92",
+            "#9ccfd8",
+            "#f6c177",
+            "#3e8fb0",
+            "#c4a7e7",
+            "#ea9a97",
+            "#e0def4",
+        ),
+    ),
+    # `rose-pine-dawn`, set by `.github/assets/demo-light.tape`.
+    LIGHT_PALETTE: vhs_theme(
+        background="#faf4ed",
+        foreground="#575279",
+        normal=(
+            "#f2e9e1",
+            "#b4637a",
+            "#56949f",
+            "#ea9d34",
+            "#286983",
+            "#907aa9",
+            "#d7827e",
+            "#575279",
+        ),
+        bright=(
+            "#9893a5",
+            "#b4637a",
+            "#56949f",
+            "#ea9d34",
+            "#286983",
+            "#907aa9",
+            "#d7827e",
+            "#575279",
+        ),
+    ),
 }
 
 

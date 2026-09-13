@@ -34,12 +34,12 @@
 
     .terminal-r1 { fill: #ec4899 }
 .terminal-r2 { fill: #ec4899;font-weight: bold }
-.terminal-r3 { fill: #c5c8c6 }
+.terminal-r3 { fill: #e0def4 }
 .terminal-r4 { fill: #ffffff;font-weight: bold }
-.terminal-r5 { fill: #c5c8c6;font-weight: bold }
-.terminal-r6 { fill: #292929 }
-.terminal-r7 { fill: #4b4e55 }
-.terminal-r8 { fill: #cc555a }
+.terminal-r5 { fill: #e0def4;font-weight: bold }
+.terminal-r6 { fill: #232136 }
+.terminal-r7 { fill: #393552 }
+.terminal-r8 { fill: #eb6f92 }
     </style>
 
     <defs>
@@ -165,7 +165,7 @@
             </clipPath>
     </defs>
 
-    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1480" height="1024" rx="8"/><text class="terminal-title" fill="#c5c8c6" text-anchor="middle" x="740" y="27">CondaMetadataTui</text>
+    <rect fill="#232136" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1480" height="1024" rx="8"/><text class="terminal-title" fill="#e0def4" text-anchor="middle" x="740" y="27">CondaMetadataTui</text>
             <g transform="translate(26,22)">
             <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
             <circle cx="22" cy="0" r="7" fill="#febc2e"/>
@@ -173,7 +173,7 @@
             </g>
         
     <g transform="translate(9, 41)" clip-path="url(#terminal-clip-terminal)">
-    <rect fill="#ec4899" x="24.4" y="25.9" width="451.4" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="391.9" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="416.3" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#c5c8c6" x="439.2" y="416.3" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="440.7" width="12.2" height="24.65" shape-rendering="crispEdges"/>
+    <rect fill="#ec4899" x="24.4" y="25.9" width="451.4" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="391.9" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="416.3" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#e0def4" x="439.2" y="416.3" width="12.2" height="24.65" shape-rendering="crispEdges"/><rect fill="#ec4899" x="329.4" y="440.7" width="12.2" height="24.65" shape-rendering="crispEdges"/>
     <g class="terminal-matrix">
     <text class="terminal-r1" x="0" y="20" textLength="36.6" clip-path="url(#terminal-line-0)">╭─&#160;</text><text class="terminal-r2" x="36.6" y="20" textLength="146.4" clip-path="url(#terminal-line-0)">[0]&#160;Packages</text><text class="terminal-r1" x="183" y="20" textLength="305" clip-path="url(#terminal-line-0)">&#160;───────────────────────╮</text><text class="terminal-r3" x="488" y="20" textLength="36.6" clip-path="url(#terminal-line-0)">╭─&#160;</text><text class="terminal-r3" x="524.6" y="20" textLength="134.2" clip-path="url(#terminal-line-0)">[1]&#160;Details</text><text class="terminal-r3" x="658.8" y="20" textLength="805.2" clip-path="url(#terminal-line-0)">&#160;────────────────────────────────────────────────────────────────╮</text><text class="terminal-r3" x="1464" y="20" textLength="12.2" clip-path="url(#terminal-line-0)">
 </text><text class="terminal-r1" x="0" y="44.4" textLength="12.2" clip-path="url(#terminal-line-1)">│</text><text class="terminal-r4" x="24.4" y="44.4" textLength="451.4" clip-path="url(#terminal-line-1)">libzlib&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-r1" x="475.8" y="44.4" textLength="12.2" clip-path="url(#terminal-line-1)">│</text><text class="terminal-r3" x="488" y="44.4" textLength="976" clip-path="url(#terminal-line-1)">│#&#160;libzlib&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;│</text><text class="terminal-r3" x="1464" y="44.4" textLength="12.2" clip-path="url(#terminal-line-1)">

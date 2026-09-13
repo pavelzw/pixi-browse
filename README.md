@@ -194,10 +194,10 @@ SHA256, so later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
 
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
-Every screen is therefore snapshotted twice from a single app run, once per
-palette, the same two looks the dark and light recordings of `pixi run demo`
-show: the dark SVG lands in `tests/__snapshots__/<module>/` and the light one in
-`tests/__snapshots__/light/<module>/`.
+Every screen is therefore snapshotted twice from a single app run, with the two
+palettes `pixi run demo` records the demos with (`rose-pine-moon` and
+`rose-pine-dawn`): the dark SVG lands in `tests/__snapshots__/<module>/` and the
+light one in `tests/__snapshots__/light/<module>/`.
 
 After an intentional UI change, review `snapshot_report.html` and accept the new
 screenshots with:
