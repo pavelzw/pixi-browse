@@ -95,6 +95,13 @@ COMPARE_UNCHANGED_COLOR = ""
 COMPARE_MODIFIED_COLOR = "yellow"
 COMPARE_LEFT_COLOR = "red"
 COMPARE_RIGHT_COLOR = "green"
+# Between two tabs of a section header, and in front of the tabs a header too
+# narrow for the whole strip had to leave out on the left.
+TAB_SEPARATOR = " - "
+CLIPPED_TABS_MARKER = "…"
+# What a section spends on its border on top of the header: the two corners of
+# the top border and the blank on either side of the header.
+BORDER_TITLE_OVERHEAD = 6
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -156,6 +163,45 @@ class FileActionOption:
 class FilePreviewContent:
     text: str
     lexer: str | None = None
+
+
+def render_tab_header(
+    prefix: Text, tabs: Sequence[Text], *, active: int, width: int | None
+) -> Text:
+    """A section header: its ``[n]`` prefix followed by the strip of ``tabs``.
+
+    ``width`` is how many cells the header has, or ``None`` when that is not
+    known yet. A strip too wide for it is clipped from the left -- with an
+    ellipsis for the tabs left out -- until the active tab fits, so that the tab
+    the section shows stays readable instead of falling off the right end, which
+    is where Textual truncates a border title.
+    """
+    for first in range(active):
+        header, active_end = _render_tab_strip(prefix, tabs, first=first, active=active)
+        # Everything fits, or at least the active tab does: Textual's own
+        # truncation ends the strip with an ellipsis, so it needs a cell of its
+        # own for the active tab to stay whole.
+        if width is None or header.cell_len <= width or active_end < width:
+            return header
+    return _render_tab_strip(prefix, tabs, first=active, active=active)[0]
+
+
+def _render_tab_strip(
+    prefix: Text, tabs: Sequence[Text], *, first: int, active: int
+) -> tuple[Text, int]:
+    """The header showing ``tabs`` from ``first`` on, and the cell the active tab
+    ends at."""
+    header = prefix.copy()
+    if first:
+        header.append(CLIPPED_TABS_MARKER, style=INACTIVE_TAB_STYLE)
+    active_end = header.cell_len
+    for index, tab in enumerate(tabs[first:], start=first):
+        if index > first:
+            header.append(TAB_SEPARATOR, style=INACTIVE_TAB_STYLE)
+        header.append_text(tab)
+        if index == active:
+            active_end = header.cell_len
+    return header, active_end
 
 
 def compare_row_styles(row: CompareRow) -> tuple[str, str]:
@@ -234,6 +280,9 @@ class DetailSection(Vertical):
         self._on_select_metadata_tab = on_select_metadata_tab
         self._on_select_dependency_tab = on_select_dependency_tab
         self._on_select_file_tab = on_select_file_tab
+        # Set while the header is a tab strip, which is re-rendered whenever the
+        # width it has to fit into changes.
+        self._render_tab_header: Callable[[int | None], Text] | None = None
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
@@ -287,7 +336,28 @@ class DetailSection(Vertical):
         self._on_select_file_tab(tab)
 
     def update_header(self, title: str | Text) -> None:
+        self._render_tab_header = None
         self.border_title = title
+
+    def update_tab_header(self, render: Callable[[int | None], Text]) -> None:
+        """Show the tab strip ``render`` draws for a given header width, and draw
+        it again whenever the section is resized."""
+        self._render_tab_header = render
+        self._draw_tab_header()
+
+    def on_resize(self) -> None:
+        if self._render_tab_header is not None:
+            self._draw_tab_header()
+
+    def _draw_tab_header(self) -> None:
+        assert self._render_tab_header is not None
+        self.border_title = self._render_tab_header(self._header_width())
+
+    def _header_width(self) -> int | None:
+        """The cells the border leaves for the header, or ``None`` while the
+        section has no width yet."""
+        width = self.outer_size.width - BORDER_TITLE_OVERHEAD
+        return width if width > 0 else None
 
     def update_body(self, body: RenderableType) -> None:
         body_static = self._body_static()
@@ -670,9 +740,9 @@ class VersionDetailsView(Vertical):
             section.set_active(index == self._active_section)
         if self._details is None:
             return
-        self._section(0).update_header(self._render_metadata_header())
-        self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_file_header())
+        self._section(0).update_tab_header(self._render_metadata_header)
+        self._section(1).update_tab_header(self._render_dependency_header)
+        self._section(2).update_tab_header(self._render_file_header)
 
     def _refresh_sections(self) -> None:
         if self._details is None:
@@ -691,7 +761,7 @@ class VersionDetailsView(Vertical):
             return
 
         metadata_section = self._section(0)
-        metadata_section.update_header(self._render_metadata_header())
+        metadata_section.update_tab_header(self._render_metadata_header)
         if self._active_metadata_tab() == "patches":
             patches = self._details.repodata_patches
             if not patches.rows:
@@ -712,7 +782,7 @@ class VersionDetailsView(Vertical):
         self._dependency_entries = {
             tab: self._dependency_entries_for_tab(tab) for tab in DEPENDENCY_TABS
         }
-        dependency_section.update_header(self._render_dependency_header())
+        dependency_section.update_tab_header(self._render_dependency_header)
         entries = self._dependency_entries[active_tab]
         if not entries:
             dependency_section.show_empty_message(
@@ -733,7 +803,7 @@ class VersionDetailsView(Vertical):
         self._file_entries = {
             tab: self._file_entries_for_details(tab) for tab in FILE_TABS
         }
-        file_section.update_header(self._render_file_header())
+        file_section.update_tab_header(self._render_file_header)
         entries = self._file_entries[active_tab]
         if not entries:
             file_section.show_empty_message(self._empty_file_message(active_tab))
@@ -903,7 +973,7 @@ class VersionDetailsView(Vertical):
             "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
-    def _render_metadata_tabs(self) -> Text:
+    def _render_metadata_tabs(self) -> tuple[Text, ...]:
         labels: dict[MetadataTab, str]
         if self._details is None:
             labels = {"metadata": "Metadata", "patches": "Repodata patches"}
@@ -914,21 +984,17 @@ class VersionDetailsView(Vertical):
                     f"Repodata patches ({self._details.repodata_patches.change_count})"
                 ),
             }
-        tab_text = Text()
-        for index, tab in enumerate(METADATA_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_metadata_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_metadata_tab(),
-                    pane_active=self._pane_selected and self._active_section == 0,
-                )
+        return tuple(
+            self._render_clickable_metadata_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_metadata_tab(),
+                pane_active=self._pane_selected and self._active_section == 0,
             )
-        return tab_text
+            for tab in METADATA_TABS
+        )
 
-    def _render_dependency_tabs(self) -> Text:
+    def _render_dependency_tabs(self) -> tuple[Text, ...]:
         if self._details is None:
             labels = {
                 "dependencies": "Dependencies",
@@ -955,19 +1021,15 @@ class VersionDetailsView(Vertical):
                 "constraints": f"Constraints ({counts['constraints']})",
                 "run_exports": f"Run exports ({counts['run_exports']})",
             }
-        tab_text = Text()
-        for index, tab in enumerate(DEPENDENCY_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_dependency_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_dependency_tab(),
-                    pane_active=self._pane_selected and self._active_section == 1,
-                )
+        return tuple(
+            self._render_clickable_dependency_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_dependency_tab(),
+                pane_active=self._pane_selected and self._active_section == 1,
             )
-        return tab_text
+            for tab in DEPENDENCY_TABS
+        )
 
     def _dependency_counts(
         self, totals: dict[DependencyTab, int]
@@ -997,7 +1059,7 @@ class VersionDetailsView(Vertical):
             for tab, total in totals.items()
         }
 
-    def _render_file_tabs(self) -> Text:
+    def _render_file_tabs(self) -> tuple[Text, ...]:
         if self._details is None:
             labels = {"pkg": "pkg/", "info": "info/"}
         else:
@@ -1011,19 +1073,15 @@ class VersionDetailsView(Vertical):
                 "pkg": f"pkg/ ({counts['pkg']})",
                 "info": f"info/ ({counts['info']})",
             }
-        tab_text = Text()
-        for index, tab in enumerate(FILE_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_file_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_file_tab(),
-                    pane_active=self._pane_selected and self._active_section == 2,
-                )
+        return tuple(
+            self._render_clickable_file_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_file_tab(),
+                pane_active=self._pane_selected and self._active_section == 2,
             )
-        return tab_text
+            for tab in FILE_TABS
+        )
 
     def _render_section_header(self, index: int, label: str) -> Text:
         style = (
@@ -1033,20 +1091,29 @@ class VersionDetailsView(Vertical):
         )
         return Text(f"[{index + 1}] {label}", style=style)
 
-    def _render_metadata_header(self) -> Text:
-        header = self._render_section_header(0, "")
-        header.append_text(self._render_metadata_tabs())
-        return header
+    def _render_metadata_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(0, ""),
+            self._render_metadata_tabs(),
+            active=self._metadata_tab_index,
+            width=width,
+        )
 
-    def _render_dependency_header(self) -> Text:
-        header = self._render_section_header(1, "")
-        header.append_text(self._render_dependency_tabs())
-        return header
+    def _render_dependency_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(1, ""),
+            self._render_dependency_tabs(),
+            active=self._dependency_tab_index,
+            width=width,
+        )
 
-    def _render_file_header(self) -> Text:
-        header = self._render_section_header(2, "")
-        header.append_text(self._render_file_tabs())
-        return header
+    def _render_file_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(2, ""),
+            self._render_file_tabs(),
+            active=self._file_tab_index,
+            width=width,
+        )
 
     @staticmethod
     def _render_clickable_metadata_tab(
@@ -1609,8 +1676,8 @@ class CompareDetailsView(Vertical):
         for index, section in enumerate(self.query(DetailSection)):
             section.set_active(index == self._active_section)
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_file_header())
+        self._section(1).update_tab_header(self._render_dependency_header)
+        self._section(2).update_tab_header(self._render_file_header)
 
     def _refresh_sections(self) -> None:
         self._refresh_metadata_section()
@@ -1630,7 +1697,7 @@ class CompareDetailsView(Vertical):
     def _refresh_dependency_section(self) -> None:
         active_tab = self._active_dependency_tab()
         section = self._section(1)
-        section.update_header(self._render_dependency_header())
+        section.update_tab_header(self._render_dependency_header)
         if not self._dependency_lines(active_tab):
             section.show_empty_message(NO_COMPARE_DEPENDENCIES_MESSAGE)
             return
@@ -1642,7 +1709,7 @@ class CompareDetailsView(Vertical):
         self._file_entries = {
             tab: self._file_entries_for_compare_data(tab) for tab in FILE_TABS
         }
-        section.update_header(self._render_file_header())
+        section.update_tab_header(self._render_file_header)
         entries = self._file_entries[active_tab]
         if not entries:
             section.show_empty_message(
@@ -1666,38 +1733,40 @@ class CompareDetailsView(Vertical):
             ),
         )
 
-    def _render_dependency_header(self) -> Text:
-        header = self._render_section_header(1, "")
-        header.append_text(self._render_dependency_tabs())
-        return header
+    def _render_dependency_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(1, ""),
+            self._render_dependency_tabs(),
+            active=self._dependency_tab_index,
+            width=width,
+        )
 
-    def _render_dependency_tabs(self) -> Text:
+    def _render_dependency_tabs(self) -> tuple[Text, ...]:
         labels = {
             "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
             "extra_depends": f"Extra depends ({len(self._compare_data.extra_depends)})",
             "constraints": f"Constraints ({len(self._compare_data.constraints)})",
             "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
         }
-        text = Text()
-        for index, tab in enumerate(DEPENDENCY_TABS):
-            if index:
-                text.append(" - ", style=INACTIVE_TAB_STYLE)
-            text.append_text(
-                self._render_clickable_dependency_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_dependency_tab(),
-                    pane_active=self._pane_selected and self._active_section == 1,
-                )
+        return tuple(
+            self._render_clickable_dependency_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_dependency_tab(),
+                pane_active=self._pane_selected and self._active_section == 1,
             )
-        return text
+            for tab in DEPENDENCY_TABS
+        )
 
-    def _render_file_header(self) -> Text:
-        header = self._render_section_header(2, "")
-        header.append_text(self._render_file_tabs())
-        return header
+    def _render_file_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(2, ""),
+            self._render_file_tabs(),
+            active=self._file_tab_index,
+            width=width,
+        )
 
-    def _render_file_tabs(self) -> Text:
+    def _render_file_tabs(self) -> tuple[Text, ...]:
         totals: dict[FileTab, int] = {
             "pkg": len(self._compare_data.files),
             "info": len(self._compare_data.info_files),
@@ -1712,19 +1781,15 @@ class CompareDetailsView(Vertical):
             "pkg": f"pkg/ ({counts['pkg']})",
             "info": f"info/ ({counts['info']})",
         }
-        text = Text()
-        for index, tab in enumerate(FILE_TABS):
-            if index:
-                text.append(" - ", style=INACTIVE_TAB_STYLE)
-            text.append_text(
-                VersionDetailsView._render_clickable_file_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_file_tab(),
-                    pane_active=self._pane_selected and self._active_section == 2,
-                )
+        return tuple(
+            VersionDetailsView._render_clickable_file_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_file_tab(),
+                pane_active=self._pane_selected and self._active_section == 2,
             )
-        return text
+            for tab in FILE_TABS
+        )
 
     @staticmethod
     def _render_clickable_dependency_tab(

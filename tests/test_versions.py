@@ -89,6 +89,7 @@ from pixi_browse.tui.widgets import (
     DetailOptionList,
     FileActionOption,
     render_repodata_patches_body,
+    render_tab_header,
 )
 
 
@@ -1428,6 +1429,78 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
         and span.style.meta.get("@click") == ("select_metadata_tab", ("patches",))
         for span in header.spans
     )
+
+
+def _tab_labels(*labels: str) -> tuple[Text, ...]:
+    return tuple(Text(label) for label in labels)
+
+
+def test_tab_header_shows_every_tab_when_they_all_fit() -> None:
+    tabs = _tab_labels("Dependencies (6)", "Extra depends (0)", "Constraints (0)")
+    strip = "[2] Dependencies (6) - Extra depends (0) - Constraints (0)"
+
+    header = render_tab_header(Text("[2] "), tabs, active=2, width=len(strip))
+
+    assert header.plain == strip
+
+
+def test_tab_header_shows_every_tab_when_the_width_is_unknown() -> None:
+    tabs = _tab_labels("pkg/ (21)", "info/ (11)")
+
+    header = render_tab_header(Text("[3] "), tabs, active=1, width=None)
+
+    assert header.plain == "[3] pkg/ (21) - info/ (11)"
+
+
+def test_tab_header_clips_leading_tabs_until_the_active_one_fits() -> None:
+    """A section too narrow for the whole strip drops tabs from its left end, so
+    that the tab it shows stays readable instead of being truncated away."""
+    tabs = _tab_labels(
+        "Dependencies (6)",
+        "Extra depends (0)",
+        "Constraints (0)",
+        "Run exports (2)",
+    )
+
+    header = render_tab_header(Text("[2] "), tabs, active=2, width=30)
+
+    assert header.plain == "[2] …Constraints (0) - Run exports (2)"
+
+
+def test_tab_header_clips_no_more_tabs_than_the_active_one_needs() -> None:
+    tabs = _tab_labels(
+        "Dependencies (6)",
+        "Extra depends (0)",
+        "Constraints (0)",
+        "Run exports (2)",
+    )
+
+    header = render_tab_header(Text("[2] "), tabs, active=1, width=30)
+
+    assert header.plain == "[2] …Extra depends (0) - Constraints (0) - Run exports (2)"
+
+
+def test_tab_header_keeps_a_cell_for_the_ellipsis_textual_truncates_with() -> None:
+    """Textual ends a border title that does not fit with an ellipsis of its own,
+    so the active tab has to end one cell before the width."""
+    tabs = _tab_labels("Metadata", "Repodata patches (2)")
+
+    assert (
+        render_tab_header(Text("[1] "), tabs, active=1, width=35).plain
+        == "[1] Metadata - Repodata patches (2)"
+    )
+    assert (
+        render_tab_header(Text("[1] "), tabs, active=1, width=34).plain
+        == "[1] …Repodata patches (2)"
+    )
+
+
+def test_tab_header_never_clips_the_first_tab_away() -> None:
+    tabs = _tab_labels("Metadata", "Repodata patches (2)")
+
+    header = render_tab_header(Text("[1] "), tabs, active=0, width=8)
+
+    assert header.plain == "[1] Metadata - Repodata patches (2)"
 
 
 def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
