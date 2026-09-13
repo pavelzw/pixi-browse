@@ -191,8 +191,15 @@ The tests run the app against small offline conda channels (`conda-forge` and
 They are downloaded into the git-ignored `tests/fixtures/channels/` directory on
 first use (or ahead of time with `pixi run fetch-test-channel`) and verified by
 SHA256, so later runs work offline. TUI screens are checked with
-[pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot);
-after an intentional UI change, review `snapshot_report.html` and accept the new
+[pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
+
+The app draws in ANSI colors, so the terminal palette alone decides how it looks.
+Every screen is therefore snapshotted twice from a single app run, with the two
+palettes `pixi run demo` records the demos with (`rose-pine-moon` and
+`rose-pine-dawn`), side by side as
+`tests/__snapshots__/<module>/<test>.{dark,light}.svg`.
+
+After an intentional UI change, review `snapshot_report.html` and accept the new
 screenshots with:
 
 ```bash

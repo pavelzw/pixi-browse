@@ -15,7 +15,7 @@ from pixi_browse.tui import FileActionScreen, VersionDetailsView
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
-    SnapCompare,
+    SnapComparePalettes,
     open_versions,
     type_text,
     wait_for_idle,
@@ -25,7 +25,7 @@ from tests.test_snapshots_compare import open_polars_compare_screen
 
 
 def test_search_narrows_the_version_list_by_platform(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``/`` on the focused sidebar searches the version list; ``osx`` matches
     the platform, so only that section is left."""
@@ -36,11 +36,13 @@ def test_search_narrows_the_version_list_by_platform(
         await type_text(pilot, "osx")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_version_list_by_version(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A version matches across platforms, so both sections stay with one of
     their two builds and the details follow the first match."""
@@ -51,11 +53,13 @@ def test_search_narrows_the_version_list_by_version(
         await type_text(pilot, "1.3.1")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_version_list_by_build_string(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The build string is part of the search key, so it selects one artifact."""
 
@@ -65,11 +69,13 @@ def test_search_narrows_the_version_list_by_build_string(
         await type_text(pilot, "h8088a28")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_version_search_without_matches_reports_it(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A query no build matches leaves the version list empty."""
 
@@ -79,11 +85,13 @@ def test_version_search_without_matches_reports_it(
         await type_text(pilot, "qqq")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_package_file_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``/`` in the file section of ``polars`` keeps the files containing
     ``lit.py`` and counts them in the tab labels."""
@@ -95,11 +103,13 @@ def test_search_narrows_the_package_file_list(
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_without_matches_reports_it(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A query no file matches empties the list instead of hiding the search."""
 
@@ -109,11 +119,13 @@ def test_search_without_matches_reports_it(
         await type_text(pilot, "qqq")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_escape_restores_the_full_file_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` leaves the search and shows every file again."""
 
@@ -125,11 +137,13 @@ def test_search_escape_restores_the_full_file_list(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_backspace_widens_the_file_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Backspace`` shortens the query, so more files match it again."""
 
@@ -141,11 +155,13 @@ def test_search_backspace_widens_the_file_list(
         await pilot.press("backspace", "backspace", "backspace")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_enter_on_a_searched_file_opens_its_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The file actions belong to the highlighted match, not to the row that
     sat at that position before the search."""
@@ -158,11 +174,13 @@ def test_enter_on_a_searched_file_opens_its_file_actions(
         await pilot.press("enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_info_file_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The search follows the active tab, so it narrows ``info/`` files too."""
 
@@ -173,11 +191,13 @@ def test_search_narrows_the_info_file_list(
         await type_text(pilot, "json")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_dependency_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``/`` in the dependency section of ``pixi-browse`` keeps the matching
     MatchSpecs, which ``Enter`` can still query."""
@@ -189,11 +209,13 @@ def test_search_narrows_the_dependency_list(
         await type_text(pilot, "ratt")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_extra_depends_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A group in the extra depends tab is kept as the header of the
     dependencies of its own that matched."""
@@ -205,11 +227,13 @@ def test_search_narrows_the_extra_depends_list(
         await type_text(pilot, "diff-view")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_drops_groups_without_matches(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A group whose dependencies all miss the query leaves with them."""
 
@@ -219,11 +243,13 @@ def test_search_drops_groups_without_matches(
         await type_text(pilot, "qqq")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_narrows_the_compare_file_list(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``/`` on the compare screen narrows the side-by-side file list and shows
     the query in its footer."""
@@ -234,7 +260,9 @@ def test_search_narrows_the_compare_file_list(
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_search_does_not_start_on_a_section_without_a_list(
