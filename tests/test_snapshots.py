@@ -46,6 +46,21 @@ def test_versions_view_shows_real_artifact_details(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_versions_view_marks_prefix_replacement_files(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``zlib`` ships ``lib/pkgconfig/zlib.pc`` with the build prefix baked in;
+    the file list marks it as needing text prefix replacement."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=4)
+        # Focus the main panel and activate the file section so all files show.
+        await pilot.press("l", "3")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_versions_view_groups_subdirs_by_latest_version(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:

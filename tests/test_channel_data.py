@@ -323,6 +323,38 @@ def test_load_version_artifact_data_reads_real_archives(
     } == snapshot
 
 
+def test_load_version_artifact_data_reads_prefix_replacement_from_paths_json(
+    make_gateway: GatewayFactory, rattler_client: Client
+) -> None:
+    """``zlib`` bakes its build prefix into ``lib/pkgconfig/zlib.pc``, so
+    ``info/paths.json`` requests text replacement for that file only."""
+
+    async def load() -> list[tuple[str, str | None]]:
+        records = await query_package_records(
+            gateway=make_gateway(),
+            channel_names=["conda-forge"],
+            platforms=[Platform("linux-64")],
+            package_name="zlib",
+        )
+        record = records[0]
+        loader = VersionDataLoader(client=rattler_client)
+        archive = await loader.get_package_archive(
+            ("zlib", "1.3.1", record.build, record.build_number, "linux-64", "zlib"),
+            str(record.url),
+        )
+        paths = await loader.get_package_paths(
+            ("zlib", "1.3.1", record.build, record.build_number, "linux-64", "zlib"),
+            archive,
+        )
+        return [
+            (package_file.path, package_file.prefix_replacement)
+            for package_file in paths
+            if package_file.prefix_replacement is not None
+        ]
+
+    assert asyncio.run(load()) == [("lib/pkgconfig/zlib.pc", "text")]
+
+
 def test_load_version_artifact_data_is_cached_per_preview_key(
     make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:

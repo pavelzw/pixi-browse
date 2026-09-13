@@ -70,6 +70,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+PREFIX_REPLACEMENT_STYLE = Style(color="#d19a66")
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -88,7 +89,7 @@ class DependencyListEntry:
 
 @dataclass(frozen=True)
 class FileListEntry:
-    label: str
+    label: Text
     path: str | None
     size_in_bytes: int | None = None
     sha256: bytes | None = None
@@ -674,24 +675,34 @@ class VersionDetailsView(Vertical):
                 )
                 for package_file in package_files
             )
-        return (FileListEntry(label="No files listed.", path=None),)
+        return (FileListEntry(label=Text("No files listed."), path=None),)
 
     @staticmethod
     def _displayed_file_path(path: str, tab: FileTab) -> str:
         return path.removeprefix("info/") if tab == "info" else path
 
     @classmethod
-    def _file_label(cls, package_file: PackageFile, tab: FileTab) -> str:
+    def _file_label(cls, package_file: PackageFile, tab: FileTab) -> Text:
+        """The file row: its path, then the symlink target or the size, then how
+        a baked-in install prefix gets rewritten."""
         path = cls._displayed_file_path(package_file.path, tab)
         if package_file.is_symlink:
-            return (
-                f"{path} -> {package_file.link_target}"
+            suffix = (
+                f" -> {package_file.link_target}"
                 if package_file.link_target is not None
-                else path
+                else ""
             )
-        if package_file.size_in_bytes is not None:
-            return f"{path} ({format_human_byte_size(package_file.size_in_bytes)})"
-        return path
+        elif package_file.size_in_bytes is not None:
+            suffix = f" ({format_human_byte_size(package_file.size_in_bytes)})"
+        else:
+            suffix = ""
+        label = Text(f"{path}{suffix}")
+        if package_file.prefix_replacement is not None:
+            label.append(
+                f" [prefix:{package_file.prefix_replacement}]",
+                style=PREFIX_REPLACEMENT_STYLE,
+            )
+        return label
 
     def _move_file_highlight(self, delta: int) -> None:
         option_list = self.query_one("#detail-option-list-2", DetailOptionList)
