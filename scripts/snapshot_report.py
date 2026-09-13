@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from pytest_textual_snapshot import (  # type: ignore[import-untyped]
+# The plugin moved its internals into a submodule and no longer re-exports them.
+from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
     PseudoApp,
     PseudoConsole,
     SvgSnapshotDiff,
