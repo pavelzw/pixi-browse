@@ -250,7 +250,7 @@ def test_search_does_not_start_on_a_section_without_a_list(
             await pilot.press("1", "slash")
             await wait_for_idle(pilot)
 
-            assert app._list_search_mode is False
+            assert app._list_search.active is False
             assert app._filter_mode is False
 
             # The file section can be searched, so ``/`` starts there.
@@ -258,8 +258,8 @@ def test_search_does_not_start_on_a_section_without_a_list(
             await type_text(pilot, "about")
             await wait_for_idle(pilot)
 
-            assert app._list_search_mode is True
-            assert app._list_search_query == "about"
+            assert app._list_search.active is True
+            assert app._list_search.query == "about"
 
     asyncio.run(run())
 
@@ -277,14 +277,14 @@ def test_version_search_ends_when_the_sidebar_loses_focus(
             await pilot.press("slash")
             await type_text(pilot, "osx")
             await wait_for_idle(pilot)
-            assert app._list_search_scope == "versions"
+            assert app._list_search.scope == "versions"
             assert app._version_search_query == "osx"
             narrowed_rows = len(app._version_rows)
 
             app._focus_main_panel()
             await wait_for_idle(pilot)
 
-            assert app._list_search_mode is False
+            assert app._list_search.active is False
             assert app._version_search_query is None
             assert len(app._version_rows) > narrowed_rows
 
@@ -309,7 +309,7 @@ def test_changing_the_tab_ends_the_search(make_app: AppFactory) -> None:
             details_view.set_dependency_tab("extra_depends")
             await wait_for_idle(pilot)
 
-            assert app._list_search_mode is False
+            assert app._list_search.active is False
             assert details_view._filter_query is None
 
     asyncio.run(run())
@@ -326,15 +326,15 @@ def test_leaving_the_compare_screen_ends_its_search(make_app: AppFactory) -> Non
             await pilot.press("3", "slash")
             await type_text(pilot, "lit.py")
             await wait_for_idle(pilot)
-            assert app._list_search_mode is True
+            assert app._list_search.active is True
 
             # The first escape leaves the search, the second the screen.
             await pilot.press("escape")
-            assert app._list_search_mode is False
+            assert app._list_search.active is False
             await pilot.press("escape")
             await wait_for_idle(pilot)
 
-            assert app._list_search_query == ""
+            assert app._list_search.query == ""
             details_view = app.query_one("#version-details-view", VersionDetailsView)
             assert details_view._filter_query is None
 

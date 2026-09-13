@@ -71,6 +71,7 @@ from pixi_browse.tui import (
     Empty,
     FileActionScreen,
     FilePreviewScreen,
+    ListSearchState,
     MainPanel,
     MatchSpecScreen,
     VersionDetailsView,
@@ -1389,7 +1390,7 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
         run_exports=(),
         files=(),
     )
-    view = CompareDetailsView(compare_data)
+    view = CompareDetailsView(compare_data, list_search=ListSearchState(lambda: None))
     sections = list(view.compose())
 
     assert "-pane-selected" in view.classes
@@ -1492,7 +1493,8 @@ def test_compare_table_keeps_unchanged_rows_neutral_and_colors_changed_rows() ->
             constraints=(),
             run_exports=(),
             files=(),
-        )
+        ),
+        list_search=ListSearchState(lambda: None),
     )
 
     table = cast(Table, view._render_metadata_body())
@@ -1548,7 +1550,8 @@ def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -
             constraints=(),
             run_exports=(),
             files=(),
-        )
+        ),
+        list_search=ListSearchState(lambda: None),
     )
 
     table = cast(Table, view._render_dependency_body("dependencies"))
@@ -1621,7 +1624,8 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
                             changed=True,
                         ),
                     ),
-                )
+                ),
+                list_search=ListSearchState(lambda: None),
             )
             app.push_screen(screen)
             await pilot.pause()
@@ -1949,7 +1953,8 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
                     constraints=(),
                     run_exports=(),
                     files=(),
-                )
+                ),
+                list_search=ListSearchState(lambda: None),
             )
             app.push_screen(screen)
             await pilot.pause()
