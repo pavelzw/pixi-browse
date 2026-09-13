@@ -23,8 +23,6 @@ if TYPE_CHECKING:
 
 
 SNAPSHOT_DIRECTORY = PurePosixPath("tests/__snapshots__")
-# The directory the light-palette snapshots live in; see `tests/helpers.py`.
-LIGHT_PALETTE_DIRECTORY = "light"
 
 
 @dataclass(frozen=True)
@@ -146,11 +144,19 @@ def read_snapshot(revision: str, path: PurePosixPath | None) -> str | None:
     return run_git("show", f"{revision}:{path}")
 
 
+def test_name_and_palette(snapshot_path: PurePosixPath) -> tuple[str, str]:
+    """Split a snapshot file name into its test name and its palette.
+
+    Snapshots are named ``<test>.<palette>.svg``; see `tests/helpers.py`.
+    """
+    test_name, _, palette = snapshot_path.stem.rpartition(".")
+    return test_name, palette
+
+
 def report_test_name(snapshot_path: PurePosixPath) -> str:
     """The report label of a snapshot: its test name, plus its palette."""
-    if LIGHT_PALETTE_DIRECTORY in snapshot_path.parts:
-        return f"{snapshot_path.stem} (light)"
-    return snapshot_path.stem
+    test_name, palette = test_name_and_palette(snapshot_path)
+    return f"{test_name} ({palette})"
 
 
 def test_docstring(revision: str, snapshot_path: PurePosixPath) -> str:
@@ -161,12 +167,11 @@ def test_docstring(revision: str, snapshot_path: PurePosixPath) -> str:
     except ValueError:
         return ""
 
-    # A snapshot sits in a directory named after its test module, directly below
-    # `__snapshots__` for the dark palette and one level deeper for the light one.
+    # A snapshot sits in a directory named after its test module.
     module_name = snapshot_path.parent.name
     module_path = PurePosixPath(*parts[:snapshot_directory_index], f"{module_name}.py")
     module = ast.parse(run_git("show", f"{revision}:{module_path}"))
-    test_name = snapshot_path.stem.partition("[")[0]
+    test_name = test_name_and_palette(snapshot_path)[0].partition("[")[0]
 
     for node in ast.walk(module):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):

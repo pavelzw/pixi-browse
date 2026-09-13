@@ -36,24 +36,24 @@ from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
 from syrupy.assertion import SnapshotAssertion
+from textual._doc import take_svg_screenshot
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
 from tests.helpers import (
     ANACONDA_CHANNELS_URL,
-    LIGHT_PALETTE,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
     GatewayFactory,
-    LightSVGImageExtension,
     PaletteScreenshotApp,
+    PaletteSVGImageExtension,
     PilotHook,
     RangeRequestHandler,
     SnapCompare,
-    report_light_comparison,
+    report_palette_comparison,
 )
 
 
@@ -154,18 +154,18 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
 
 @pytest.fixture
 def snap_compare(
-    snap_compare: SnapCompare,
-    snapshot: SnapshotAssertion,
-    request: pytest.FixtureRequest,
+    snapshot: SnapshotAssertion, request: pytest.FixtureRequest
 ) -> SnapCompare:
-    """``pytest-textual-snapshot``'s fixture, extended by the light palette.
+    """Compare a screen with its snapshot in every palette.
 
-    The plugin's fixture compares the dark SVG of the run with the snapshot in
-    ``tests/__snapshots__/<module>/``; this wrapper compares the light SVG of the
-    very same run with the snapshot in ``tests/__snapshots__/light/<module>/``, so
-    every screen is reviewed in both looks without running the app twice.
+    This replaces ``pytest-textual-snapshot``'s fixture of the same name, which
+    compares a single screenshot with a single snapshot. The app is run and
+    screenshotted exactly the way the plugin does it, but every palette of the
+    run (see ``tests.helpers.SVG_PALETTES``) is compared with a snapshot of its
+    own in ``tests/__snapshots__/<module>/<test>.<palette>.svg``, and every
+    comparison lands in ``snapshot_report.html`` as the plugin's own do.
     """
-    light_snapshot = snapshot.use_extension(LightSVGImageExtension)
+    snapshot = snapshot.use_extension(PaletteSVGImageExtension)
 
     def compare(
         app: CondaMetadataTui,
@@ -176,22 +176,27 @@ def snap_compare(
         assert isinstance(app, PaletteScreenshotApp), (
             "Snapshot tests must build their app with the `make_app` fixture."
         )
-        dark_matches = snap_compare(
-            app, press=press, terminal_size=terminal_size, run_before=run_before
+        # Runs the app and screenshots it, which fills `palette_screenshots`.
+        take_svg_screenshot(
+            app=app, press=press, terminal_size=terminal_size, run_before=run_before
         )
-        # Comparing here rather than in the test keeps syrupy from dumping the
-        # line diff of two SVGs into the terminal on a mismatch.
-        light_svg = app.palette_screenshots[LIGHT_PALETTE]
-        light_matches = light_snapshot == light_svg
-        report_light_comparison(
-            request.node, light_snapshot, light_svg, matches=light_matches
-        )
-        if dark_matches and not light_matches:
-            raise AssertionError(
-                "The dark snapshot matched but the light one did not: the screen "
-                "either changed in a way that only a light terminal shows, or has "
-                "no light snapshot yet. Accept it with `pixi run snapshot-update`."
+        unmatched: list[str] = []
+        for palette, svg in app.palette_screenshots.items():
+            # Comparing here rather than in the test keeps syrupy from dumping
+            # the line diff of two SVGs into the terminal on a mismatch.
+            matches = snapshot(name=palette) == svg
+            report_palette_comparison(
+                request.node, snapshot, palette, svg, matches=matches
             )
-        return dark_matches
+            if not matches:
+                unmatched.append(palette)
+        if unmatched and len(unmatched) < len(app.palette_screenshots):
+            raise AssertionError(
+                f"Only some palettes did not match: {', '.join(unmatched)}. The "
+                "screen either changed in a way that only those palettes show, or "
+                "has no snapshot for them yet. Accept them with "
+                "`pixi run snapshot-update`."
+            )
+        return not unmatched
 
     return compare

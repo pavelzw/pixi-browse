@@ -196,8 +196,8 @@ SHA256, so later runs work offline. TUI screens are checked with
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
 Every screen is therefore snapshotted twice from a single app run, with the two
 palettes `pixi run demo` records the demos with (`rose-pine-moon` and
-`rose-pine-dawn`): the dark SVG lands in `tests/__snapshots__/<module>/` and the
-light one in `tests/__snapshots__/light/<module>/`.
+`rose-pine-dawn`), side by side as
+`tests/__snapshots__/<module>/<test>.{dark,light}.svg`.
 
 After an intentional UI change, review `snapshot_report.html` and accept the new
 screenshots with:
