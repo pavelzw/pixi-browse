@@ -32,7 +32,7 @@ from syrupy.data import Snapshot, SnapshotCollection
 from syrupy.location import PyTestLocation
 from textual.pilot import Pilot
 from textual.screen import Screen
-from textual.widgets import OptionList, Static
+from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker, WorkerState
 
 from pixi_browse.tui import CondaMetadataTui
@@ -317,6 +317,24 @@ def report_palette_comparison(
     report_path.with_name(f"{report_path.name}_{palette}").write_bytes(
         pickle.dumps(comparison)
     )
+
+
+async def still_cursors_after(run_before: PilotHook | None, pilot: Pilot[None]) -> None:
+    """Run a snapshot's ``run_before`` hook, then stop every cursor blinking.
+
+    Textual blinks the cursor of a focused ``Input`` on a wall-clock timer, so a
+    screenshot catches whichever phase the machine happened to reach: a slower
+    runner (Windows, most often) then disagrees with the committed snapshot over
+    the single reverse-video cell under the cursor. Stilling the inputs right
+    before the screenshot leaves the cursor drawn -- the phase every snapshot
+    was recorded in -- and keeps the blink in the app itself.
+    """
+    if run_before is not None:
+        await run_before(pilot)
+    for screen in pilot.app.screen_stack:
+        for text_input in screen.query(Input):
+            text_input.cursor_blink = False
+    await pilot.pause()
 
 
 async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:

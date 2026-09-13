@@ -54,6 +54,7 @@ from tests.helpers import (
     RangeRequestHandler,
     SnapComparePalettes,
     report_palette_comparison,
+    still_cursors_after,
 )
 
 
@@ -178,7 +179,10 @@ def snap_compare_palettes(
         )
         # Runs the app and screenshots it, which fills `palette_screenshots`.
         take_svg_screenshot(
-            app=app, press=press, terminal_size=terminal_size, run_before=run_before
+            app=app,
+            press=press,
+            terminal_size=terminal_size,
+            run_before=partial(still_cursors_after, run_before),
         )
         unmatched: list[str] = []
         for palette, svg in app.palette_screenshots.items():
