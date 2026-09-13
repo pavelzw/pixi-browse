@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import yaml
 from rattler.networking import Client
-from rattler.package import PathType, PrefixPlaceholder, RunExportsJson
+from rattler.package import FileMode, PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
@@ -65,12 +65,10 @@ class VersionDataLoader:
         return None
 
     @staticmethod
-    def _prefix_replacement_mode(
-        prefix_placeholder: PrefixPlaceholder | None,
-    ) -> PrefixReplacementMode | None:
-        if prefix_placeholder is None:
-            return None
-        file_mode = prefix_placeholder.file_mode
+    def _file_mode_name(file_mode: FileMode) -> PrefixReplacementMode:
+        # TODO: drop this in favour of `file_mode.mode` once
+        # https://github.com/conda/rattler/pull/2789 lands. It is a stand-in for
+        # that property, down to the return type.
         if file_mode.binary:
             return "binary"
         if file_mode.text:
@@ -111,8 +109,10 @@ class VersionDataLoader:
                 sha256=path.sha256,
                 no_link=path.no_link,
                 path_type=self._path_type_name(path.path_type),
-                prefix_replacement=self._prefix_replacement_mode(
-                    path.prefix_placeholder
+                prefix_replacement=(
+                    self._file_mode_name(path.prefix_placeholder.file_mode)
+                    if path.prefix_placeholder is not None
+                    else None
                 ),
             )
             for path in paths_json.paths

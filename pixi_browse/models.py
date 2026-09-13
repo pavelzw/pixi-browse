@@ -13,6 +13,8 @@ MetadataTab = Literal["metadata", "patches"]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
+# Mirrors the return type of py-rattler's `FileMode.mode`, so it can be assigned
+# straight from there once https://github.com/conda/rattler/pull/2789 lands.
 PrefixReplacementMode = Literal["binary", "text", "unknown"]
 MetadataRow = tuple[str, str]
 
