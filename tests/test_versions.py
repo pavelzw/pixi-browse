@@ -1853,9 +1853,9 @@ def test_file_list_entry_uses_plain_file_path() -> None:
 
     entries = view._file_entries_for_details()
 
-    assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
+    assert entries[0].label.plain == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
-    assert entries[1].label == "bin/demo"
+    assert entries[1].label.plain == "bin/demo"
     assert entries[1].path is None
 
 
@@ -1873,15 +1873,15 @@ def test_file_list_entries_mark_prefix_replacement() -> None:
 
     entries = view._file_entries_for_details()
 
-    assert [entry.label for entry in entries] == [
+    assert [entry.label.plain for entry in entries] == [
         "lib/pkgconfig/demo.pc (512 B) [prefix:text]",
         "bin/demo (2.0 KiB) [prefix:binary]",
         "share/demo/data.txt (64 B)",
     ]
-    marker = entries[0].option.spans[0]
-    assert entries[0].option.plain[marker.start : marker.end] == " [prefix:text]"
+    marker = entries[0].label.spans[0]
+    assert entries[0].label.plain[marker.start : marker.end] == " [prefix:text]"
     assert marker.style == PREFIX_REPLACEMENT_STYLE
-    assert entries[2].option.spans == []
+    assert entries[2].label.spans == []
 
 
 def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
@@ -1901,7 +1901,7 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
 
     entries = view._file_entries_for_details("info")
 
-    assert [entry.label for entry in entries] == [
+    assert [entry.label.plain for entry in entries] == [
         "index.json (1.0 KiB)",
         "recipe/meta.yaml (1.5 KiB)",
         "current -> recipe/meta.yaml",
