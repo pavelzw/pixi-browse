@@ -71,6 +71,15 @@ ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 PREFIX_REPLACEMENT_STYLE = Style(color="#d19a66")
+# Foreground colors for the compare file list. Named ANSI colors, like the
+# compare tables use, so both follow the terminal palette.
+COMPARE_FILE_UNCHANGED_COLOR = "white"
+COMPARE_FILE_MODIFIED_COLOR = "yellow"
+COMPARE_FILE_LEFT_ONLY_COLOR = "red"
+COMPARE_FILE_RIGHT_ONLY_COLOR = "green"
+# Sizes and link targets recede by dimming the row color rather than by picking a
+# fixed grey, so they stay readable on the highlighted row too.
+COMPARE_FILE_SUFFIX_STYLE = Style(dim=True)
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -1450,14 +1459,14 @@ class CompareDetailsView(Vertical):
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
         if not row.comparison_known:
-            return "#7a5c00"
+            return COMPARE_FILE_MODIFIED_COLOR
         if not row.changed:
-            return "#5c6370"
+            return COMPARE_FILE_UNCHANGED_COLOR
         if row.left and row.right:
-            return "#7a5c00"
+            return COMPARE_FILE_MODIFIED_COLOR
         if row.left:
-            return "#8b1e1e"
-        return "#1f5f2b"
+            return COMPARE_FILE_LEFT_ONLY_COLOR
+        return COMPARE_FILE_RIGHT_ONLY_COLOR
 
     def _current_file_entries(self) -> tuple[CompareFileListEntry, ...]:
         return self._file_entries[self._active_file_tab()]
@@ -1496,24 +1505,16 @@ class CompareDetailsView(Vertical):
     def _render_compare_file_option(cls, row: CompareFileRow) -> Text:
         row_style = cls._file_row_style(row)
         if row.comparison_known:
-            label_style = row_style
             text = Text(cls._compare_file_prefix(row), style=row_style)
             text.append(row.label, style=row_style)
         else:
-            label_style = "#5c6370"
+            # Unknown comparisons only mark the prefix; the label stays neutral.
             text = Text()
             text.append(cls._compare_file_prefix(row), style=row_style)
-            text.append(row.label, style=label_style)
+            text.append(row.label, style=COMPARE_FILE_UNCHANGED_COLOR)
         suffix = cls._compare_file_suffix(row)
         if suffix:
-            text.append(
-                suffix,
-                style=(
-                    "dim"
-                    if row.comparison_known
-                    else Style(color=label_style, dim=True)
-                ),
-            )
+            text.append(suffix, style=COMPARE_FILE_SUFFIX_STYLE)
         return text
 
     @staticmethod

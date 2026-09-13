@@ -80,6 +80,11 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import (
+    COMPARE_FILE_LEFT_ONLY_COLOR,
+    COMPARE_FILE_MODIFIED_COLOR,
+    COMPARE_FILE_RIGHT_ONLY_COLOR,
+    COMPARE_FILE_SUFFIX_STYLE,
+    COMPARE_FILE_UNCHANGED_COLOR,
     PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
     FileActionOption,
@@ -1637,10 +1642,10 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
                 "+ right-only.txt",
             ]
             assert [prompt.style for prompt in prompts] == [
-                "#5c6370",
-                "#7a5c00",
-                "#8b1e1e",
-                "#1f5f2b",
+                COMPARE_FILE_UNCHANGED_COLOR,
+                COMPARE_FILE_MODIFIED_COLOR,
+                COMPARE_FILE_LEFT_ONLY_COLOR,
+                COMPARE_FILE_RIGHT_ONLY_COLOR,
             ]
 
     asyncio.run(_run())
@@ -1713,9 +1718,9 @@ def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     assert [
         (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
     ] == [
-        ("? ", "#7a5c00"),
-        ("index.json", "#5c6370"),
-        (" (1.2 KiB)", Style(color="#5c6370", dim=True)),
+        ("? ", COMPARE_FILE_MODIFIED_COLOR),
+        ("index.json", COMPARE_FILE_UNCHANGED_COLOR),
+        (" (1.2 KiB)", COMPARE_FILE_SUFFIX_STYLE),
     ]
 
 
