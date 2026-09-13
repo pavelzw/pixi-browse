@@ -82,7 +82,7 @@ def test_version_search_without_matches_reports_it(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=0)
         await pilot.press("slash")
-        await type_text(pilot, "qqq")
+        await type_text(pilot, "qq")
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
