@@ -4,6 +4,8 @@ Everything runs in a pixi environment. Any command (like `pytest`) must be prefi
 
 Code formatting must align with our standards. Run `pixi run lint` before `git commit`s to ensure this.
 
+Commit messages and PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), with an optional scope (e.g. `feat(search): filter dependency lists with /`, `fix: keep the active section tab visible`). PRs land as squash merges, so the PR title becomes the commit subject on `main` -- write it as the commit message you want in the history.
+
 When using things from py-rattler and pulling data, always properly type them, try to avoid using `Any`.
 
 Don't write tests with `monkeypatch`. Instead, write real-data tests using snapshots.
