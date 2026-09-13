@@ -134,6 +134,36 @@ def test_search_narrows_the_dependency_list(
     assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
+def test_search_narrows_the_extra_depends_list(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A group in the extra depends tab is kept as the header of the
+    dependencies of its own that matched."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        # The dependency section, its extra depends tab, then search it.
+        await pilot.press("2", "]", "slash")
+        await type_text(pilot, "diff-view")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_search_drops_groups_without_matches(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A group whose dependencies all miss the query leaves with them."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "]", "slash")
+        await type_text(pilot, "qqq")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
 def test_search_narrows_the_compare_file_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:

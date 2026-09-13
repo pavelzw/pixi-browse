@@ -10,7 +10,7 @@ ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
 MetadataTab = Literal["metadata", "patches"]
-DependencyTab = Literal["dependencies", "constraints", "run_exports"]
+DependencyTab = Literal["dependencies", "extra_depends", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 # Mirrors the return type of py-rattler's `FileMode.mode`, so it can be assigned
@@ -93,6 +93,7 @@ class VersionArtifactData:
     metadata_rows: tuple[MetadataRow, ...]
     dependencies: tuple[str, ...]
     constraints: tuple[str, ...]
+    extra_depends: tuple[tuple[str, tuple[str, ...]], ...] = ()
     package_url: str = ""
     file_paths: tuple[PackageFile, ...] = ()
     info_files: tuple[PackageFile, ...] = ()
@@ -134,3 +135,4 @@ class VersionCompareData:
     run_exports: tuple[CompareRow, ...]
     files: tuple[CompareFileRow, ...]
     info_files: tuple[CompareFileRow, ...] = ()
+    extra_depends: tuple[CompareRow, ...] = ()

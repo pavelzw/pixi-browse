@@ -8,12 +8,12 @@
       'dev_url': 'https://github.com/pavelzw/pixi-browse',
       'doc_url': 'https://github.com/pavelzw/pixi-browse',
       'extra': dict({
-        'flow_run_id': 'github_26884037975',
+        'flow_run_id': 'github_34508039282',
         'recipe-maintainers': list([
           'pavelzw',
         ]),
         'remote_url': 'https://github.com/conda-forge/pixi-browse-feedstock',
-        'sha': '94b9f1d564e589aaebc8c4baffff1133d8874690',
+        'sha': '48f88c59a4cb90f6a0083bafb4cfad73ed23b010',
       }),
       'home': 'https://github.com/pavelzw/pixi-browse',
       'license': 'BSD-3-Clause',
@@ -23,12 +23,13 @@
       'https://config.invalid/conda-forge',
     ]),
     'packages': list([
+      'pixi-browse-0.0.15-pyhc364b38_0.conda',
       'pixi-browse-0.0.14-pyhc364b38_0.conda',
       'pixi-browse-0.0.13-pyhc364b38_0.conda',
       'pixi-browse-0.0.12-pyhc364b38_0.conda',
     ]),
     'requests': list([
-      '/conda-forge/noarch/pixi-browse-0.0.14-pyhc364b38_0.conda',
+      '/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda',
       '/conda-forge/noarch/repodata.json',
     ]),
   })
@@ -42,12 +43,12 @@
       'dev_url': 'https://github.com/pavelzw/pixi-browse',
       'doc_url': 'https://github.com/pavelzw/pixi-browse',
       'extra': dict({
-        'flow_run_id': 'github_26884037975',
+        'flow_run_id': 'github_34508039282',
         'recipe-maintainers': list([
           'pavelzw',
         ]),
         'remote_url': 'https://github.com/conda-forge/pixi-browse-feedstock',
-        'sha': '94b9f1d564e589aaebc8c4baffff1133d8874690',
+        'sha': '48f88c59a4cb90f6a0083bafb4cfad73ed23b010',
       }),
       'home': 'https://github.com/pavelzw/pixi-browse',
       'license': 'BSD-3-Clause',
@@ -57,12 +58,13 @@
       'https://config.invalid/conda-forge',
     ]),
     'packages': list([
+      'pixi-browse-0.0.15-pyhc364b38_0.conda',
       'pixi-browse-0.0.14-pyhc364b38_0.conda',
       'pixi-browse-0.0.13-pyhc364b38_0.conda',
       'pixi-browse-0.0.12-pyhc364b38_0.conda',
     ]),
     'requests': list([
-      '/conda-forge/noarch/pixi-browse-0.0.14-pyhc364b38_0.conda',
+      '/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda',
       '/conda-forge/noarch/repodata.json',
     ]),
   })
@@ -76,12 +78,12 @@
       'dev_url': 'https://github.com/pavelzw/pixi-browse',
       'doc_url': 'https://github.com/pavelzw/pixi-browse',
       'extra': dict({
-        'flow_run_id': 'github_26884037975',
+        'flow_run_id': 'github_34508039282',
         'recipe-maintainers': list([
           'pavelzw',
         ]),
         'remote_url': 'https://github.com/conda-forge/pixi-browse-feedstock',
-        'sha': '94b9f1d564e589aaebc8c4baffff1133d8874690',
+        'sha': '48f88c59a4cb90f6a0083bafb4cfad73ed23b010',
       }),
       'home': 'https://github.com/pavelzw/pixi-browse',
       'license': 'BSD-3-Clause',
@@ -91,12 +93,13 @@
       's3://conda-forge',
     ]),
     'packages': list([
+      'pixi-browse-0.0.15-pyhc364b38_0.conda',
       'pixi-browse-0.0.14-pyhc364b38_0.conda',
       'pixi-browse-0.0.13-pyhc364b38_0.conda',
       'pixi-browse-0.0.12-pyhc364b38_0.conda',
     ]),
     'requests': list([
-      '/conda-forge/noarch/pixi-browse-0.0.14-pyhc364b38_0.conda',
+      '/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda',
       '/conda-forge/noarch/repodata.json',
     ]),
   })
@@ -110,12 +113,12 @@
       'dev_url': 'https://github.com/pavelzw/pixi-browse',
       'doc_url': 'https://github.com/pavelzw/pixi-browse',
       'extra': dict({
-        'flow_run_id': 'github_26884037975',
+        'flow_run_id': 'github_34508039282',
         'recipe-maintainers': list([
           'pavelzw',
         ]),
         'remote_url': 'https://github.com/conda-forge/pixi-browse-feedstock',
-        'sha': '94b9f1d564e589aaebc8c4baffff1133d8874690',
+        'sha': '48f88c59a4cb90f6a0083bafb4cfad73ed23b010',
       }),
       'home': 'https://github.com/pavelzw/pixi-browse',
       'license': 'BSD-3-Clause',
@@ -125,12 +128,13 @@
       's3://conda-forge',
     ]),
     'packages': list([
+      'pixi-browse-0.0.15-pyhc364b38_0.conda',
       'pixi-browse-0.0.14-pyhc364b38_0.conda',
       'pixi-browse-0.0.13-pyhc364b38_0.conda',
       'pixi-browse-0.0.12-pyhc364b38_0.conda',
     ]),
     'requests': list([
-      '/conda-forge/noarch/pixi-browse-0.0.14-pyhc364b38_0.conda',
+      '/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda',
       '/conda-forge/noarch/repodata.json',
     ]),
   })

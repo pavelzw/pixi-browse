@@ -65,6 +65,7 @@ NO_SEARCH_MATCHES_MESSAGE = "No matches."
 METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
+    "extra_depends",
     "constraints",
     "run_exports",
 )
@@ -673,6 +674,8 @@ class VersionDetailsView(Vertical):
             return NO_SEARCH_MATCHES_MESSAGE
         if tab == "dependencies":
             return "No dependencies."
+        if tab == "extra_depends":
+            return "No extra dependencies."
         if tab == "constraints":
             return "No constraints."
         return "No run exports."
@@ -688,7 +691,30 @@ class VersionDetailsView(Vertical):
     def _dependency_entries_for_tab(
         self, tab: DependencyTab
     ) -> tuple[DependencyListEntry, ...]:
+        if tab == "extra_depends":
+            assert self._details is not None
+            extra_query = self._search_query_for_section(1)
+            extra_entries: list[DependencyListEntry] = []
+            for group, dependencies in self._details.extra_depends:
+                group_entries = [
+                    DependencyListEntry(label=f"  {dependency}", matchspec=dependency)
+                    for dependency in dependencies
+                ]
+                if extra_query is not None:
+                    # Only the dependencies are searched; a group is kept as the
+                    # header of whatever matched inside it.
+                    group_entries = fuzzy_filter(
+                        extra_query, group_entries, key=lambda entry: entry.label
+                    )
+                    if not group_entries:
+                        continue
+                extra_entries.append(
+                    DependencyListEntry(label=f"{group}:", matchspec=None)
+                )
+                extra_entries.extend(group_entries)
+            return tuple(extra_entries)
         lines = self._dependency_lines(tab)
+        entries: tuple[DependencyListEntry, ...]
         if tab == "run_exports":
             entries = tuple(
                 DependencyListEntry(
@@ -822,6 +848,7 @@ class VersionDetailsView(Vertical):
         if self._details is None:
             labels = {
                 "dependencies": "Dependencies",
+                "extra_depends": "Extra depends",
                 "constraints": "Constraints",
                 "run_exports": "Run exports",
             }
@@ -830,12 +857,17 @@ class VersionDetailsView(Vertical):
             counts = self._dependency_counts(
                 {
                     "dependencies": len(self._details.dependencies),
+                    "extra_depends": sum(
+                        len(dependencies)
+                        for _, dependencies in self._details.extra_depends
+                    ),
                     "constraints": len(self._details.constraints),
                     "run_exports": len(run_exports),
                 }
             )
             labels = {
                 "dependencies": f"Dependencies ({counts['dependencies']})",
+                "extra_depends": f"Extra depends ({counts['extra_depends']})",
                 "constraints": f"Constraints ({counts['constraints']})",
                 "run_exports": f"Run exports ({counts['run_exports']})",
             }
@@ -860,9 +892,17 @@ class VersionDetailsView(Vertical):
         if self._search_query_for_section(1) is None:
             return {tab: str(total) for tab, total in totals.items()}
         return {
-            tab: f"{len(self._dependency_entries[tab])}/{total}"
+            tab: f"{self._dependency_match_count(tab)}/{total}"
             for tab, total in totals.items()
         }
+
+    def _dependency_match_count(self, tab: DependencyTab) -> int:
+        """The rows the search kept, counted the way the tab's total counts them:
+        the ``extra_depends`` total leaves its group headers out."""
+        entries = self._dependency_entries[tab]
+        if tab == "extra_depends":
+            return sum(1 for entry in entries if entry.matchspec is not None)
+        return len(entries)
 
     def _file_counts(self, totals: dict[FileTab, int]) -> dict[FileTab, str]:
         """The per-tab counts, ``matched/total`` while the search narrows them."""
@@ -1526,6 +1566,7 @@ class CompareDetailsView(Vertical):
     def _render_dependency_tabs(self) -> Text:
         labels = {
             "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
+            "extra_depends": f"Extra depends ({len(self._compare_data.extra_depends)})",
             "constraints": f"Constraints ({len(self._compare_data.constraints)})",
             "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
         }
@@ -1598,6 +1639,8 @@ class CompareDetailsView(Vertical):
     def _dependency_lines(self, tab: DependencyTab) -> tuple[CompareRow, ...]:
         if tab == "dependencies":
             return self._compare_data.dependencies
+        if tab == "extra_depends":
+            return self._compare_data.extra_depends
         if tab == "constraints":
             return self._compare_data.constraints
         return self._compare_data.run_exports
@@ -1614,7 +1657,8 @@ class CompareDetailsView(Vertical):
         return self._render_compare_table(
             self._dependency_lines(tab),
             empty_message="No dependency data.",
-            show_label_column=False,
+            show_label_column=tab == "extra_depends",
+            label_title="Extra",
         )
 
     @staticmethod
@@ -1960,6 +2004,7 @@ class CompareScreen(Screen[None]):
             right_selection=self._compare_data.right_selection,
             metadata_rows=self._compare_data.metadata_rows,
             dependencies=self._compare_data.dependencies,
+            extra_depends=self._compare_data.extra_depends,
             constraints=self._compare_data.constraints,
             run_exports=self._compare_data.run_exports,
             files=self._compare_data.files,
@@ -2005,6 +2050,7 @@ class CompareScreen(Screen[None]):
             right_selection=compare_data.left_selection,
             metadata_rows=cls._swap_rows(compare_data.metadata_rows),
             dependencies=cls._swap_rows(compare_data.dependencies),
+            extra_depends=cls._swap_rows(compare_data.extra_depends),
             constraints=cls._swap_rows(compare_data.constraints),
             run_exports=cls._swap_rows(compare_data.run_exports),
             files=cls._swap_file_rows(compare_data.files),

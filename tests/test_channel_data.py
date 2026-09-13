@@ -259,6 +259,7 @@ def test_render_package_preview_from_real_records(
     ("package_name", "subdir", "version"),
     [
         ("pixi-browse", "noarch", "0.0.14"),
+        ("pixi-browse", "noarch", "0.0.15"),
         ("libzlib", "linux-64", "1.3.2"),
         ("six", "noarch", "1.16.0"),
     ],
@@ -274,7 +275,9 @@ def test_load_version_artifact_data_reads_real_archives(
     """Metadata, run exports and file lists come straight out of the archive,
     for both ``.conda`` and legacy ``.tar.bz2`` packages."""
 
-    async def load() -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    async def load() -> tuple[
+        list[str], list[str], list[str], list[str], list[str], list[str]
+    ]:
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
@@ -302,6 +305,11 @@ def test_load_version_artifact_data_reads_real_archives(
         return (
             list(format_version_details_metadata_lines(details)),
             list(details.dependencies),
+            [
+                f"{group}: {dependency}"
+                for group, dependencies in details.extra_depends
+                for dependency in dependencies
+            ],
             list(format_version_details_run_exports(details.run_exports)),
             files + [file.path for file in details.info_files],
             [
@@ -310,11 +318,14 @@ def test_load_version_artifact_data_reads_real_archives(
             ],
         )
 
-    metadata, dependencies, run_exports, files, repodata_patches = asyncio.run(load())
+    metadata, dependencies, extra_depends, run_exports, files, repodata_patches = (
+        asyncio.run(load())
+    )
 
     assert {
         "metadata": metadata,
         "dependencies": dependencies,
+        "extra_depends": extra_depends,
         "run_exports": run_exports,
         "files": files,
         # The fixture repodata is generated from the packages' own index.json,

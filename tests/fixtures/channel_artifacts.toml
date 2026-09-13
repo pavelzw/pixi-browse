@@ -34,6 +34,12 @@ sha256 = "c52c5f3d57ac8e2de5da37ffabc053adfdfa73fd90472614b337b73285832cce"
 [[artifacts]]
 channel = "conda-forge"
 subdir = "noarch"
+file_name = "pixi-browse-0.0.15-pyhc364b38_0.conda"
+sha256 = "58a7ec2830400741530b3eaabaff8bc40915860c44458e350ebfbb4dd5649f8c"
+
+[[artifacts]]
+channel = "conda-forge"
+subdir = "noarch"
 file_name = "polars-1.44.0-pyh8da0edf_0.conda"
 sha256 = "30283eacfdc455cc8838a3706fbe2e08a3648c89c5739f9d8deda2ae84d3ae05"
 
