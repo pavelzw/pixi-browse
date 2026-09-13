@@ -16,7 +16,7 @@ from tests.helpers import (
 
 
 def test_enter_on_package_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """Files from ``paths.json`` carry their SHA256."""
 
@@ -25,11 +25,13 @@ def test_enter_on_package_file_opens_file_actions(
         await pilot.press("3", "enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_enter_on_info_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """Files streamed from ``info/`` only know their size."""
 
@@ -38,11 +40,13 @@ def test_enter_on_info_file_opens_file_actions(
         await pilot.press("3", "]", "enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_clicking_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """Clicking a file row opens the same file action screen as ``Enter``."""
 
@@ -51,11 +55,13 @@ def test_clicking_file_opens_file_actions(
         await pilot.click("#detail-option-list-2", offset=(2, 0))
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_enter_on_symlink_does_nothing(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """``libzlib`` ships ``lib/libz.so`` as a symlink, which has no actions."""
 
@@ -64,11 +70,13 @@ def test_enter_on_symlink_does_nothing(
         await pilot.press("3", "enter")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_file_actions_escape_returns_to_details(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the file action screen and leaves the file pane active."""
 
@@ -79,11 +87,13 @@ def test_file_actions_escape_returns_to_details(
         await pilot.press("escape")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_preview_python_file_uses_syntax_highlighting(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """Previewing a ``.py`` file renders it with Python syntax highlighting."""
 
@@ -96,11 +106,13 @@ def test_preview_python_file_uses_syntax_highlighting(
         await pilot.press("j", "j", "j")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_preview_escape_returns_to_details(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the preview and returns to the details view."""
 
@@ -113,11 +125,13 @@ def test_preview_escape_returns_to_details(
         await pilot.press("escape")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_download_path_screen_rejects_empty_destination(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """Submitting an empty destination in the download prompt shows an inline
     error."""
@@ -132,11 +146,13 @@ def test_download_path_screen_rejects_empty_destination(
         await pilot.press("backspace", "enter")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_d_on_section_row_warns(
-    snap_compare: SnapCompare, make_app: AppFactory
+    compare_snapshot: SnapCompare, make_app: AppFactory
 ) -> None:
     """``d`` on a platform section row warns that a specific artifact must be
     selected."""
@@ -146,4 +162,6 @@ def test_d_on_section_row_warns(
         await pilot.press("k", "d")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert compare_snapshot(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )

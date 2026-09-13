@@ -27,6 +27,7 @@ from collections.abc import Iterable, Iterator
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 
 import pytest
 from rattler.config import Config
@@ -35,6 +36,8 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from textual.pilot import Pilot
+from textual.widgets import Input
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
@@ -45,7 +48,9 @@ from tests.helpers import (
     MISSING_CHANNEL,
     AppFactory,
     GatewayFactory,
+    PilotHook,
     RangeRequestHandler,
+    SnapCompare,
 )
 
 
@@ -121,6 +126,34 @@ def make_gateway(rattler_config: Config, rattler_cache_dir: Path) -> GatewayFact
         return create_gateway(config=rattler_config, cache_dir=rattler_cache_dir)
 
     return factory
+
+
+@pytest.fixture
+def compare_snapshot(snap_compare: SnapCompare) -> SnapCompare:
+    """``pytest-textual-snapshot``'s ``snap_compare``, with the blink stopped.
+
+    Textual blinks the cursor of a focused ``Input`` on a wall-clock timer, so
+    the capture catches whichever phase the machine happened to reach: a slower
+    runner (Windows, most often) disagrees with the committed snapshot over the
+    single reverse-video cell under the cursor. Every input on the screen stack
+    is stilled once the test has driven the app, right before the screenshot is
+    taken, so the cursor is always drawn and the app keeps its blink.
+    """
+
+    def compare(app: CondaMetadataTui, **kwargs: object) -> bool:
+        run_before = cast(PilotHook | None, kwargs.pop("run_before", None))
+
+        async def run_before_with_steady_cursor(pilot: Pilot[None]) -> None:
+            if run_before is not None:
+                await run_before(pilot)
+            for screen in pilot.app.screen_stack:
+                for text_input in screen.query(Input):
+                    text_input.cursor_blink = False
+            await pilot.pause()
+
+        return snap_compare(app, run_before=run_before_with_steady_cursor, **kwargs)
+
+    return compare
 
 
 @pytest.fixture
