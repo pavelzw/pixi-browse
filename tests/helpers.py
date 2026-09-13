@@ -3,17 +3,32 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 import os
+import pickle
 import re
 import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler
+from pathlib import Path
 from typing import Any, BinaryIO
 
+import pytest
+from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
+    PseudoApp,
+    PseudoConsole,
+    SVGImageExtension,
+    node_to_report_path,
+)
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from rich.console import Console
+from rich.terminal_theme import SVG_EXPORT_THEME, TerminalTheme
+from syrupy.assertion import SnapshotAssertion
+from syrupy.location import PyTestLocation
+from textual._ansi_theme import ALABASTER
 from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import OptionList, Static
@@ -36,6 +51,19 @@ AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
 SnapCompare = Callable[..., bool]
+
+# The app draws in ANSI colors (its theme is `ansi-dark`), so the terminal
+# palette alone decides how it ends up looking. Every screen is therefore
+# snapshotted with a dark and a light palette, the same two looks the dark and
+# light recordings of `pixi run demo` show.
+DARK_PALETTE = "dark"
+LIGHT_PALETTE = "light"
+SVG_PALETTES: dict[str, TerminalTheme] = {
+    # Rich's SVG export default, the palette of the dark snapshots.
+    DARK_PALETTE: SVG_EXPORT_THEME,
+    # Textual's light ANSI mapping, the default of `App.ansi_theme_light`.
+    LIGHT_PALETTE: ALABASTER,
+}
 
 
 class RangeRequestHandler(SimpleHTTPRequestHandler):
@@ -98,6 +126,106 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Last-Modified", self.date_time_string(int(modified)))
         self.end_headers()
         return io.BytesIO(body)
+
+
+class PaletteScreenshotApp(CondaMetadataTui):
+    """The app under test, screenshotted with every palette in a single run.
+
+    ``pytest-textual-snapshot`` takes its screenshot through
+    ``App.export_screenshot``, which records the screen and exports it as an SVG
+    with Rich's dark default palette. Recording is the expensive half -- it
+    needs the whole app run -- while turning the recording into an SVG only maps
+    the recorded ANSI colors to a palette's hex colors. This override therefore
+    exports one SVG per palette from a single recording and keeps them all in
+    ``palette_screenshots``.
+    """
+
+    # Textual titles a window after its app class, and that title is drawn into
+    # the screenshot, so keep the name of the app under test.
+    TITLE = CondaMetadataTui.__name__
+
+    palette_screenshots: dict[str, str]
+    """The SVGs of the last screenshot, one per palette in ``SVG_PALETTES``."""
+
+    def export_screenshot(
+        self, *, title: str | None = None, simplify: bool = False
+    ) -> str:
+        # Mirrors `App.export_screenshot` of Textual 8, except that the recorded
+        # console is exported once per palette instead of once in total.
+        assert self._driver is not None, "App must be running"
+        width, height = self.size
+        console = Console(
+            width=width,
+            height=height,
+            file=io.StringIO(),
+            force_terminal=True,
+            color_system="truecolor",
+            record=True,
+            legacy_windows=False,
+            safe_box=False,
+        )
+        console.print(
+            self.screen._compositor.render_update(
+                full=True, screen_stack=self._background_screens, simplify=simplify
+            )
+        )
+        self.palette_screenshots = {
+            palette: console.export_svg(
+                title=title or self.title, theme=theme, clear=False
+            )
+            for palette, theme in SVG_PALETTES.items()
+        }
+        return self.palette_screenshots[DARK_PALETTE]
+
+
+class LightSVGImageExtension(SVGImageExtension):  # type: ignore[misc]
+    """Keep light-palette snapshots in a ``light`` tree of their own.
+
+    The tree mirrors the dark one, ``tests/__snapshots__/light/<module>/``, so
+    syrupy manages both the same way (writing new ones, updating changed ones
+    and deleting the snapshots of deleted tests).
+    """
+
+    @classmethod
+    def dirname(cls, *, test_location: PyTestLocation) -> str:
+        module_dirname = Path(super().dirname(test_location=test_location))
+        # The module directory has to stay innermost: syrupy relates a snapshot
+        # to its test by the name of the directory the file sits in.
+        return str(module_dirname.parent / LIGHT_PALETTE / module_dirname.name)
+
+
+def report_light_comparison(
+    node: pytest.Function,
+    light_snapshot: SnapshotAssertion,
+    light_svg: str,
+    *,
+    matches: bool,
+) -> None:
+    """List the light comparison in ``snapshot_report.html`` as well.
+
+    ``pytest-textual-snapshot`` builds that report at the end of the session out
+    of one pickled comparison per test, so pickling the light comparison the
+    same way puts the light screen next to the dark one in the report.
+    """
+    execution = light_snapshot.executions.get(light_snapshot.num_executions - 1)
+    console = Console(legacy_windows=False, force_terminal=True)
+    full_path, line_number, name = node.reportinfo()
+    comparison = (
+        matches,
+        str(light_snapshot),
+        light_svg,
+        PseudoApp(PseudoConsole(console.legacy_windows, console.size)),
+        full_path,
+        line_number,
+        f"{name} ({LIGHT_PALETTE})",
+        inspect.getdoc(node.function) or "",
+        "",
+        execution is not None and execution.final_data is not None,
+    )
+    report_path = node_to_report_path(node)
+    report_path.with_name(f"{report_path.name}_{LIGHT_PALETTE}").write_bytes(
+        pickle.dumps(comparison)
+    )
 
 
 async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 
 SNAPSHOT_DIRECTORY = PurePosixPath("tests/__snapshots__")
+# The directory the light-palette snapshots live in; see `tests/helpers.py`.
+LIGHT_PALETTE_DIRECTORY = "light"
 
 
 @dataclass(frozen=True)
@@ -144,15 +146,24 @@ def read_snapshot(revision: str, path: PurePosixPath | None) -> str | None:
     return run_git("show", f"{revision}:{path}")
 
 
+def report_test_name(snapshot_path: PurePosixPath) -> str:
+    """The report label of a snapshot: its test name, plus its palette."""
+    if LIGHT_PALETTE_DIRECTORY in snapshot_path.parts:
+        return f"{snapshot_path.stem} (light)"
+    return snapshot_path.stem
+
+
 def test_docstring(revision: str, snapshot_path: PurePosixPath) -> str:
     """Read a snapshot's test docstring from its committed Python module."""
     parts = snapshot_path.parts
     try:
         snapshot_directory_index = parts.index("__snapshots__")
-        module_name = parts[snapshot_directory_index + 1]
-    except (ValueError, IndexError):
+    except ValueError:
         return ""
 
+    # A snapshot sits in a directory named after its test module, directly below
+    # `__snapshots__` for the dark palette and one level deeper for the light one.
+    module_name = snapshot_path.parent.name
     module_path = PurePosixPath(*parts[:snapshot_directory_index], f"{module_name}.py")
     module = ast.parse(run_git("show", f"{revision}:{module_path}"))
     test_name = snapshot_path.stem.partition("[")[0]
@@ -201,7 +212,7 @@ def build_diffs(
             SvgSnapshotDiff(
                 snapshot=individualize_svg(snapshot, f"base-{index}"),
                 actual=individualize_svg(actual, f"head-{index}"),
-                test_name=display_path.stem,
+                test_name=report_test_name(display_path),
                 path=Path(display_path),
                 line_number=1,
                 app=app,

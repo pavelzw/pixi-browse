@@ -35,17 +35,25 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from syrupy.assertion import SnapshotAssertion
 
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
 from tests.helpers import (
     ANACONDA_CHANNELS_URL,
+    LIGHT_PALETTE,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
+    TERMINAL_SIZE,
     AppFactory,
     GatewayFactory,
+    LightSVGImageExtension,
+    PaletteScreenshotApp,
+    PilotHook,
     RangeRequestHandler,
+    SnapCompare,
+    report_light_comparison,
 )
 
 
@@ -133,7 +141,7 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
     ) -> CondaMetadataTui:
-        return CondaMetadataTui(
+        return PaletteScreenshotApp(
             default_channels=default_channels,
             default_platforms=default_platforms,
             default_matchspec=default_matchspec,
@@ -142,3 +150,48 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
         )
 
     return factory
+
+
+@pytest.fixture
+def snap_compare(
+    snap_compare: SnapCompare,
+    snapshot: SnapshotAssertion,
+    request: pytest.FixtureRequest,
+) -> SnapCompare:
+    """``pytest-textual-snapshot``'s fixture, extended by the light palette.
+
+    The plugin's fixture compares the dark SVG of the run with the snapshot in
+    ``tests/__snapshots__/<module>/``; this wrapper compares the light SVG of the
+    very same run with the snapshot in ``tests/__snapshots__/light/<module>/``, so
+    every screen is reviewed in both looks without running the app twice.
+    """
+    light_snapshot = snapshot.use_extension(LightSVGImageExtension)
+
+    def compare(
+        app: CondaMetadataTui,
+        press: Iterable[str] = (),
+        terminal_size: tuple[int, int] = TERMINAL_SIZE,
+        run_before: PilotHook | None = None,
+    ) -> bool:
+        assert isinstance(app, PaletteScreenshotApp), (
+            "Snapshot tests must build their app with the `make_app` fixture."
+        )
+        dark_matches = snap_compare(
+            app, press=press, terminal_size=terminal_size, run_before=run_before
+        )
+        # Comparing here rather than in the test keeps syrupy from dumping the
+        # line diff of two SVGs into the terminal on a mismatch.
+        light_svg = app.palette_screenshots[LIGHT_PALETTE]
+        light_matches = light_snapshot == light_svg
+        report_light_comparison(
+            request.node, light_snapshot, light_svg, matches=light_matches
+        )
+        if dark_matches and not light_matches:
+            raise AssertionError(
+                "The dark snapshot matched but the light one did not: the screen "
+                "either changed in a way that only a light terminal shows, or has "
+                "no light snapshot yet. Accept it with `pixi run snapshot-update`."
+            )
+        return dark_matches
+
+    return compare
