@@ -894,3 +894,14 @@ def test_whoneeds_query_spans_all_channels(
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
     )
+
+
+def test_enter_on_extra_dependency_opens_matchspec_screen(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "]", "j", "enter")
+        await wait_for_screen(pilot, MatchSpecScreen)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)

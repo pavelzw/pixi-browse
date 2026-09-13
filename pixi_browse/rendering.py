@@ -372,6 +372,10 @@ def build_version_artifact_data(
         ),
         dependencies=tuple(str(dependency) for dependency in record.depends or ()),
         constraints=tuple(str(constraint) for constraint in record.constrains or ()),
+        extra_depends=tuple(
+            (group, tuple(dependencies))
+            for group, dependencies in sorted(record.extra_depends.items())
+        ),
         package_url=str(record.url),
         file_paths=tuple(package_paths),
         info_files=tuple(info_files),
@@ -795,6 +799,9 @@ def build_version_compare_data(
         for label in ordered_labels
     )
 
+    left_extras = dict(left_artifact.extra_depends)
+    right_extras = dict(right_artifact.extra_depends)
+
     return VersionCompareData(
         left_selection=left_selection,
         right_selection=right_selection,
@@ -813,6 +820,20 @@ def build_version_compare_data(
             left_run_exports,
             right_run_exports,
             run_export=True,
+        ),
+        extra_depends=tuple(
+            CompareRow(
+                label=group,
+                left=row.left,
+                right=row.right,
+                changed=row.changed,
+            )
+            for group in sorted(left_extras.keys() | right_extras.keys())
+            for row in _diff_dependency_group(
+                left_extras.get(group, ()),
+                right_extras.get(group, ()),
+                run_export=False,
+            )
         ),
         files=_build_file_compare_rows(left_artifact, right_artifact),
         info_files=_build_info_file_compare_rows(left_artifact, right_artifact),
