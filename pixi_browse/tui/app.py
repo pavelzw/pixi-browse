@@ -32,6 +32,7 @@ from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.events import Key, Resize
 from textual.screen import ModalScreen, Screen
+from textual.widget import Widget
 from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
@@ -253,7 +254,7 @@ class CondaMetadataTui(App[None]):
 
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = False
-        package_list.focus()
+        self._move_focus(package_list)
         self._update_platform_indicator()
         self._update_package_selection_status()
         if self._visible_package_names:
@@ -770,7 +771,7 @@ class CondaMetadataTui(App[None]):
             return
 
         self._update_filter_indicator()
-        self.query_one("#sidebar-list", OptionList).focus()
+        self._move_focus(self.query_one("#sidebar-list", OptionList))
 
     async def _apply_channel_selection(self, channel_names: Sequence[str]) -> None:
         channel_names = normalize_channel_names(channel_names)
@@ -793,7 +794,7 @@ class CondaMetadataTui(App[None]):
         if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
-            package_list.focus()
+            self._move_focus(package_list)
             self.notify(
                 f"Failed to load channels: {load_error}",
                 title="Channels",
@@ -927,6 +928,7 @@ class CondaMetadataTui(App[None]):
         # message is handled a cycle later. Dropping the claim of a pane that no
         # longer has the focus keeps a click or a restored focus from overriding
         # what the app did in between (a query result focusing the sidebar).
+        # ``_move_focus`` is what makes that check reliable.
         if not self._pane_has_focus(event.pane):
             return
         self._set_selected_pane(event.pane)
@@ -954,14 +956,25 @@ class CondaMetadataTui(App[None]):
         if self._list_search.scope == "versions":
             self._list_search.stop()
         self._selected_pane = "main"
-        self.query_one("#main-panel", MainPanel).focus()
+        self._move_focus(self.query_one("#main-panel", MainPanel))
         self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
         self._stop_details_search()
         self._selected_pane = "sidebar"
-        self.query_one("#sidebar-list", OptionList).focus()
+        self._move_focus(self.query_one("#sidebar-list", OptionList))
         self._update_filter_indicator()
+
+    def _move_focus(self, widget: Widget) -> None:
+        """Focus ``widget`` right away instead of after the next message batch.
+
+        ``Widget.focus()`` only schedules the move, so until it runs the focus
+        still points at the widget the app moved away from. A pane that lost the
+        focus in the meantime (the main panel takes it whenever the sidebar list
+        is disabled for a query) would then still look focused to
+        ``on_pane_selected``, so its stale claim would win over this move.
+        """
+        widget.screen.set_focus(widget)
 
     def _pane_has_focus(self, pane: Literal["sidebar", "main"]) -> bool:
         if pane == "sidebar":
@@ -2268,7 +2281,7 @@ class CondaMetadataTui(App[None]):
         except (GatewayError, RuntimeError) as exc:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
-            package_list.focus()
+            self._move_focus(package_list)
             self.notify(
                 f"Failed to query MatchSpec: {exc!s}",
                 title="MatchSpec",

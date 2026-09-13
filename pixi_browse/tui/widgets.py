@@ -2145,8 +2145,9 @@ class CompareScreen(Screen[None]):
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        self.post_message(PaneSelected("sidebar"))
-        self.query_one("#sidebar-list").focus()
+        # The package list has no focus handler of its own to claim the pane, so
+        # the app both selects the sidebar and focuses the list.
+        self.post_message(SidebarFocusRequested())
         event.stop()
 
 
