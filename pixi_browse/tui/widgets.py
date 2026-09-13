@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
@@ -42,6 +42,11 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 from pixi_browse.search import substring_filter
+
+if TYPE_CHECKING:
+    # The app imports this module, so its own type is only available to the
+    # type checker; the ``cast``s below name it as a string.
+    from pixi_browse.tui.app import CondaMetadataTui
 
 try:
     from textual_diff_view import DiffView
@@ -405,9 +410,7 @@ class VersionDetailsView(Vertical):
             self._filter_scope
         ):
             return False
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        cast(CondaMetadataTui, self.app)._stop_list_search()
+        cast("CondaMetadataTui", self.app)._stop_list_search()
         return True
 
     def _search_query_for_dependency_tab(self, tab: DependencyTab) -> str | None:
@@ -1087,9 +1090,7 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        cast(CondaMetadataTui, self.app)._set_selected_pane("main")
+        cast("CondaMetadataTui", self.app)._set_selected_pane("main")
         self.focus()
         event.stop()
 
@@ -1127,16 +1128,12 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        app = cast(CondaMetadataTui, self.app)
+        app = cast("CondaMetadataTui", self.app)
         app._set_selected_pane("main")
         app._update_filter_indicator()
 
     def on_blur(self) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        cast(CondaMetadataTui, self.app)._update_filter_indicator()
+        cast("CondaMetadataTui", self.app)._update_filter_indicator()
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -1274,11 +1271,10 @@ class MainPanel(Vertical):
         return self._page_step(placeholder.size.height)
 
     def on_key(self, event: Key) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the list and app shortcuts.
-        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event, "details"):
+        app = cast("CondaMetadataTui", self.app)
+        if app._consume_list_search_key(event, "details"):
             event.stop()
             return
 
@@ -1366,9 +1362,7 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            from pixi_browse.tui.app import CondaMetadataTui
-
-            cast(CondaMetadataTui, self.app)._focus_sidebar()
+            cast("CondaMetadataTui", self.app)._focus_sidebar()
             event.stop()
 
 
@@ -1460,9 +1454,7 @@ class CompareDetailsView(Vertical):
             self._filter_scope
         ):
             return False
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        cast(CondaMetadataTui, self.app)._stop_list_search()
+        cast("CondaMetadataTui", self.app)._stop_list_search()
         return True
 
     def _search_query_for_file_tab(self, tab: FileTab) -> str | None:
@@ -1866,11 +1858,10 @@ class CompareDetailsView(Vertical):
         )
 
     def on_key(self, event: Key) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the pane shortcuts.
-        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event, "compare"):
+        app = cast("CondaMetadataTui", self.app)
+        if app._consume_list_search_key(event, "compare"):
             event.stop()
             return
 
@@ -2134,9 +2125,7 @@ class CompareScreen(Screen[None]):
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        from pixi_browse.tui.app import CondaMetadataTui
-
-        app = cast(CondaMetadataTui, self.app)
+        app = cast("CondaMetadataTui", self.app)
         app._set_selected_pane("sidebar")
         app.query_one("#sidebar-list").focus()
         event.stop()
