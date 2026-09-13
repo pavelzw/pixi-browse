@@ -243,6 +243,12 @@ class DetailSection(Vertical):
                 classes="detail-option-list",
                 markup=False,
             )
+            # Takes the list's place when there is nothing to list, so an empty
+            # section reads as a message instead of a one-row list.
+            yield Static(
+                id=f"{self._id_prefix}-empty-{self._index}",
+                classes="detail-empty",
+            )
             return
 
         with VerticalScroll(
@@ -287,13 +293,31 @@ class DetailSection(Vertical):
     def update_options(
         self, labels: list[str | Text | Option], *, highlighted: int = 0
     ) -> None:
-        option_list = self.query_one(
-            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
-        )
+        option_list = self._option_list()
+        self._empty_message_static().display = False
+        option_list.display = True
         option_list.clear_options()
         option_list.add_options(labels)
         if labels:
             option_list.highlighted = max(0, min(highlighted, len(labels) - 1))
+
+    def show_empty_message(self, message: str) -> None:
+        """Replace the list with a dimmed message, the way the bodies of the
+        other sections report that they have nothing to show."""
+        option_list = self._option_list()
+        option_list.clear_options()
+        option_list.display = False
+        empty = self._empty_message_static()
+        empty.update(Text(message, style="dim"))
+        empty.display = True
+
+    def _option_list(self) -> DetailOptionList:
+        return self.query_one(
+            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
+        )
+
+    def _empty_message_static(self) -> Static:
+        return self.query_one(f"#{self._id_prefix}-empty-{self._index}", Static)
 
     def set_active(self, active: bool) -> None:
         self.set_class(active, "-active")
@@ -675,8 +699,8 @@ class VersionDetailsView(Vertical):
         dependency_section.update_header(self._render_dependency_header())
         entries = self._dependency_entries[active_tab]
         if not entries:
-            dependency_section.update_options(
-                [self._empty_dependency_message(active_tab)]
+            dependency_section.show_empty_message(
+                self._empty_dependency_message(active_tab)
             )
             return
         dependency_section.update_options(
@@ -696,7 +720,7 @@ class VersionDetailsView(Vertical):
         file_section.update_header(self._render_file_header())
         entries = self._file_entries[active_tab]
         if not entries:
-            file_section.update_options([Text(self._empty_file_message(active_tab))])
+            file_section.show_empty_message(self._empty_file_message(active_tab))
             return
         file_section.update_options(
             [entry.label for entry in entries],
@@ -1593,12 +1617,11 @@ class CompareDetailsView(Vertical):
         section.update_header(self._render_file_header())
         entries = self._file_entries[active_tab]
         if not entries:
-            message = (
+            section.show_empty_message(
                 NO_SEARCH_MATCHES_MESSAGE
                 if self._search_query_for_file_tab(active_tab) is not None
                 else "No files listed."
             )
-            section.update_options([Option(Text(message, style="dim"))])
             return
         section.update_options(
             [Option(entry.option) for entry in entries],
