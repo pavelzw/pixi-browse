@@ -131,6 +131,13 @@ Screen {
     width: 100%;
 }
 
+/* Shown instead of the option list when the section has nothing to list; lined
+   up with the list rows so the sections keep the same left edge. */
+.detail-empty {
+    width: 100%;
+    padding: 0 0 0 1;
+}
+
 .detail-option-list {
     height: 1fr;
     border: none;
