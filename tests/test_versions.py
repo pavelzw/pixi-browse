@@ -8,7 +8,14 @@ from typing import cast
 import pytest
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
-from rattler.package import IndexJson, NoArchLiteral, PackageName, RunExportsJson
+from rattler.package import (
+    FileMode,
+    IndexJson,
+    NoArchLiteral,
+    PackageName,
+    PrefixPlaceholder,
+    RunExportsJson,
+)
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
@@ -73,6 +80,7 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import (
+    PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
     FileActionOption,
     render_repodata_patches_body,
@@ -968,12 +976,14 @@ def test_get_package_paths_caches_archive_paths() -> None:
             sha256: bytes | None,
             no_link: bool,
             path_type: str,
+            prefix_placeholder: PrefixPlaceholder | None = None,
         ) -> None:
             self.relative_path = PurePosixPath(relative_path)
             self.size_in_bytes = size_in_bytes
             self.sha256 = sha256
             self.no_link = no_link
             self.path_type = _FakePathType(path_type)
+            self.prefix_placeholder = prefix_placeholder
 
     class _FakePathsJson:
         paths = [
@@ -983,6 +993,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
                 bytes.fromhex("00" * 32),
                 False,
                 "hardlink",
+                PrefixPlaceholder(FileMode("binary"), "/build/placeholder"),
             ),
             _FakePathEntry(
                 "lib/python3.13/site-packages/demo.py",
@@ -1018,6 +1029,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
             bytes.fromhex("00" * 32),
             False,
             "hardlink",
+            prefix_replacement="binary",
         ),
         PackageFile(
             "lib/python3.13/site-packages/demo.py",
@@ -1845,6 +1857,31 @@ def test_file_list_entry_uses_plain_file_path() -> None:
     assert entries[0].path == "site-packages/demo.py"
     assert entries[1].label == "bin/demo"
     assert entries[1].path is None
+
+
+def test_file_list_entries_mark_prefix_replacement() -> None:
+    """Files whose ``info/paths.json`` entry carries a prefix placeholder are
+    marked, and text replacement is distinguished from binary replacement."""
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        file_paths=(
+            PackageFile("lib/pkgconfig/demo.pc", 512, prefix_replacement="text"),
+            PackageFile("bin/demo", 2048, prefix_replacement="binary"),
+            PackageFile("share/demo/data.txt", 64),
+        ),
+    )
+
+    entries = view._file_entries_for_details()
+
+    assert [entry.label for entry in entries] == [
+        "lib/pkgconfig/demo.pc (512 B) [prefix:text]",
+        "bin/demo (2.0 KiB) [prefix:binary]",
+        "share/demo/data.txt (64 B)",
+    ]
+    marker = entries[0].option.spans[0]
+    assert entries[0].option.plain[marker.start : marker.end] == " [prefix:text]"
+    assert marker.style == PREFIX_REPLACEMENT_STYLE
+    assert entries[2].option.spans == []
 
 
 def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:

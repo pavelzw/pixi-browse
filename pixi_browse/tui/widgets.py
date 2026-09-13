@@ -70,6 +70,7 @@ INACTIVE_SECTION_TITLE_STYLE = Style(color="white", bold=False)
 ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
+PREFIX_REPLACEMENT_STYLE = Style(color="#d19a66")
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -88,10 +89,14 @@ class DependencyListEntry:
 
 @dataclass(frozen=True)
 class FileListEntry:
-    label: str
+    option: Text
     path: str | None
     size_in_bytes: int | None = None
     sha256: bytes | None = None
+
+    @property
+    def label(self) -> str:
+        return self.option.plain
 
 
 @dataclass(frozen=True)
@@ -601,7 +606,7 @@ class VersionDetailsView(Vertical):
             tab: self._file_entries_for_details(tab) for tab in FILE_TABS
         }
         file_section.update_options(
-            [entry.label for entry in self._file_entries[active_tab]],
+            [entry.option for entry in self._file_entries[active_tab]],
             highlighted=self._file_highlighted[active_tab],
         )
 
@@ -667,18 +672,29 @@ class VersionDetailsView(Vertical):
         if package_files:
             return tuple(
                 FileListEntry(
-                    label=self._file_label(package_file, tab),
+                    option=self._file_option(package_file, tab),
                     path=None if package_file.is_symlink else package_file.path,
                     size_in_bytes=package_file.size_in_bytes,
                     sha256=package_file.sha256,
                 )
                 for package_file in package_files
             )
-        return (FileListEntry(label="No files listed.", path=None),)
+        return (FileListEntry(option=Text("No files listed."), path=None),)
 
     @staticmethod
     def _displayed_file_path(path: str, tab: FileTab) -> str:
         return path.removeprefix("info/") if tab == "info" else path
+
+    @classmethod
+    def _file_option(cls, package_file: PackageFile, tab: FileTab) -> Text:
+        """The file row: path, size, and how the install prefix is rewritten."""
+        option = Text(cls._file_label(package_file, tab))
+        if package_file.prefix_replacement is not None:
+            option.append(
+                f" [prefix:{package_file.prefix_replacement}]",
+                style=PREFIX_REPLACEMENT_STYLE,
+            )
+        return option
 
     @classmethod
     def _file_label(cls, package_file: PackageFile, tab: FileTab) -> str:

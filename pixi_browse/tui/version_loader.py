@@ -4,13 +4,14 @@ from dataclasses import replace
 
 import yaml
 from rattler.networking import Client
-from rattler.package import PathType, RunExportsJson
+from rattler.package import PathType, PrefixPlaceholder, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
+    PrefixReplacementMode,
     VersionArtifactData,
     VersionPreviewKey,
 )
@@ -64,6 +65,19 @@ class VersionDataLoader:
         return None
 
     @staticmethod
+    def _prefix_replacement_mode(
+        prefix_placeholder: PrefixPlaceholder | None,
+    ) -> PrefixReplacementMode | None:
+        if prefix_placeholder is None:
+            return None
+        file_mode = prefix_placeholder.file_mode
+        if file_mode.binary:
+            return "binary"
+        if file_mode.text:
+            return "text"
+        return "unknown"
+
+    @staticmethod
     def extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
         data = yaml.safe_load(rendered_recipe_text)
         if not isinstance(data, dict):
@@ -97,6 +111,9 @@ class VersionDataLoader:
                 sha256=path.sha256,
                 no_link=path.no_link,
                 path_type=self._path_type_name(path.path_type),
+                prefix_replacement=self._prefix_replacement_mode(
+                    path.prefix_placeholder
+                ),
             )
             for path in paths_json.paths
         ]

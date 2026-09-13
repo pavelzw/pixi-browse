@@ -13,6 +13,7 @@ MetadataTab = Literal["metadata", "patches"]
 DependencyTab = Literal["dependencies", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
+PrefixReplacementMode = Literal["binary", "text", "unknown"]
 MetadataRow = tuple[str, str]
 
 
@@ -40,6 +41,10 @@ class PackageFile:
     no_link: bool | None = None
     path_type: PackageFilePathType | None = None
     link_target: str | None = None
+    # The install prefix is baked into some files at build time and has to be
+    # rewritten on install. ``None`` means the file needs no replacement, the
+    # mode says whether ``info/paths.json`` asks for text or binary rewriting.
+    prefix_replacement: PrefixReplacementMode | None = None
 
     @property
     def is_symlink(self) -> bool:
