@@ -72,6 +72,13 @@ ACTIVE_TAB_STYLE = Style(color="#ec4899", bold=True)
 INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 PREFIX_REPLACEMENT_STYLE = Style(color="#d19a66")
+# Foreground colors shared by every compare view: the metadata and dependency
+# tables and the file list. Named ANSI colors, so they follow the terminal
+# palette. Unchanged values keep the regular foreground color.
+COMPARE_UNCHANGED_COLOR = ""
+COMPARE_MODIFIED_COLOR = "yellow"
+COMPARE_LEFT_COLOR = "red"
+COMPARE_RIGHT_COLOR = "green"
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -126,8 +133,8 @@ class FilePreviewContent:
 
 def compare_row_styles(row: CompareRow) -> tuple[str, str]:
     if row.changed:
-        return "red", "green"
-    return "white", "white"
+        return COMPARE_LEFT_COLOR, COMPARE_RIGHT_COLOR
+    return COMPARE_UNCHANGED_COLOR, COMPARE_UNCHANGED_COLOR
 
 
 def render_compare_table(
@@ -1472,14 +1479,14 @@ class CompareDetailsView(Vertical):
     @staticmethod
     def _file_row_style(row: CompareFileRow) -> str:
         if not row.comparison_known:
-            return "#7a5c00"
+            return COMPARE_MODIFIED_COLOR
         if not row.changed:
-            return "#5c6370"
+            return COMPARE_UNCHANGED_COLOR
         if row.left and row.right:
-            return "#7a5c00"
+            return COMPARE_MODIFIED_COLOR
         if row.left:
-            return "#8b1e1e"
-        return "#1f5f2b"
+            return COMPARE_LEFT_COLOR
+        return COMPARE_RIGHT_COLOR
 
     def _current_file_entries(self) -> tuple[CompareFileListEntry, ...]:
         return self._file_entries[self._active_file_tab()]
@@ -1517,25 +1524,17 @@ class CompareDetailsView(Vertical):
     @classmethod
     def _render_compare_file_option(cls, row: CompareFileRow) -> Text:
         row_style = cls._file_row_style(row)
-        if row.comparison_known:
-            label_style = row_style
-            text = Text(cls._compare_file_prefix(row), style=row_style)
-            text.append(row.label, style=row_style)
-        else:
-            label_style = "#5c6370"
-            text = Text()
-            text.append(cls._compare_file_prefix(row), style=row_style)
-            text.append(row.label, style=label_style)
+        # Unknown comparisons only mark the prefix; the label stays neutral.
+        label_style = row_style if row.comparison_known else COMPARE_UNCHANGED_COLOR
+        # Style every part as a span. A base style on the ``Text`` would be parsed
+        # with Textual's color names rather than Rich's, so "yellow" would come out
+        # a different shade than the spans and than the compare tables.
+        text = Text()
+        text.append(cls._compare_file_prefix(row), style=row_style)
+        text.append(row.label, style=label_style)
         suffix = cls._compare_file_suffix(row)
         if suffix:
-            text.append(
-                suffix,
-                style=(
-                    "dim"
-                    if row.comparison_known
-                    else Style(color=label_style, dim=True)
-                ),
-            )
+            text.append(suffix, style=label_style)
         return text
 
     @staticmethod
