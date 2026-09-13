@@ -70,7 +70,7 @@ from pixi_browse.repodata import (
     query_whoneeds_records,
     whoneeds_target_label,
 )
-from pixi_browse.search import fuzzy_score
+from pixi_browse.search import fuzzy_filter
 
 from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
@@ -88,6 +88,7 @@ from .widgets import (
     FileDiffScreen,
     FilePreviewContent,
     FilePreviewScreen,
+    FilterableListView,
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
@@ -184,6 +185,10 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package: str | None = None
         self._package_preview_request: tuple[str, Worker[None]] | None = None
         self._filter_mode = False
+        # The ``/`` search of the version details and compare file/dependency
+        # lists, kept here because it also owns the footer.
+        self._list_search_mode = False
+        self._list_search_query = ""
         self._download_indicator_override: str | None = None
         self._download_in_progress = False
         self._file_action_in_progress = False
@@ -444,6 +449,8 @@ class CondaMetadataTui(App[None]):
     def _clear_compare_state(self) -> None:
         self._compare_selection = None
         self._compare_screen_open = False
+        # The compare screen owned the search; it is gone with the screen.
+        self._reset_list_search_state()
         self.query_one("#footer", Static).update(self._footer_text())
 
     def _reset_preview_state(self) -> None:
@@ -843,6 +850,8 @@ class CondaMetadataTui(App[None]):
             screen.dismiss(None)
 
     def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
+        if pane == "sidebar":
+            self._stop_list_search()
         self._selected_pane = pane
         self._update_filter_indicator()
 
@@ -852,6 +861,7 @@ class CondaMetadataTui(App[None]):
         self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
+        self._stop_list_search()
         self._selected_pane = "sidebar"
         self.query_one("#sidebar-list", OptionList).focus()
         self._update_filter_indicator()
@@ -940,7 +950,7 @@ class CondaMetadataTui(App[None]):
             "App",
             [
                 ("?", "Show this help"),
-                ("/", "Start package filter"),
+                ("/", "Search packages, dependencies, or files"),
                 ("p", "Open platform selector"),
                 ("c", "Select channels"),
                 ("C", "Compare selected artifact in versions view"),
@@ -2088,16 +2098,9 @@ class CondaMetadataTui(App[None]):
         if not self._filter_mode or not self._search_query:
             self._visible_package_names = list(self._all_package_names)
         else:
-            scored_results: list[tuple[int, str]] = []
-            for package_name in self._all_package_names:
-                score = fuzzy_score(self._search_query, package_name)
-                if score is not None:
-                    scored_results.append((score, package_name))
-
-            scored_results.sort(key=lambda item: (-item[0], item[1]))
-            self._visible_package_names = [
-                package_name for _, package_name in scored_results
-            ]
+            self._visible_package_names = fuzzy_filter(
+                self._search_query, self._all_package_names, key=lambda name: name
+            )
         self._render_package_options()
         self._update_package_selection_status()
         self._previewed_package = None
@@ -2277,6 +2280,7 @@ class CondaMetadataTui(App[None]):
         await self._apply_whoneeds_query(target)
 
     def _back_to_packages(self) -> None:
+        self._stop_list_search()
         self._mode = "packages"
         self._draft_selected_platform_names = None
         self._clear_version_state()
@@ -2296,6 +2300,7 @@ class CondaMetadataTui(App[None]):
         self._focus_sidebar()
 
     async def _open_versions(self, package_name: str) -> None:
+        self._stop_list_search()
         package_list = self.query_one("#sidebar-list", OptionList)
         self._last_package_highlight = package_list.highlighted
         self._last_package_scroll_y = package_list.scroll_y
@@ -2350,6 +2355,9 @@ class CondaMetadataTui(App[None]):
     def _footer_text(self) -> str | Text:
         if self._mode == "packages" and self._filter_mode:
             return f"Search: {self._search_query}_"
+
+        if self._list_search_mode:
+            return f"Search: {self._list_search_query}_"
 
         if self._compare_screen_open:
             return (
@@ -2476,6 +2484,86 @@ class CondaMetadataTui(App[None]):
         self._filter_packages()
         self._update_filter_indicator()
 
+    def _list_search_target(self) -> FilterableListView | None:
+        """The view the ``/`` search narrows: the compare screen while it is
+        open, otherwise the version details in the main panel."""
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            return cast(CompareScreen, self.screen)
+        if self._mode != "versions":
+            return None
+        return self.query_one("#main-panel", MainPanel)
+
+    def _start_list_search(self) -> bool:
+        """Start searching the dependency or file list; ``False`` when the
+        current view has no such list, so ``/`` keeps its other meanings."""
+        if self._list_search_mode:
+            self._append_list_search_char("/")
+            return True
+        if not self._compare_screen_open and not self._main_panel_is_focused():
+            return False
+        target = self._list_search_target()
+        if target is None or not target.filterable_section_is_active():
+            return False
+        self._list_search_mode = True
+        self._list_search_query = ""
+        self._apply_list_search()
+        return True
+
+    def _apply_list_search(self) -> None:
+        if self._list_search_mode:
+            target = self._list_search_target()
+            if target is not None:
+                target.set_filter_query(self._list_search_query)
+        else:
+            self._clear_list_search_query()
+        self.query_one("#footer", Static).update(self._footer_text())
+
+    def _clear_list_search_query(self) -> None:
+        """Show every row again. Both views are cleared because the search can
+        end after the view it ran on is gone (a query result, going back)."""
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            cast(CompareScreen, self.screen).set_filter_query(None)
+        self.query_one("#main-panel", MainPanel).set_filter_query(None)
+
+    def _append_list_search_char(self, char: str) -> None:
+        self._list_search_query += char
+        self._apply_list_search()
+
+    def _reset_list_search_state(self) -> None:
+        self._list_search_mode = False
+        self._list_search_query = ""
+
+    def _stop_list_search(self) -> None:
+        """Leave the list search and show the full list again."""
+        if not self._list_search_mode:
+            return
+        self._reset_list_search_state()
+        self._apply_list_search()
+
+    def _consume_list_search_key(self, event: Key) -> bool:
+        """Feed a key of the focused list view into the ``/`` search.
+
+        Mirrors the package search: printable characters extend the query,
+        backspace shortens it and escape leaves the search. Everything else
+        (the arrow keys, paging, ``Enter``) is left to the list itself.
+        """
+        if not self._list_search_mode:
+            return False
+        if event.key == "escape":
+            self._stop_list_search()
+            return True
+        if event.key == "backspace":
+            self._list_search_query = self._list_search_query[:-1]
+            self._apply_list_search()
+            return True
+        if event.key == "space":
+            self._append_list_search_char(" ")
+            return True
+        if event.character is not None and event.character.isprintable():
+            self._append_list_search_char(event.character)
+            return True
+        return False
+
     def _open_channel_screen(self) -> None:
         self.push_screen(
             ChannelScreen(self._channel_names),
@@ -2493,6 +2581,9 @@ class CondaMetadataTui(App[None]):
         )
 
     def action_filter_key_slash(self) -> None:
+        if self._start_list_search():
+            return
+
         if self._mode != "packages":
             return
 

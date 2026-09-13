@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+
 
 def fuzzy_score(query: str, candidate: str) -> int | None:
     """Score a candidate using subsequence matching; higher scores are
@@ -30,3 +32,21 @@ def fuzzy_score(query: str, candidate: str) -> int | None:
     prefix_bonus = 120 if candidate.startswith(query) else 0
     length_penalty = len(candidate) - len(query)
     return prefix_bonus + (longest_run * 20) - (gap_penalty * 2) - length_penalty
+
+
+def fuzzy_filter[ItemT](
+    query: str, items: Iterable[ItemT], *, key: Callable[[ItemT], str]
+) -> list[ItemT]:
+    """The items whose ``key`` matches ``query``, best match first.
+
+    Ties are broken by the matched text so the order never depends on the order
+    the items came in.
+    """
+    scored: list[tuple[int, str, ItemT]] = []
+    for item in items:
+        text = key(item)
+        score = fuzzy_score(query, text)
+        if score is not None:
+            scored.append((score, text, item))
+    scored.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [item for _, _, item in scored]
