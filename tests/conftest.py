@@ -52,7 +52,7 @@ from tests.helpers import (
     PaletteSVGImageExtension,
     PilotHook,
     RangeRequestHandler,
-    SnapCompare,
+    SnapComparePalettes,
     report_palette_comparison,
 )
 
@@ -153,16 +153,16 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
 
 
 @pytest.fixture
-def snap_compare(
+def snap_compare_palettes(
     snapshot: SnapshotAssertion, request: pytest.FixtureRequest
-) -> SnapCompare:
+) -> SnapComparePalettes:
     """Compare a screen with its snapshot in every palette.
 
-    This replaces ``pytest-textual-snapshot``'s fixture of the same name, which
-    compares a single screenshot with a single snapshot. The app is run and
-    screenshotted exactly the way the plugin does it, but every palette of the
-    run (see ``tests.helpers.SVG_PALETTES``) is compared with a snapshot of its
-    own in ``tests/__snapshots__/<module>/<test>.<palette>.svg``, and every
+    This is used instead of ``pytest-textual-snapshot``'s ``snap_compare``,
+    which compares a single screenshot with a single snapshot. The app is run
+    and screenshotted exactly the way the plugin does it, but every palette of
+    the run (see ``tests.helpers.SVG_PALETTES``) is compared with a snapshot of
+    its own in ``tests/__snapshots__/<module>/<test>.<palette>.svg``, and every
     comparison lands in ``snapshot_report.html`` as the plugin's own do.
     """
     snapshot = snapshot.use_extension(PaletteSVGImageExtension)

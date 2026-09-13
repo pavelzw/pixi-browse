@@ -51,7 +51,7 @@ CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noar
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
-SnapCompare = Callable[..., bool]
+SnapComparePalettes = Callable[..., bool]
 
 # The app draws in ANSI colors (its theme is `ansi-dark`), so the terminal
 # palette alone decides how it ends up looking. Every screen is therefore
@@ -259,7 +259,7 @@ class PaletteSVGImageExtension(SVGImageExtension):  # type: ignore[misc]
     """One SVG file per palette, both next to each other.
 
     The palette is passed as syrupy's snapshot index (``snapshot(name=palette)``
-    in the ``snap_compare`` fixture), which syrupy would spell
+    in the ``snap_compare_palettes`` fixture), which syrupy would spell
     ``<test>[<palette>].svg``. Only the file name is spelled differently here,
     as ``<test>.<palette>.svg``, so that a test's palettes read as variants of
     one screen and sort next to each other; syrupy still manages them like any
