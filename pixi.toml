@@ -46,6 +46,7 @@ mypy = "*"
 ty = "*"
 types-pyyaml = "*"
 vhs = "*"
+filelock = ">=3.32.5,<4"
 pytest-textual-snapshot = ">=1.1.0"
 [feature.test.tasks]
 test = "pytest -n auto"
