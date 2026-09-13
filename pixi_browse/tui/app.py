@@ -70,7 +70,7 @@ from pixi_browse.repodata import (
     query_whoneeds_records,
     whoneeds_target_label,
 )
-from pixi_browse.search import substring_filter
+from pixi_browse.search import substring_filter, substring_position
 
 from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
@@ -79,6 +79,7 @@ from .widgets import (
     DIFF_VIEW_AVAILABLE,
     DIFF_VIEW_INSTALL_HINT,
     INACTIVE_SECTION_TITLE_STYLE,
+    NO_SEARCH_MATCHES_MESSAGE,
     ChannelScreen,
     CompareScreen,
     DownloadPathScreen,
@@ -100,6 +101,10 @@ from .widgets import (
 )
 
 _PREVIEW_MAX_BYTES = 256 * 1024
+
+# Which list the ``/`` search narrows: the sidebar's version list, the version
+# details in the main panel or the compare screen's file list.
+type ListSearchScope = Literal["versions", "details", "compare"]
 
 
 class CondaMetadataTui(App[None]):
@@ -185,10 +190,14 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_package: str | None = None
         self._package_preview_request: tuple[str, Worker[None]] | None = None
         self._filter_mode = False
-        # The ``/`` search of the version details and compare file/dependency
-        # lists, kept here because it also owns the footer.
+        # The ``/`` search of the version list, the version details and the
+        # compare file lists, kept here because it also owns the footer.
         self._list_search_mode = False
         self._list_search_query = ""
+        self._list_search_scope: ListSearchScope | None = None
+        # The query narrowing the version list, mirrored here because that list
+        # is rendered from the app rather than from a view.
+        self._version_search_query: str | None = None
         self._download_indicator_override: str | None = None
         self._download_in_progress = False
         self._file_action_in_progress = False
@@ -310,7 +319,32 @@ class CondaMetadataTui(App[None]):
         gap = row_width - len(left) - len(right)
         return f"{left}{' ' * gap}{right}"
 
-    def _render_version_options(self, *, preserve_position: bool = False) -> None:
+    @staticmethod
+    def _version_search_text(entry: VersionEntry, subdir: str) -> str:
+        """What the ``/`` search matches a version row against."""
+        return f"{entry.version} {entry.build} {subdir}"
+
+    def _matching_version_entries(
+        self, subdir: str, entries: list[VersionEntry]
+    ) -> list[VersionEntry]:
+        """The entries the search kept, still newest first: unlike the other
+        lists, the version order carries more meaning than the match quality."""
+        query = self._version_search_query
+        if query is None:
+            return entries
+        return [
+            entry
+            for entry in entries
+            if substring_position(query, self._version_search_text(entry, subdir))
+            is not None
+        ]
+
+    def _render_version_options(
+        self,
+        *,
+        preserve_position: bool = False,
+        prefer_entry: VersionEntry | None = None,
+    ) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
         previous_highlight = package_list.highlighted
         previous_scroll_y = package_list.scroll_y
@@ -328,9 +362,13 @@ class CondaMetadataTui(App[None]):
         row_width = self._version_row_width()
         for subdir in self._version_subdirs:
             subdir_entries = self._versions_by_subdir.get(subdir, [])
+            matching_entries = self._matching_version_entries(subdir, subdir_entries)
+            if self._version_search_query is not None and not matching_entries:
+                continue
             collapsed = subdir in self._collapsed_version_subdirs
             marker = "▸" if collapsed else "▾"
-            package_list.add_option(f"{marker} {subdir} ({len(subdir_entries)})")
+            count = self._version_count_label(matching_entries, subdir_entries)
+            package_list.add_option(f"{marker} {subdir} ({count})")
             self._version_rows.append(VersionRow(kind="section", subdir=subdir))
             if collapsed:
                 continue
@@ -338,21 +376,48 @@ class CondaMetadataTui(App[None]):
             package_list.add_options(
                 [
                     self._format_version_option_label(entry, row_width)
-                    for entry in subdir_entries
+                    for entry in matching_entries
                 ]
             )
             self._version_rows.extend(
                 VersionRow(kind="entry", subdir=subdir, entry=entry)
-                for entry in subdir_entries
+                for entry in matching_entries
             )
+
+        if self._version_search_query is not None and len(self._version_rows) == 1:
+            package_list.add_option(NO_SEARCH_MATCHES_MESSAGE)
+            self._version_rows.append(VersionRow(kind="empty"))
 
         if preserve_position and previous_highlight is not None:
             package_list.highlighted = min(
                 previous_highlight, len(self._version_rows) - 1
             )
             package_list.scroll_to(y=previous_scroll_y, animate=False)
+        elif prefer_entry is not None:
+            package_list.highlighted = self._version_entry_index(prefer_entry)
         else:
             package_list.action_first()
+
+    def _version_entry_index(self, prefer_entry: VersionEntry) -> int:
+        """Where to highlight after a search changed the rows: ``prefer_entry``
+        if it is still listed, else the first build that is."""
+        first_entry_index = 0
+        for index, row in enumerate(self._version_rows):
+            if row.kind != "entry":
+                continue
+            if row.entry == prefer_entry:
+                return index
+            if first_entry_index == 0:
+                first_entry_index = index
+        return first_entry_index
+
+    def _version_count_label(
+        self, matching_entries: list[VersionEntry], subdir_entries: list[VersionEntry]
+    ) -> str:
+        """A platform's entry count, ``matched/total`` while the search runs."""
+        if self._version_search_query is None:
+            return str(len(subdir_entries))
+        return f"{len(matching_entries)}/{len(subdir_entries)}"
 
     def _find_version_section_index(self, subdir: str) -> int | None:
         for index, row in enumerate(self._version_rows):
@@ -851,17 +916,26 @@ class CondaMetadataTui(App[None]):
 
     def _set_selected_pane(self, pane: Literal["sidebar", "main"]) -> None:
         if pane == "sidebar":
-            self._stop_list_search()
+            self._stop_details_search()
         self._selected_pane = pane
         self._update_filter_indicator()
 
+    def _stop_details_search(self) -> None:
+        """Leave a search of the main panel's lists; a version list search is
+        the sidebar's own and survives."""
+        if self._list_search_scope == "details":
+            self._stop_list_search()
+
     def _focus_main_panel(self) -> None:
+        # The version list search belongs to the sidebar and ends with its focus.
+        if self._list_search_scope == "versions":
+            self._stop_list_search()
         self._selected_pane = "main"
         self.query_one("#main-panel", MainPanel).focus()
         self._update_filter_indicator()
 
     def _focus_sidebar(self) -> None:
-        self._stop_list_search()
+        self._stop_details_search()
         self._selected_pane = "sidebar"
         self.query_one("#sidebar-list", OptionList).focus()
         self._update_filter_indicator()
@@ -950,7 +1024,7 @@ class CondaMetadataTui(App[None]):
             "App",
             [
                 ("?", "Show this help"),
-                ("/", "Search packages, dependencies, or files"),
+                ("/", "Search packages, versions, deps, or files"),
                 ("p", "Open platform selector"),
                 ("c", "Select channels"),
                 ("C", "Compare selected artifact in versions view"),
@@ -2493,37 +2567,63 @@ class CondaMetadataTui(App[None]):
             return None
         return self.query_one("#main-panel", MainPanel)
 
+    def _list_search_scope_for_focus(self) -> ListSearchScope | None:
+        """The list ``/`` would search right now, ``None`` when there is none."""
+        if self._compare_screen_open and isinstance(self.screen, CompareScreen):
+            return "compare"
+        if self._mode != "versions":
+            return None
+        if self._sidebar_is_focused():
+            return "versions"
+        return "details" if self._main_panel_is_focused() else None
+
     def _start_list_search(self) -> bool:
-        """Start searching the dependency or file list; ``False`` when the
-        current view has no such list, so ``/`` keeps its other meanings."""
+        """Start searching the version, dependency or file list; ``False`` when
+        the current view has no such list, so ``/`` keeps its other meanings."""
         if self._list_search_mode:
             self._append_list_search_char("/")
             return True
-        if not self._compare_screen_open and not self._main_panel_is_focused():
+        scope = self._list_search_scope_for_focus()
+        if scope is None:
             return False
-        target = self._list_search_target()
-        if target is None or not target.filterable_section_is_active():
-            return False
+        if scope != "versions":
+            target = self._list_search_target()
+            if target is None or not target.filterable_section_is_active():
+                return False
         self._list_search_mode = True
         self._list_search_query = ""
+        self._list_search_scope = scope
         self._apply_list_search()
         return True
 
     def _apply_list_search(self) -> None:
-        if self._list_search_mode:
+        if not self._list_search_mode:
+            self._clear_list_search_query()
+        elif self._list_search_scope == "versions":
+            self._apply_version_search()
+        else:
             target = self._list_search_target()
             if target is not None:
                 target.set_filter_query(self._list_search_query)
-        else:
-            self._clear_list_search_query()
         self.query_one("#footer", Static).update(self._footer_text())
 
+    def _apply_version_search(self) -> None:
+        """Narrow the sidebar's version list, keeping the highlighted build as
+        long as it matches so its details stay in the main panel."""
+        highlighted = self._highlighted_version_entry()
+        self._version_search_query = self._list_search_query
+        self._render_version_options(prefer_entry=highlighted)
+
     def _clear_list_search_query(self) -> None:
-        """Show every row again. Both views are cleared because the search can
+        """Show every row again. Every list is cleared because the search can
         end after the view it ran on is gone (a query result, going back)."""
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
             cast(CompareScreen, self.screen).set_filter_query(None)
         self.query_one("#main-panel", MainPanel).set_filter_query(None)
+        if self._version_search_query is not None:
+            highlighted = self._highlighted_version_entry()
+            self._version_search_query = None
+            self._render_version_options(prefer_entry=highlighted)
 
     def _append_list_search_char(self, char: str) -> None:
         self._list_search_query += char
@@ -2532,6 +2632,7 @@ class CondaMetadataTui(App[None]):
     def _reset_list_search_state(self) -> None:
         self._list_search_mode = False
         self._list_search_query = ""
+        self._list_search_scope = None
 
     def _stop_list_search(self) -> None:
         """Leave the list search and show the full list again."""
@@ -2540,14 +2641,15 @@ class CondaMetadataTui(App[None]):
         self._reset_list_search_state()
         self._apply_list_search()
 
-    def _consume_list_search_key(self, event: Key) -> bool:
+    def _consume_list_search_key(self, event: Key, scope: ListSearchScope) -> bool:
         """Feed a key of the focused list view into the ``/`` search.
 
         Mirrors the package search: printable characters extend the query,
         backspace shortens it and escape leaves the search. Everything else
-        (the arrow keys, paging, ``Enter``) is left to the list itself.
+        (the arrow keys, paging, ``Enter``) is left to the list itself. Only the
+        list the search runs on may type into it, hence ``scope``.
         """
-        if not self._list_search_mode:
+        if not self._list_search_mode or self._list_search_scope != scope:
             return False
         if event.key == "escape":
             self._stop_list_search()
@@ -2861,6 +2963,18 @@ class CondaMetadataTui(App[None]):
                     self._request_file_action_for_selected_compare_file()
                 event.stop()
                 return
+
+        # While the version list is being searched its query gets the printable
+        # keys first, just like the package filter above the sidebar's own keys.
+        # Unlike the searches of a focused list widget, this handler runs before
+        # ``App._on_key``, so the app's own bindings (``q``, ``p``, escape, ...)
+        # have to be prevented explicitly instead of only stopping the bubbling.
+        if self._sidebar_is_focused() and self._consume_list_search_key(
+            event, "versions"
+        ):
+            event.prevent_default()
+            event.stop()
+            return
 
         if self._sidebar_is_focused() and not (
             self._mode == "packages" and self._filter_mode

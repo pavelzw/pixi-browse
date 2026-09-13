@@ -326,9 +326,11 @@ class VersionDetailsView(Vertical):
             tab: 0 for tab in DEPENDENCY_TABS
         }
         self._file_highlighted: dict[FileTab, int] = {tab: 0 for tab in FILE_TABS}
-        # ``None`` while the ``/`` search is off; the query narrows whichever
-        # list section is active.
+        # ``None`` while the ``/`` search is off; the query narrows the active
+        # tab of the active list section, which ``_filter_scope`` remembers so
+        # the search can end when another tab takes over.
         self._filter_query: str | None = None
+        self._filter_scope: tuple[int, int] | None = None
         # Duplicate this state so we can avoid updating on every Textual
         # on_focus/on_blur and decide pane selection transitions ourselves.
         self._pane_selected = False
@@ -366,12 +368,13 @@ class VersionDetailsView(Vertical):
 
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, VERSION_DETAIL_SECTION_COUNT - 1))
-        self._refresh_filtered_lists()
+        self._end_search_if_scope_changed()
         self._apply_section_state()
 
     def set_filter_query(self, query: str | None) -> None:
-        """Narrow the active list section to ``query``; ``None`` shows it whole."""
+        """Narrow the active tab to ``query``; ``None`` shows it whole."""
         self._filter_query = query
+        self._filter_scope = None if query is None else self._current_filter_scope()
         self._refresh_dependency_section()
         self._refresh_file_section()
         self._apply_section_state()
@@ -379,19 +382,38 @@ class VersionDetailsView(Vertical):
     def filterable_section_is_active(self) -> bool:
         return self.dependency_section_is_active() or self.file_section_is_active()
 
-    def _refresh_filtered_lists(self) -> None:
-        """Rebuild both lists after the active section changed, because the
-        search only applies to the active one."""
-        if self._filter_query is None:
-            return
-        self._refresh_dependency_section()
-        self._refresh_file_section()
+    def _current_filter_scope(self) -> tuple[int, int]:
+        """The one list a search runs on: the active section and its tab."""
+        tab_index = (
+            self._file_tab_index
+            if self._active_section == 2
+            else self._dependency_tab_index
+        )
+        return (self._active_section, tab_index)
 
-    def _search_query_for_section(self, index: int) -> str | None:
-        """The query when it narrows section ``index``, ``None`` otherwise."""
-        if not self._filter_query or self._active_section != index:
+    def _end_search_if_scope_changed(self) -> bool:
+        """Leave the ``/`` search when the list it narrows is no longer showing,
+        so a search never outlives the tab it was started on."""
+        if self._filter_query is None or self._current_filter_scope() == (
+            self._filter_scope
+        ):
+            return False
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._stop_list_search()
+        return True
+
+    def _search_query_for_dependency_tab(self, tab: DependencyTab) -> str | None:
+        """The query when it narrows dependency ``tab``, ``None`` otherwise."""
+        if not self._filter_query or self._active_section != 1:
             return None
-        return self._filter_query
+        return self._filter_query if tab == self._active_dependency_tab() else None
+
+    def _search_query_for_file_tab(self, tab: FileTab) -> str | None:
+        """The query when it narrows file ``tab``, ``None`` otherwise."""
+        if not self._filter_query or self._active_section != 2:
+            return None
+        return self._filter_query if tab == self._active_file_tab() else None
 
     def set_pane_selected(self, selected: bool) -> None:
         self._pane_selected = selected
@@ -419,7 +441,7 @@ class VersionDetailsView(Vertical):
         self._active_section = (
             self._active_section + direction
         ) % VERSION_DETAIL_SECTION_COUNT
-        self._refresh_filtered_lists()
+        self._end_search_if_scope_changed()
         self._apply_section_state()
 
     def cycle_metadata_tab(self, direction: int) -> None:
@@ -444,19 +466,23 @@ class VersionDetailsView(Vertical):
         self._dependency_tab_index = (self._dependency_tab_index + direction) % len(
             DEPENDENCY_TABS
         )
-        self._refresh_dependency_section()
+        if not self._end_search_if_scope_changed():
+            self._refresh_dependency_section()
 
     def set_dependency_tab(self, tab: DependencyTab) -> None:
         self._dependency_tab_index = DEPENDENCY_TABS.index(tab)
-        self._refresh_dependency_section()
+        if not self._end_search_if_scope_changed():
+            self._refresh_dependency_section()
 
     def cycle_file_tab(self, direction: int) -> None:
         self._file_tab_index = (self._file_tab_index + direction) % len(FILE_TABS)
-        self._refresh_file_section()
+        if not self._end_search_if_scope_changed():
+            self._refresh_file_section()
 
     def set_file_tab(self, tab: FileTab) -> None:
         self._file_tab_index = FILE_TABS.index(tab)
-        self._refresh_file_section()
+        if not self._end_search_if_scope_changed():
+            self._refresh_file_section()
 
     def select_dependency_tab(
         self, tab: DependencyTab, *, focus_main_panel: bool = False
@@ -654,7 +680,7 @@ class VersionDetailsView(Vertical):
         file_section.update_header(self._render_file_header())
         entries = self._file_entries[active_tab]
         if not entries:
-            file_section.update_options([Text(self._empty_file_message())])
+            file_section.update_options([Text(self._empty_file_message(active_tab))])
             return
         file_section.update_options(
             [entry.label for entry in entries],
@@ -670,7 +696,7 @@ class VersionDetailsView(Vertical):
         return format_version_details_run_exports(self._details.run_exports)
 
     def _empty_dependency_message(self, tab: DependencyTab) -> str:
-        if self._search_query_for_section(1) is not None:
+        if self._search_query_for_dependency_tab(tab) is not None:
             return NO_SEARCH_MATCHES_MESSAGE
         if tab == "dependencies":
             return "No dependencies."
@@ -680,8 +706,8 @@ class VersionDetailsView(Vertical):
             return "No constraints."
         return "No run exports."
 
-    def _empty_file_message(self) -> str:
-        if self._search_query_for_section(2) is not None:
+    def _empty_file_message(self, tab: FileTab) -> str:
+        if self._search_query_for_file_tab(tab) is not None:
             return NO_SEARCH_MATCHES_MESSAGE
         return "No files listed."
 
@@ -693,7 +719,7 @@ class VersionDetailsView(Vertical):
     ) -> tuple[DependencyListEntry, ...]:
         if tab == "extra_depends":
             assert self._details is not None
-            extra_query = self._search_query_for_section(1)
+            extra_query = self._search_query_for_dependency_tab(tab)
             extra_entries: list[DependencyListEntry] = []
             for group, dependencies in self._details.extra_depends:
                 group_entries = [
@@ -730,7 +756,7 @@ class VersionDetailsView(Vertical):
                 )
                 for line in lines
             )
-        query = self._search_query_for_section(1)
+        query = self._search_query_for_dependency_tab(tab)
         if query is None:
             return entries
         return tuple(substring_filter(query, entries, key=lambda entry: entry.label))
@@ -771,7 +797,7 @@ class VersionDetailsView(Vertical):
             )
             for package_file in package_files
         )
-        query = self._search_query_for_section(2)
+        query = self._search_query_for_file_tab(tab)
         if query is None:
             return entries
         return tuple(
@@ -890,11 +916,11 @@ class VersionDetailsView(Vertical):
     def _dependency_counts(
         self, totals: dict[DependencyTab, int]
     ) -> dict[DependencyTab, str]:
-        """The per-tab counts, ``matched/total`` while the search narrows them."""
-        if self._search_query_for_section(1) is None:
-            return {tab: str(total) for tab, total in totals.items()}
+        """The per-tab counts, ``matched/total`` for the searched tab."""
         return {
             tab: f"{self._dependency_match_count(tab)}/{total}"
+            if self._search_query_for_dependency_tab(tab) is not None
+            else str(total)
             for tab, total in totals.items()
         }
 
@@ -907,11 +933,11 @@ class VersionDetailsView(Vertical):
         return len(entries)
 
     def _file_counts(self, totals: dict[FileTab, int]) -> dict[FileTab, str]:
-        """The per-tab counts, ``matched/total`` while the search narrows them."""
-        if self._search_query_for_section(2) is None:
-            return {tab: str(total) for tab, total in totals.items()}
+        """The per-tab counts, ``matched/total`` for the searched tab."""
         return {
             tab: f"{len(self._file_entries[tab])}/{total}"
+            if self._search_query_for_file_tab(tab) is not None
+            else str(total)
             for tab, total in totals.items()
         }
 
@@ -1245,7 +1271,7 @@ class MainPanel(Vertical):
 
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the list and app shortcuts.
-        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event):
+        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event, "details"):
             event.stop()
             return
 
@@ -1358,8 +1384,11 @@ class CompareDetailsView(Vertical):
             tab: () for tab in FILE_TABS
         }
         self._file_highlighted: dict[FileTab, int] = {tab: 0 for tab in FILE_TABS}
-        # ``None`` while the ``/`` search is off; the query narrows the file list.
+        # ``None`` while the ``/`` search is off; the query narrows the active
+        # file tab, which ``_filter_scope`` remembers so the search can end when
+        # another tab or section takes over.
         self._filter_query: str | None = None
+        self._filter_scope: tuple[int, int] | None = None
         self._pane_selected = True
 
     def compose(self) -> ComposeResult:
@@ -1395,34 +1424,45 @@ class CompareDetailsView(Vertical):
 
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, 2))
-        self._refresh_filtered_files()
+        self._end_search_if_scope_changed()
         self._apply_section_state()
 
     def cycle_active_section(self, direction: int) -> None:
         self._active_section = (self._active_section + direction) % 3
-        self._refresh_filtered_files()
+        self._end_search_if_scope_changed()
         self._apply_section_state()
 
     def set_filter_query(self, query: str | None) -> None:
-        """Narrow the file list to ``query``; ``None`` shows it whole."""
+        """Narrow the active file tab to ``query``; ``None`` shows it whole."""
         self._filter_query = query
+        self._filter_scope = None if query is None else self._current_filter_scope()
         self._refresh_file_section()
         self._apply_section_state()
 
     def filterable_section_is_active(self) -> bool:
         return self.file_section_is_active()
 
-    def _refresh_filtered_files(self) -> None:
-        """Rebuild the file list after the active section changed, because the
-        search only applies while the file section is the active one."""
-        if self._filter_query is not None:
-            self._refresh_file_section()
+    def _current_filter_scope(self) -> tuple[int, int]:
+        """The one list a search runs on: the active section and its file tab."""
+        return (self._active_section, self._file_tab_index)
 
-    def _search_query_for_files(self) -> str | None:
-        """The query when it narrows the file list, ``None`` otherwise."""
+    def _end_search_if_scope_changed(self) -> bool:
+        """Leave the ``/`` search when the list it narrows is no longer showing,
+        so a search never outlives the tab it was started on."""
+        if self._filter_query is None or self._current_filter_scope() == (
+            self._filter_scope
+        ):
+            return False
+        from pixi_browse.tui.app import CondaMetadataTui
+
+        cast(CondaMetadataTui, self.app)._stop_list_search()
+        return True
+
+    def _search_query_for_file_tab(self, tab: FileTab) -> str | None:
+        """The query when it narrows file ``tab``, ``None`` otherwise."""
         if not self._filter_query or not self.file_section_is_active():
             return None
-        return self._filter_query
+        return self._filter_query if tab == self._active_file_tab() else None
 
     def _select_dependency_tab_from_click(self, tab: DependencyTab) -> None:
         self.select_dependency_tab(tab, focus_view=True)
@@ -1448,7 +1488,8 @@ class CompareDetailsView(Vertical):
     def select_file_tab(self, tab: FileTab, *, focus_view: bool = False) -> None:
         self.set_active_section(2)
         self._file_tab_index = FILE_TABS.index(tab)
-        self._refresh_file_section()
+        if not self._end_search_if_scope_changed():
+            self._refresh_file_section()
         if focus_view:
             self.focus()
 
@@ -1540,7 +1581,7 @@ class CompareDetailsView(Vertical):
         if not entries:
             message = (
                 NO_SEARCH_MATCHES_MESSAGE
-                if self._search_query_for_files() is not None
+                if self._search_query_for_file_tab(active_tab) is not None
                 else "No files listed."
             )
             section.update_options([Option(Text(message, style="dim"))])
@@ -1596,13 +1637,12 @@ class CompareDetailsView(Vertical):
             "pkg": len(self._compare_data.files),
             "info": len(self._compare_data.info_files),
         }
-        if self._search_query_for_files() is None:
-            counts = {tab: str(total) for tab, total in totals.items()}
-        else:
-            counts = {
-                tab: f"{len(self._file_entries[tab])}/{total}"
-                for tab, total in totals.items()
-            }
+        counts = {
+            tab: f"{len(self._file_entries[tab])}/{total}"
+            if self._search_query_for_file_tab(tab) is not None
+            else str(total)
+            for tab, total in totals.items()
+        }
         labels = {
             "pkg": f"pkg/ ({counts['pkg']})",
             "info": f"info/ ({counts['info']})",
@@ -1687,7 +1727,7 @@ class CompareDetailsView(Vertical):
         self, tab: FileTab = "pkg"
     ) -> tuple[CompareFileListEntry, ...]:
         rows = self._file_rows(tab)
-        query = self._search_query_for_files()
+        query = self._search_query_for_file_tab(tab)
         if query is not None:
             rows = tuple(substring_filter(query, rows, key=lambda row: row.label))
         return tuple(
@@ -1831,7 +1871,7 @@ class CompareDetailsView(Vertical):
 
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the pane shortcuts.
-        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event):
+        if cast(CondaMetadataTui, self.app)._consume_list_search_key(event, "compare"):
             event.stop()
             return
 

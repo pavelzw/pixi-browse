@@ -15,7 +15,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 ## Features
 
 - **Browse packages** from any conda channel (conda-forge, prefix.dev, etc.)
-- **Substring search** to quickly filter through thousands of packages, as well as through a package's dependencies and files
+- **Substring search** to quickly filter through thousands of packages, as well as through a package's versions, dependencies and files
 - **Inspect versions** grouped by platform with collapsible sections
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
@@ -144,17 +144,17 @@ uses `conda-forge`.
 
 ### App
 
-| Key | Action                                        |
-| --- | --------------------------------------------- |
-| `?` | Show help                                     |
-| `/` | Search packages, dependencies, or files       |
-| `p` | Open platform selector                        |
-| `c` | Select channels                               |
-| `C` | Compare selected artifact (in versions view)  |
-| `m` | Query packages with a MatchSpec               |
-| `w` | Query packages that need a package            |
-| `d` | Download selected artifact (in versions view) |
-| `q` | Quit                                          |
+| Key | Action                                            |
+| --- | ------------------------------------------------- |
+| `?` | Show help                                         |
+| `/` | Search packages, versions, dependencies, or files |
+| `p` | Open platform selector                            |
+| `c` | Select channels                                   |
+| `C` | Compare selected artifact (in versions view)      |
+| `m` | Query packages with a MatchSpec                   |
+| `w` | Query packages that need a package                |
+| `d` | Download selected artifact (in versions view)     |
+| `q` | Quit                                              |
 
 ### Channel selector
 

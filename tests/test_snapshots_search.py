@@ -1,8 +1,8 @@
-"""Snapshot tests of the ``/`` search inside the detail lists.
+"""Snapshot tests of the ``/`` search inside the version and detail lists.
 
 The package list search lives in ``test_snapshots.py``; these tests cover the
-same search in the dependency and file lists of the version details and in the
-compare screen's file list.
+same search in the sidebar's version list, in the dependency and file lists of
+the version details and in the compare screen's file list.
 """
 
 from __future__ import annotations
@@ -22,6 +22,64 @@ from tests.helpers import (
     wait_for_screen,
 )
 from tests.test_snapshots_compare import open_polars_compare_screen
+
+
+def test_search_narrows_the_version_list_by_platform(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """``/`` on the focused sidebar searches the version list; ``osx`` matches
+    the platform, so only that section is left."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("slash")
+        await type_text(pilot, "osx")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_search_narrows_the_version_list_by_version(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A version matches across platforms, so both sections stay with one of
+    their two builds and the details follow the first match."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("slash")
+        await type_text(pilot, "1.3.1")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_search_narrows_the_version_list_by_build_string(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """The build string is part of the search key, so it selects one artifact."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("slash")
+        await type_text(pilot, "h8088a28")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+
+
+def test_version_search_without_matches_reports_it(
+    snap_compare: SnapCompare, make_app: AppFactory
+) -> None:
+    """A query no build matches leaves the version list empty."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("slash")
+        await type_text(pilot, "qqq")
+        await wait_for_idle(pilot)
+
+    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
 
 
 def test_search_narrows_the_package_file_list(
@@ -202,6 +260,57 @@ def test_search_does_not_start_on_a_section_without_a_list(
 
             assert app._list_search_mode is True
             assert app._list_search_query == "about"
+
+    asyncio.run(run())
+
+
+def test_version_search_ends_when_the_sidebar_loses_focus(
+    make_app: AppFactory,
+) -> None:
+    """The version search belongs to the sidebar: focusing the main panel ends
+    it and brings every build back."""
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await open_versions(pilot, package_index=0)
+            await pilot.press("slash")
+            await type_text(pilot, "osx")
+            await wait_for_idle(pilot)
+            assert app._list_search_scope == "versions"
+            assert app._version_search_query == "osx"
+            narrowed_rows = len(app._version_rows)
+
+            app._focus_main_panel()
+            await wait_for_idle(pilot)
+
+            assert app._list_search_mode is False
+            assert app._version_search_query is None
+            assert len(app._version_rows) > narrowed_rows
+
+    asyncio.run(run())
+
+
+def test_changing_the_tab_ends_the_search(make_app: AppFactory) -> None:
+    """A search runs on one tab only, so selecting another one closes it
+    instead of carrying the query over."""
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await open_versions(pilot, package_index=1)
+            await pilot.press("2", "slash")
+            await type_text(pilot, "ratt")
+            await wait_for_idle(pilot)
+            details_view = app.query_one("#version-details-view", VersionDetailsView)
+            assert details_view._filter_query == "ratt"
+
+            # What clicking the extra depends tab calls.
+            details_view.set_dependency_tab("extra_depends")
+            await wait_for_idle(pilot)
+
+            assert app._list_search_mode is False
+            assert details_view._filter_query is None
 
     asyncio.run(run())
 
