@@ -4,6 +4,8 @@
     'dependencies': list([
       '__glibc >=2.17,<3.0.a0',
     ]),
+    'extra_depends': list([
+    ]),
     'files': list([
       'lib/libz.so.1 -> libz.so.1.3.2',
       'lib/libz.so.1.3.2',
@@ -73,6 +75,8 @@
       'typer >=0.26.5,<0.27',
       'pyyaml >=6.0.3,<7',
       'python',
+    ]),
+    'extra_depends': list([
     ]),
     'files': list([
       'site-packages/pixi_browse/__init__.py',
@@ -145,10 +149,96 @@
     ]),
   })
 # ---
+# name: test_load_version_artifact_data_reads_real_archives[pixi-browse-noarch-0.0.15]
+  dict({
+    'dependencies': list([
+      'python >=3.13',
+      'textual >=8.2.8,<9',
+      'py-rattler >=0.26.0,<0.27',
+      'typer >=0.27.2,<0.28',
+      'pyyaml >=6.0.3,<7',
+      'python',
+    ]),
+    'extra_depends': list([
+      'diff: textual-diff-view >=0.1.5,<0.2',
+    ]),
+    'files': list([
+      'site-packages/pixi_browse/__init__.py',
+      'site-packages/pixi_browse/__main__.py',
+      'site-packages/pixi_browse/models.py',
+      'site-packages/pixi_browse/platform_utils.py',
+      'site-packages/pixi_browse/rendering.py',
+      'site-packages/pixi_browse/repodata.py',
+      'site-packages/pixi_browse/search.py',
+      'site-packages/pixi_browse/selection_list.tcss',
+      'site-packages/pixi_browse/tui/__init__.py',
+      'site-packages/pixi_browse/tui/app.py',
+      'site-packages/pixi_browse/tui/state.py',
+      'site-packages/pixi_browse/tui/version_loader.py',
+      'site-packages/pixi_browse/tui/widgets.py',
+      'site-packages/pixi_browse-0.0.15.dist-info/INSTALLER',
+      'site-packages/pixi_browse-0.0.15.dist-info/METADATA',
+      'site-packages/pixi_browse-0.0.15.dist-info/RECORD',
+      'site-packages/pixi_browse-0.0.15.dist-info/REQUESTED',
+      'site-packages/pixi_browse-0.0.15.dist-info/WHEEL',
+      'site-packages/pixi_browse-0.0.15.dist-info/direct_url.json',
+      'site-packages/pixi_browse-0.0.15.dist-info/entry_points.txt',
+      'site-packages/pixi_browse-0.0.15.dist-info/licenses/LICENSE',
+      'info/about.json',
+      'info/hash_input.json',
+      'info/index.json',
+      'info/licenses/LICENSE',
+      'info/link.json',
+      'info/paths.json',
+      'info/recipe/recipe-scripts-license.txt',
+      'info/recipe/recipe.yaml',
+      'info/recipe/rendered_recipe.yaml',
+      'info/recipe/variant_config.yaml',
+      'info/tests/tests.yaml',
+    ]),
+    'metadata': list([
+      'Package               pixi-browse',
+      'Name                  pixi-browse',
+      'Version               0.0.15',
+      'Build                 pyhc364b38_0',
+      'Build Number          0',
+      'Subdir                noarch',
+      'File Name             pixi-browse-0.0.15-pyhc364b38_0.conda',
+      'Channel               https://conda.anaconda.org/conda-forge/',
+      'Size                  57.7 KiB (59,119 bytes)',
+      'Timestamp             2026-09-10T17:25:35.460000+00:00',
+      'License               BSD-3-Clause',
+      'License Family        not available',
+      'Arch                  not available',
+      'Platform              not available',
+      'NoArch                NoArchType("python")',
+      'Features              not available',
+      'Track Features        none',
+      'Python Site-Packages  not available',
+      'MD5                   90b60dec7f2cdb051ed129c8444fa511',
+      'SHA256                58a7ec2830400741530b3eaabaff8bc40915860c44458e350ebfbb4dd5649f8c',
+      'Legacy .tar.bz2 MD5   not available',
+      'Legacy .tar.bz2 Size  not available',
+      "Package URL           [@click=app.open_external_url('https://conda.anaconda.org/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda')]https://conda.anaconda.org/conda-forge/noarch/pixi-browse-0.0.15-pyhc364b38_0.conda[/]",
+      "Repository            [@click=app.open_external_url('https://github.com/pavelzw/pixi-browse')]https://github.com/pavelzw/pixi-browse[/]",
+      "Documentation         [@click=app.open_external_url('https://github.com/pavelzw/pixi-browse')]https://github.com/pavelzw/pixi-browse[/]",
+      "Homepage              [@click=app.open_external_url('https://github.com/pavelzw/pixi-browse')]https://github.com/pavelzw/pixi-browse[/]",
+      "Recipe maintainers    [@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]",
+      "Provenance            [@click=app.open_external_url('https://github.com/conda-forge/pixi-browse-feedstock/commit/48f88c59a4cb90f6a0083bafb4cfad73ed23b010')]conda-forge/pixi-browse-feedstock@48f88c59a4cb90f6a0083bafb4cfad73ed23b010[/]",
+      'Built with            rattler-build 0.76.0',
+    ]),
+    'repodata_patches': list([
+    ]),
+    'run_exports': list([
+    ]),
+  })
+# ---
 # name: test_load_version_artifact_data_reads_real_archives[six-noarch-1.16.0]
   dict({
     'dependencies': list([
       'python',
+    ]),
+    'extra_depends': list([
     ]),
     'files': list([
       'site-packages/six-1.16.0.dist-info/INSTALLER',

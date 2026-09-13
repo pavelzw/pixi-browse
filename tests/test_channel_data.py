@@ -259,6 +259,7 @@ def test_render_package_preview_from_real_records(
     ("package_name", "subdir", "version"),
     [
         ("pixi-browse", "noarch", "0.0.14"),
+        ("pixi-browse", "noarch", "0.0.15"),
         ("libzlib", "linux-64", "1.3.2"),
         ("six", "noarch", "1.16.0"),
     ],
@@ -274,7 +275,9 @@ def test_load_version_artifact_data_reads_real_archives(
     """Metadata, run exports and file lists come straight out of the archive,
     for both ``.conda`` and legacy ``.tar.bz2`` packages."""
 
-    async def load() -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    async def load() -> tuple[
+        list[str], list[str], list[str], list[str], list[str], list[str]
+    ]:
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
@@ -302,6 +305,11 @@ def test_load_version_artifact_data_reads_real_archives(
         return (
             list(format_version_details_metadata_lines(details)),
             list(details.dependencies),
+            [
+                f"{group}: {dependency}"
+                for group, dependencies in details.extra_depends
+                for dependency in dependencies
+            ],
             list(format_version_details_run_exports(details.run_exports)),
             files + [file.path for file in details.info_files],
             [
@@ -310,17 +318,52 @@ def test_load_version_artifact_data_reads_real_archives(
             ],
         )
 
-    metadata, dependencies, run_exports, files, repodata_patches = asyncio.run(load())
+    metadata, dependencies, extra_depends, run_exports, files, repodata_patches = (
+        asyncio.run(load())
+    )
 
     assert {
         "metadata": metadata,
         "dependencies": dependencies,
+        "extra_depends": extra_depends,
         "run_exports": run_exports,
         "files": files,
         # The fixture repodata is generated from the packages' own index.json,
         # so anything reported here is a false positive of the patch detection.
         "repodata_patches": repodata_patches,
     } == snapshot
+
+
+def test_load_version_artifact_data_reads_prefix_replacement_from_paths_json(
+    make_gateway: GatewayFactory, rattler_client: Client
+) -> None:
+    """``zlib`` bakes its build prefix into ``lib/pkgconfig/zlib.pc``, so
+    ``info/paths.json`` requests text replacement for that file only."""
+
+    async def load() -> list[tuple[str, str | None]]:
+        records = await query_package_records(
+            gateway=make_gateway(),
+            channel_names=["conda-forge"],
+            platforms=[Platform("linux-64")],
+            package_name="zlib",
+        )
+        record = records[0]
+        loader = VersionDataLoader(client=rattler_client)
+        archive = await loader.get_package_archive(
+            ("zlib", "1.3.1", record.build, record.build_number, "linux-64", "zlib"),
+            str(record.url),
+        )
+        paths = await loader.get_package_paths(
+            ("zlib", "1.3.1", record.build, record.build_number, "linux-64", "zlib"),
+            archive,
+        )
+        return [
+            (package_file.path, package_file.prefix_replacement)
+            for package_file in paths
+            if package_file.prefix_replacement is not None
+        ]
+
+    assert asyncio.run(load()) == [("lib/pkgconfig/zlib.pc", "text")]
 
 
 def test_load_version_artifact_data_is_cached_per_preview_key(

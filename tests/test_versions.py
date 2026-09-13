@@ -79,6 +79,11 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import (
+    COMPARE_LEFT_COLOR,
+    COMPARE_MODIFIED_COLOR,
+    COMPARE_RIGHT_COLOR,
+    COMPARE_UNCHANGED_COLOR,
+    PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
     FileActionOption,
     render_repodata_patches_body,
@@ -1117,6 +1122,8 @@ def test_get_package_paths_caches_archive_paths() -> None:
                         "path_type": "hardlink",
                         "size_in_bytes": 1234,
                         "sha256": "00" * 32,
+                        "prefix_placeholder": "/build/placeholder",
+                        "file_mode": "binary",
                     },
                     {
                         "_path": "lib/python3.13/site-packages/demo.py",
@@ -1154,6 +1161,7 @@ def test_get_package_paths_caches_archive_paths() -> None:
             bytes.fromhex("00" * 32),
             False,
             "hardlink",
+            prefix_replacement="binary",
         ),
         PackageFile(
             "lib/python3.13/site-packages/demo.py",
@@ -1623,9 +1631,7 @@ def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
     assert "[ / ]" not in active_header.plain
 
 
-def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_green() -> (
-    None
-):
+def test_compare_table_keeps_unchanged_rows_neutral_and_colors_changed_rows() -> None:
     view = CompareDetailsView(
         VersionCompareData(
             left_selection=CompareSelection(
@@ -1675,10 +1681,10 @@ def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_g
     assert table.columns[1].header == "Left"
     assert table.columns[2].header == "Right"
     assert table.rows[0].style is None
-    assert cast(Text, table.columns[1]._cells[0]).style == "white"
-    assert cast(Text, table.columns[2]._cells[0]).style == "white"
-    assert cast(Text, table.columns[1]._cells[1]).style == "red"
-    assert cast(Text, table.columns[2]._cells[1]).style == "green"
+    assert cast(Text, table.columns[1]._cells[0]).style == COMPARE_UNCHANGED_COLOR
+    assert cast(Text, table.columns[2]._cells[0]).style == COMPARE_UNCHANGED_COLOR
+    assert cast(Text, table.columns[1]._cells[1]).style == COMPARE_LEFT_COLOR
+    assert cast(Text, table.columns[2]._cells[1]).style == COMPARE_RIGHT_COLOR
 
 
 def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -> None:
@@ -1812,11 +1818,13 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
                 "- left-only.txt",
                 "+ right-only.txt",
             ]
-            assert [prompt.style for prompt in prompts] == [
-                "#5c6370",
-                "#7a5c00",
-                "#8b1e1e",
-                "#1f5f2b",
+            # Marker, label and size share one span style per row; unchanged rows
+            # keep the regular foreground color and so carry no span at all.
+            assert [{span.style for span in prompt.spans} for prompt in prompts] == [
+                set(),
+                {COMPARE_MODIFIED_COLOR},
+                {COMPARE_LEFT_COLOR},
+                {COMPARE_RIGHT_COLOR},
             ]
 
     asyncio.run(_run())
@@ -1886,19 +1894,16 @@ def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     prompt = CompareDetailsView._render_compare_file_option(row)
 
     assert prompt.plain == "? index.json (1.2 KiB)"
+    # The label and size keep the regular foreground color, so they carry no span.
     assert [
         (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
-    ] == [
-        ("? ", "#7a5c00"),
-        ("index.json", "#5c6370"),
-        (" (1.2 KiB)", Style(color="#5c6370", dim=True)),
-    ]
+    ] == [("? ", COMPARE_MODIFIED_COLOR)]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
     view = VersionDetailsView()
     view._active_section = 0
-    view._dependency_tab_index = 1
+    view.set_dependency_tab("constraints")
     view._details = _make_artifact_data(
         dependencies=("dep",),
         constraints=("constraint",),
@@ -2029,10 +2034,35 @@ def test_file_list_entry_uses_plain_file_path() -> None:
 
     entries = view._file_entries_for_details()
 
-    assert entries[0].label == "site-packages/demo.py (1.5 KiB)"
+    assert entries[0].label.plain == "site-packages/demo.py (1.5 KiB)"
     assert entries[0].path == "site-packages/demo.py"
-    assert entries[1].label == "bin/demo"
+    assert entries[1].label.plain == "bin/demo"
     assert entries[1].path is None
+
+
+def test_file_list_entries_mark_prefix_replacement() -> None:
+    """Files whose ``info/paths.json`` entry carries a prefix placeholder are
+    marked, and text replacement is distinguished from binary replacement."""
+    view = VersionDetailsView()
+    view._details = _make_artifact_data(
+        file_paths=(
+            PackageFile("lib/pkgconfig/demo.pc", 512, prefix_replacement="text"),
+            PackageFile("bin/demo", 2048, prefix_replacement="binary"),
+            PackageFile("share/demo/data.txt", 64),
+        ),
+    )
+
+    entries = view._file_entries_for_details()
+
+    assert [entry.label.plain for entry in entries] == [
+        "lib/pkgconfig/demo.pc (512 B) [prefix:text]",
+        "bin/demo (2.0 KiB) [prefix:binary]",
+        "share/demo/data.txt (64 B)",
+    ]
+    marker = entries[0].label.spans[0]
+    assert entries[0].label.plain[marker.start : marker.end] == " [prefix:text]"
+    assert marker.style == PREFIX_REPLACEMENT_STYLE
+    assert entries[2].label.spans == []
 
 
 def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
@@ -2052,7 +2082,7 @@ def test_info_file_list_entries_use_archive_paths_and_sizes() -> None:
 
     entries = view._file_entries_for_details("info")
 
-    assert [entry.label for entry in entries] == [
+    assert [entry.label.plain for entry in entries] == [
         "index.json (1.0 KiB)",
         "recipe/meta.yaml (1.5 KiB)",
         "current -> recipe/meta.yaml",
@@ -2106,7 +2136,16 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
 
             assert (
                 str(screen.query_one("#compare-footer", Static).render())
-                == "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | Quit: q | Help: ?"
+                == "Tab/Shift+Tab panes | Enter: file actions | Search: / | Swap: x | "
+                "Back: esc | Quit: q | Help: ?"
+            )
+
+            screen.set_filter_query("lib")
+            await pilot.pause()
+
+            assert (
+                str(screen.query_one("#compare-footer", Static).render())
+                == "Search: lib_"
             )
 
     asyncio.run(_run())

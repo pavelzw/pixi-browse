@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from pytest_textual_snapshot import (  # type: ignore[import-untyped]
+from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
     PseudoApp,
     PseudoConsole,
     SvgSnapshotDiff,
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 
 SNAPSHOT_DIRECTORY = PurePosixPath("tests/__snapshots__")
+# Git's status for a rename whose content is byte for byte the same.
+RENAMED_UNCHANGED = "R100"
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,10 @@ def changed_svg_snapshots(base: str, head: str) -> list[SnapshotChange]:
             after_path = None if change_type == "D" else path
 
         paths = (before_path, after_path)
+        if status == RENAMED_UNCHANGED:
+            # A snapshot that only moved renders the same screen on both sides
+            # of the report, so listing it would be noise.
+            continue
         if any(path is not None and path.suffix == ".svg" for path in paths):
             changes.append(SnapshotChange(status, before_path, after_path))
 
@@ -144,18 +150,34 @@ def read_snapshot(revision: str, path: PurePosixPath | None) -> str | None:
     return run_git("show", f"{revision}:{path}")
 
 
+def test_name_and_palette(snapshot_path: PurePosixPath) -> tuple[str, str]:
+    """Split a snapshot file name into its test name and its palette.
+
+    Snapshots are named ``<test>.<palette>.svg``; see `tests/helpers.py`.
+    """
+    test_name, _, palette = snapshot_path.stem.rpartition(".")
+    return test_name, palette
+
+
+def report_test_name(snapshot_path: PurePosixPath) -> str:
+    """The report label of a snapshot: its test name, plus its palette."""
+    test_name, palette = test_name_and_palette(snapshot_path)
+    return f"{test_name} ({palette})"
+
+
 def test_docstring(revision: str, snapshot_path: PurePosixPath) -> str:
     """Read a snapshot's test docstring from its committed Python module."""
     parts = snapshot_path.parts
     try:
         snapshot_directory_index = parts.index("__snapshots__")
-        module_name = parts[snapshot_directory_index + 1]
-    except (ValueError, IndexError):
+    except ValueError:
         return ""
 
+    # A snapshot sits in a directory named after its test module.
+    module_name = snapshot_path.parent.name
     module_path = PurePosixPath(*parts[:snapshot_directory_index], f"{module_name}.py")
     module = ast.parse(run_git("show", f"{revision}:{module_path}"))
-    test_name = snapshot_path.stem.partition("[")[0]
+    test_name = test_name_and_palette(snapshot_path)[0].partition("[")[0]
 
     for node in ast.walk(module):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
@@ -201,7 +223,7 @@ def build_diffs(
             SvgSnapshotDiff(
                 snapshot=individualize_svg(snapshot, f"base-{index}"),
                 actual=individualize_svg(actual, f"head-{index}"),
-                test_name=display_path.stem,
+                test_name=report_test_name(display_path),
                 path=Path(display_path),
                 line_number=1,
                 app=app,

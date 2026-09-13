@@ -1,4 +1,4 @@
-"""Snapshot tests of comparing two real ``libzlib`` artifacts."""
+"""Snapshot tests of comparing real package artifacts."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pixi_browse.tui import (
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
-    SnapCompare,
+    SnapComparePalettes,
     clear_notifications,
     open_versions,
     wait_for_idle,
@@ -61,7 +61,7 @@ POLARS_LAZYFRAME_PY_ROW = 164
 
 
 def test_compare_key_stores_first_selection(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``C`` on an artifact stores it as compare A, notifies, and highlights the
     compare hint in the footer."""
@@ -71,11 +71,13 @@ def test_compare_key_stores_first_selection(
         await pilot.press("C")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_key_rejects_the_same_artifact_twice(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``C`` twice on the same artifact warns that compare B must differ."""
 
@@ -84,11 +86,13 @@ def test_compare_key_rejects_the_same_artifact_twice(
         await pilot.press("C", "C")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_key_on_section_row_does_nothing(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``C`` on a platform section row stores nothing."""
 
@@ -97,36 +101,40 @@ def test_compare_key_on_section_row_does_nothing(
         await pilot.press("k", "C")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_shows_metadata_diff(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The compare screen lists metadata side by side with the older build on the
     left."""
 
-    assert snap_compare(
+    assert snap_compare_palettes(
         make_app(), run_before=open_compare_screen, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_compare_screen_tab_activates_dependencies(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """``Tab`` activates the dependency pane; ``]`` twice switches it to the run
+    """``Tab`` activates the dependency pane; ``[`` switches it to the run
     exports."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
-        await pilot.press("tab", "]", "]")
+        await pilot.press("tab", "[")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_shift_tab_activates_files(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Shift+Tab`` wraps to the file pane, where ``j`` moves the highlight."""
 
@@ -135,11 +143,13 @@ def test_compare_screen_shift_tab_activates_files(
         await pilot.press("shift+tab", "j")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_swap_sides(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``x`` swaps left and right, including the title colors and the file
     markers."""
@@ -149,11 +159,13 @@ def test_compare_screen_swap_sides(
         await pilot.press("x")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_info_tab_marks_unresolved_rows(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Info files only carry sizes, so equal-sized files are unknown (``?``)
     until their hashes are compared."""
@@ -163,11 +175,13 @@ def test_compare_screen_info_tab_marks_unresolved_rows(
         await pilot.press("3", "]")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_enter_on_info_file_resolves_hashes(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Selecting an unresolved info file (``paths.json``) hashes both
     archives' copies, marks the row and offers the file actions for both
@@ -178,11 +192,13 @@ def test_compare_screen_enter_on_info_file_resolves_hashes(
         await pilot.press("3", "]", "j", "enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_enter_on_symlink_row_warns(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Enter`` on a symlink row explains that symlinks cannot be previewed or
     downloaded."""
@@ -192,11 +208,13 @@ def test_compare_screen_enter_on_symlink_row_warns(
         await pilot.press("3", "enter")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_enter_on_left_only_file_offers_left_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Enter`` on a file only the left build has offers preview and download for
     the left side only."""
@@ -206,11 +224,13 @@ def test_compare_screen_enter_on_left_only_file_offers_left_actions(
         await pilot.press("3", "j", "enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_rejects_binary_preview(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Previewing a shared library shows the binary-file notice instead of its
     contents."""
@@ -223,11 +243,13 @@ def test_compare_screen_rejects_binary_preview(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_escape_returns_to_versions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Leaving the compare screen also forgets compare A."""
 
@@ -236,7 +258,9 @@ def test_compare_screen_escape_returns_to_versions(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
@@ -255,7 +279,7 @@ def test_compare_screen_q_exits_app(make_app: AppFactory) -> None:
 
 
 def test_compare_key_in_packages_view_is_ignored(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``C`` only stores artifacts in the versions view."""
 
@@ -264,14 +288,16 @@ def test_compare_key_in_packages_view_is_ignored(
         await pilot.press("C")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
 def test_compare_screen_diff_of_python_file(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Diff left / right`` on a changed Python file (``polars/functions/lit.py``)
     opens the diff of both archives' copies with syntax highlighting."""
@@ -285,11 +311,13 @@ def test_compare_screen_diff_of_python_file(
         await wait_for_screen(pilot, FileDiffScreen)
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_left_bracket_wraps_dependency_tab(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``[`` on the dependencies tab wraps around to the run exports."""
 
@@ -298,11 +326,13 @@ def test_compare_screen_left_bracket_wraps_dependency_tab(
         await pilot.press("tab", "[")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_left_bracket_wraps_file_tab(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``[`` on the ``pkg/`` tab wraps around to ``info/``."""
 
@@ -311,21 +341,24 @@ def test_compare_screen_left_bracket_wraps_file_tab(
         await pilot.press("3", "[")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize(
     ("section_index", "column"),
-    [(1, 30), (2, 20)],
-    ids=["constraints", "info"],
+    [(1, 30), (1, 50), (2, 20)],
+    ids=["extra-depends", "constraints", "info"],
 )
 def test_compare_screen_clicking_tab_label_switches_tab(
-    snap_compare: SnapCompare,
+    snap_compare_palettes: SnapComparePalettes,
     make_app: AppFactory,
     section_index: int,
     column: int,
 ) -> None:
-    """Clicking the second tab label of a compare section switches its tab."""
+    """Clicking a tab label of a compare section switches its tab. The columns
+    are the ones the labels occupy on the top border."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_compare_screen(pilot)
@@ -333,7 +366,9 @@ def test_compare_screen_clicking_tab_label_switches_tab(
         await pilot.click(section, offset=(column, 0))
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize(
@@ -347,7 +382,9 @@ def test_compare_screen_clicking_tab_label_switches_tab(
     ids=["ctrl+d", "end-k", "gg", "pagedown-pageup-home"],
 )
 def test_compare_screen_paging_keys_move_file_highlight(
-    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    keys: tuple[str, ...],
 ) -> None:
     """Paging and jump keys move the file highlight of the compare screen; a
     trailing ``j`` shows the highlight did land on the first row."""
@@ -357,14 +394,18 @@ def test_compare_screen_paging_keys_move_file_highlight(
         await pilot.press(*keys)
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize(
     "keys", [("G",), ("j", "j", "j"), ("G", "g", "g")], ids=["G", "jjj", "G-gg"]
 )
 def test_compare_screen_metadata_table_scrolls(
-    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    keys: tuple[str, ...],
 ) -> None:
     """The metadata table is taller than its section: ``j`` scrolls it, ``G``
     jumps to the end and ``gg`` back to the top."""
@@ -374,11 +415,13 @@ def test_compare_screen_metadata_table_scrolls(
         await pilot.press(*keys)
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_clicking_file_row_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Clicking a compare file row opens the file actions, like ``Enter``."""
 
@@ -388,11 +431,13 @@ def test_compare_screen_clicking_file_row_opens_file_actions(
         await pilot.click("#compare-option-list-2", offset=(2, 2))
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_file_actions_escape_returns_to_compare(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` on the file actions returns to the compare screen unchanged."""
 
@@ -403,14 +448,16 @@ def test_compare_screen_file_actions_escape_returns_to_compare(
         await pilot.press("escape")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
 def test_compare_screen_diff_escape_returns_to_compare(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the diff and returns to the compare screen."""
 
@@ -423,11 +470,35 @@ def test_compare_screen_diff_escape_returns_to_compare(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+@pytest.mark.parametrize("swap", [False, True], ids=["added", "removed"])
+def test_compare_extra_depends(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory, swap: bool
+) -> None:
+    """0.0.15 adds the diff extra relative to 0.0.14; swapping reverses it."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("C", "j")
+        await wait_for_idle(pilot)
+        await pilot.press("C")
+        await wait_for_idle(pilot)
+        await pilot.press("2", "]")
+        if swap:
+            await pilot.press("x")
+        await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_compare_screen_preview_rejects_large_file(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Preview left`` of a file above the size limit shows the too-large
     notice instead of fetching it."""
@@ -440,14 +511,16 @@ def test_compare_screen_preview_rejects_large_file(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.skipif(
     not DIFF_VIEW_AVAILABLE, reason="needs the optional textual-diff-view package"
 )
 def test_compare_screen_diff_rejects_large_file(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Diff left / right`` of a changed file above the size limit warns
     instead of opening the diff."""
@@ -459,4 +532,6 @@ def test_compare_screen_diff_rejects_large_file(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )

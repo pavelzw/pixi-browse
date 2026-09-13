@@ -9,7 +9,7 @@ from pixi_browse.tui import FileActionScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
-    SnapCompare,
+    SnapComparePalettes,
     open_versions,
     wait_for_idle,
     wait_for_screen,
@@ -17,7 +17,7 @@ from tests.helpers import (
 
 
 def test_enter_on_package_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Files from ``paths.json`` carry their SHA256."""
 
@@ -26,11 +26,13 @@ def test_enter_on_package_file_opens_file_actions(
         await pilot.press("3", "enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_enter_on_info_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Files streamed from ``info/`` only know their size."""
 
@@ -39,11 +41,13 @@ def test_enter_on_info_file_opens_file_actions(
         await pilot.press("3", "]", "enter")
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_clicking_file_opens_file_actions(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Clicking a file row opens the same file action screen as ``Enter``."""
 
@@ -52,11 +56,13 @@ def test_clicking_file_opens_file_actions(
         await pilot.click("#detail-option-list-2", offset=(2, 0))
         await wait_for_screen(pilot, FileActionScreen)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_enter_on_symlink_does_nothing(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``libzlib`` ships ``lib/libz.so`` as a symlink, which has no actions."""
 
@@ -65,11 +71,13 @@ def test_enter_on_symlink_does_nothing(
         await pilot.press("3", "enter")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_file_actions_escape_returns_to_details(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the file action screen and leaves the file pane active."""
 
@@ -80,11 +88,13 @@ def test_file_actions_escape_returns_to_details(
         await pilot.press("escape")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_preview_python_file_uses_syntax_highlighting(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Previewing a ``.py`` file renders it with Python syntax highlighting."""
 
@@ -97,11 +107,13 @@ def test_preview_python_file_uses_syntax_highlighting(
         await pilot.press("j", "j", "j")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_preview_escape_returns_to_details(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the preview and returns to the details view."""
 
@@ -114,11 +126,13 @@ def test_preview_escape_returns_to_details(
         await pilot.press("escape")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_download_path_screen_rejects_empty_destination(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Submitting an empty destination in the download prompt shows an inline
     error."""
@@ -133,11 +147,13 @@ def test_download_path_screen_rejects_empty_destination(
         await pilot.press("backspace", "enter")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_d_on_section_row_warns(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``d`` on a platform section row warns that a specific artifact must be
     selected."""
@@ -147,7 +163,9 @@ def test_d_on_section_row_warns(
         await pilot.press("k", "d")
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize(
@@ -156,7 +174,9 @@ def test_d_on_section_row_warns(
     ids=["G", "ctrl+d", "ctrl+d-k", "end-ctrl+u", "G-g"],
 )
 def test_preview_scroll_keys(
-    snap_compare: SnapCompare, make_app: AppFactory, keys: tuple[str, ...]
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    keys: tuple[str, ...],
 ) -> None:
     """The preview of ``pixi_browse/__main__.py`` is longer than the dialog:
     ``G``/``end`` jump to the end, ``g`` back to the top, ``ctrl+d``/``ctrl+u``
@@ -172,11 +192,13 @@ def test_preview_scroll_keys(
         await pilot.press(*keys)
         await pilot.pause()
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 def test_download_path_escape_cancels_download(
-    snap_compare: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` on the destination prompt downloads nothing and returns to the
     details."""
@@ -190,4 +212,6 @@ def test_download_path_escape_cancels_download(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert snap_compare(make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE)
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )

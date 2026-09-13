@@ -154,6 +154,14 @@ Screen {
     text-style: bold;
 }
 
+/* Compare file rows carry their own status colors, which cannot be overridden by
+   the highlight, so the highlighted row gets a dark band the colors read on. */
+#compare-option-list-2 > .option-list--option-highlighted {
+    color: #ffffff;
+    background: #6b2f4a;
+    text-style: bold;
+}
+
 .detail-option-list > .option-list--option-hover {
     color: #f9a8d4;
     background: #4a2233;
