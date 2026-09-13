@@ -73,14 +73,12 @@ INACTIVE_SELECTED_TAB_STYLE = Style(color="#ec4899", bold=False)
 INACTIVE_TAB_STYLE = INACTIVE_SECTION_TITLE_STYLE
 PREFIX_REPLACEMENT_STYLE = Style(color="#d19a66")
 # Foreground colors for the compare file list. Named ANSI colors, like the
-# compare tables use, so both follow the terminal palette.
-COMPARE_FILE_UNCHANGED_COLOR = "white"
+# compare tables use, so both follow the terminal palette. Unchanged rows keep
+# the regular foreground color.
+COMPARE_FILE_UNCHANGED_COLOR = ""
 COMPARE_FILE_MODIFIED_COLOR = "yellow"
 COMPARE_FILE_LEFT_ONLY_COLOR = "red"
 COMPARE_FILE_RIGHT_ONLY_COLOR = "green"
-# Sizes and link targets recede by dimming the row color rather than by picking a
-# fixed grey, so they stay readable on the highlighted row too.
-COMPARE_FILE_SUFFIX_STYLE = Style(dim=True)
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -1536,7 +1534,7 @@ class CompareDetailsView(Vertical):
             text.append(row.label, style=COMPARE_FILE_UNCHANGED_COLOR)
         suffix = cls._compare_file_suffix(row)
         if suffix:
-            text.append(suffix, style=COMPARE_FILE_SUFFIX_STYLE)
+            text.append(suffix)
         return text
 
     @staticmethod

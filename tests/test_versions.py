@@ -83,7 +83,6 @@ from pixi_browse.tui.widgets import (
     COMPARE_FILE_LEFT_ONLY_COLOR,
     COMPARE_FILE_MODIFIED_COLOR,
     COMPARE_FILE_RIGHT_ONLY_COLOR,
-    COMPARE_FILE_SUFFIX_STYLE,
     COMPARE_FILE_UNCHANGED_COLOR,
     PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
@@ -1715,13 +1714,10 @@ def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     prompt = CompareDetailsView._render_compare_file_option(row)
 
     assert prompt.plain == "? index.json (1.2 KiB)"
+    # The label and size keep the regular foreground color, so they carry no span.
     assert [
         (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
-    ] == [
-        ("? ", COMPARE_FILE_MODIFIED_COLOR),
-        ("index.json", COMPARE_FILE_UNCHANGED_COLOR),
-        (" (1.2 KiB)", COMPARE_FILE_SUFFIX_STYLE),
-    ]
+    ] == [("? ", COMPARE_FILE_MODIFIED_COLOR)]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
