@@ -80,6 +80,10 @@ from pixi_browse.tui import (
 from pixi_browse.tui.state import AboutUrls
 from pixi_browse.tui.version_loader import VersionDataLoader
 from pixi_browse.tui.widgets import (
+    COMPARE_LEFT_COLOR,
+    COMPARE_MODIFIED_COLOR,
+    COMPARE_RIGHT_COLOR,
+    COMPARE_UNCHANGED_COLOR,
     PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
     FileActionOption,
@@ -1447,9 +1451,7 @@ def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
     assert "[ / ]" not in active_header.plain
 
 
-def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_green() -> (
-    None
-):
+def test_compare_table_keeps_unchanged_rows_neutral_and_colors_changed_rows() -> None:
     view = CompareDetailsView(
         VersionCompareData(
             left_selection=CompareSelection(
@@ -1499,10 +1501,10 @@ def test_compare_table_renders_unchanged_rows_in_white_and_changed_rows_in_red_g
     assert table.columns[1].header == "Left"
     assert table.columns[2].header == "Right"
     assert table.rows[0].style is None
-    assert cast(Text, table.columns[1]._cells[0]).style == "white"
-    assert cast(Text, table.columns[2]._cells[0]).style == "white"
-    assert cast(Text, table.columns[1]._cells[1]).style == "red"
-    assert cast(Text, table.columns[2]._cells[1]).style == "green"
+    assert cast(Text, table.columns[1]._cells[0]).style == COMPARE_UNCHANGED_COLOR
+    assert cast(Text, table.columns[2]._cells[0]).style == COMPARE_UNCHANGED_COLOR
+    assert cast(Text, table.columns[1]._cells[1]).style == COMPARE_LEFT_COLOR
+    assert cast(Text, table.columns[2]._cells[1]).style == COMPARE_RIGHT_COLOR
 
 
 def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -> None:
@@ -1636,11 +1638,13 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
                 "- left-only.txt",
                 "+ right-only.txt",
             ]
-            assert [prompt.style for prompt in prompts] == [
-                "#5c6370",
-                "#7a5c00",
-                "#8b1e1e",
-                "#1f5f2b",
+            # Marker, label and size share one span style per row; unchanged rows
+            # keep the regular foreground color and so carry no span at all.
+            assert [{span.style for span in prompt.spans} for prompt in prompts] == [
+                set(),
+                {COMPARE_MODIFIED_COLOR},
+                {COMPARE_LEFT_COLOR},
+                {COMPARE_RIGHT_COLOR},
             ]
 
     asyncio.run(_run())
@@ -1710,13 +1714,10 @@ def test_unknown_compare_info_row_styles_only_marker_yellow() -> None:
     prompt = CompareDetailsView._render_compare_file_option(row)
 
     assert prompt.plain == "? index.json (1.2 KiB)"
+    # The label and size keep the regular foreground color, so they carry no span.
     assert [
         (prompt.plain[span.start : span.end], span.style) for span in prompt.spans
-    ] == [
-        ("? ", "#7a5c00"),
-        ("index.json", "#5c6370"),
-        (" (1.2 KiB)", Style(color="#5c6370", dim=True)),
-    ]
+    ] == [("? ", COMPARE_MODIFIED_COLOR)]
 
 
 def test_dependency_header_keeps_selected_tab_colored_when_pane_is_inactive() -> None:
