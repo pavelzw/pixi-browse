@@ -14,7 +14,7 @@ from tests.helpers import (
     MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
-    SnapCompare,
+    SnapComparePalettes,
     open_versions,
     type_text,
     wait_for_idle,
@@ -71,7 +71,7 @@ async def switch_channel(pilot: Pilot[None], channel_name: str) -> None:
 
 
 def test_filter_types_shortcut_keys_into_search(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """While the search takes input, the keys bound to platform, channel,
     compare, quit, MatchSpec and who-needs are typed rather than triggered."""
@@ -81,13 +81,13 @@ def test_filter_types_shortcut_keys_into_search(
         await pilot.press("slash", "p", "c", "C", "q", "m", "w")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_filter_backspace_and_slash(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Backspace`` edits the search and ``/`` is typed into it once the search
     is active."""
@@ -97,13 +97,13 @@ def test_filter_backspace_and_slash(
         await pilot.press("slash", "z", "x", "backspace", "slash", "backspace")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_filter_escape_restores_full_package_list(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` leaves the search and restores the full package list."""
 
@@ -115,13 +115,13 @@ def test_filter_escape_restores_full_package_list(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_filter_without_matches_shows_placeholder(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A search without matches shows an empty list and a placeholder in the
     details."""
@@ -132,13 +132,13 @@ def test_filter_without_matches_shows_placeholder(
         await type_text(pilot, "numpy")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_filter_survives_opening_a_package(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The footer no longer shows the search in the versions view, but going
     back returns to the filtered list."""
@@ -153,7 +153,7 @@ def test_filter_survives_opening_a_package(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
@@ -162,11 +162,11 @@ def test_filter_survives_opening_a_package(
 
 
 def test_default_matchspec_opens_single_matching_package(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A startup ``--matchspec`` that matches one package opens its versions."""
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(
             default_matchspec=MatchSpec("libzlib >=1.3.2", exact_names_only=False)
         ),
@@ -176,7 +176,7 @@ def test_default_matchspec_opens_single_matching_package(
 
 
 def test_matchspec_glob_lists_multiple_packages(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``*zlib`` matches ``libzlib`` and ``zlib``; the sidebar heading names the
     query."""
@@ -185,13 +185,13 @@ def test_matchspec_glob_lists_multiple_packages(
         await wait_for_idle(pilot)
         await run_matchspec_query(pilot, "*zlib")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_without_matches(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A MatchSpec without matches leaves the package list empty."""
 
@@ -199,13 +199,13 @@ def test_matchspec_without_matches(
         await wait_for_idle(pilot)
         await run_matchspec_query(pilot, "numpy")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_from_versions_view_clears_search_filter(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``m`` works again once a package is open, and the result replaces the
     search filter that was active before."""
@@ -219,13 +219,13 @@ def test_matchspec_from_versions_view_clears_search_filter(
         await wait_for_idle(pilot)
         await run_matchspec_query(pilot, "*zlib")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_screen_shows_inline_validation_error(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """An invalid MatchSpec is rejected with the parser's error shown inline."""
 
@@ -237,13 +237,13 @@ def test_matchspec_screen_shows_inline_validation_error(
         await pilot.press("enter")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_screen_reopens_with_previous_query_selected(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``m`` after a query reopens the prompt with the previous query selected."""
 
@@ -253,13 +253,13 @@ def test_matchspec_screen_reopens_with_previous_query_selected(
         await pilot.press("m")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_screen_escape_keeps_result(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` in the MatchSpec prompt keeps the current query result."""
 
@@ -271,13 +271,13 @@ def test_matchspec_screen_escape_keeps_result(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_empty_matchspec_restores_full_package_list(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Submitting an empty MatchSpec clears the query and shows every package
     again."""
@@ -291,13 +291,13 @@ def test_empty_matchspec_restores_full_package_list(
         await pilot.press("backspace", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_enter_on_dependency_opens_matchspec_screen(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Selecting a dependency pre-fills the MatchSpec prompt with it."""
 
@@ -306,13 +306,13 @@ def test_enter_on_dependency_opens_matchspec_screen(
         await pilot.press("2", "enter")
         await wait_for_screen(pilot, MatchSpecScreen)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_dependency_matchspec_query_opens_dependency_versions(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``zlib`` pins an exact ``libzlib`` build (its last dependency);
     querying it opens exactly that build."""
@@ -324,7 +324,7 @@ def test_dependency_matchspec_query_opens_dependency_versions(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
@@ -333,7 +333,7 @@ def test_dependency_matchspec_query_opens_dependency_versions(
 
 
 def test_whoneeds_screen_shows_inline_validation_error(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A who-needs target that is not a package name is rejected inline."""
 
@@ -345,13 +345,13 @@ def test_whoneeds_screen_shows_inline_validation_error(
         await pilot.press("enter")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_screen_reopens_with_previous_target(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``w`` after a who-needs query reopens the prompt with the previous target."""
 
@@ -361,13 +361,13 @@ def test_whoneeds_screen_reopens_with_previous_target(
         await pilot.press("w")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_without_dependents(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A package nothing depends on yields an empty who-needs result."""
 
@@ -375,13 +375,13 @@ def test_whoneeds_without_dependents(
         await wait_for_idle(pilot)
         await run_whoneeds_query(pilot, "six")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_empty_whoneeds_restores_full_package_list(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Submitting an empty who-needs target clears the query and shows every
     package again."""
@@ -394,13 +394,13 @@ def test_empty_whoneeds_restores_full_package_list(
         await pilot.press("ctrl+u", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_on_back_row_prefills_open_package(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Without a highlighted artifact, ``w`` asks for a name and offers the
     package that is open."""
@@ -412,13 +412,13 @@ def test_whoneeds_on_back_row_prefills_open_package(
         await pilot.press("w")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_on_artifact_asks_for_confirmation(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``w`` on a highlighted artifact asks to confirm the query for that exact
     build."""
@@ -428,13 +428,13 @@ def test_whoneeds_on_artifact_asks_for_confirmation(
         await pilot.press("w")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_confirmation_query_something_else_prefills_name(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Choosing *Query something else* opens the name prompt prefilled with the
     package."""
@@ -446,13 +446,13 @@ def test_whoneeds_confirmation_query_something_else_prefills_name(
         await pilot.press("down", "enter")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_confirmation_cancel_keeps_versions_view(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` on the confirmation leaves the versions view untouched."""
 
@@ -463,13 +463,13 @@ def test_whoneeds_confirmation_cancel_keeps_versions_view(
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_whoneeds_for_artifact_lists_its_exact_dependents(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``zlib`` depends on the exact ``libzlib 1.3.1`` builds, so the
     who-needs query for that build finds it. The ``libzlib 1.3.1`` builds
@@ -485,7 +485,7 @@ def test_whoneeds_for_artifact_lists_its_exact_dependents(
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
@@ -494,7 +494,7 @@ def test_whoneeds_for_artifact_lists_its_exact_dependents(
 
 
 def test_platform_selector_space_toggles_platform(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Space`` unticks the highlighted platform and updates the selection count."""
 
@@ -503,13 +503,13 @@ def test_platform_selector_space_toggles_platform(
         await pilot.press("p", "space")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_platform_selector_a_selects_all_platforms(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``a`` ticks every platform again after some were unticked."""
 
@@ -518,13 +518,13 @@ def test_platform_selector_a_selects_all_platforms(
         await pilot.press("p", "space", "j", "space", "a")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_platform_selector_keeps_at_least_one_platform(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Unticking the last remaining platform is refused with a status message."""
 
@@ -533,13 +533,13 @@ def test_platform_selector_keeps_at_least_one_platform(
         await pilot.press("p", "space", "j", "space", "j", "space")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_platform_selector_escape_discards_draft(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` discards unapplied platform changes; reopening shows the old
     selection."""
@@ -551,13 +551,13 @@ def test_platform_selector_escape_discards_draft(
         await pilot.press("p")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_applying_noarch_only_lists_noarch_packages(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Applying only ``noarch`` reloads the list with the noarch packages."""
 
@@ -566,13 +566,13 @@ def test_applying_noarch_only_lists_noarch_packages(
         await pilot.press("p", "space", "j", "space", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_applying_unchanged_platforms_returns_to_packages(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Applying an unchanged selection just returns to the highlighted package."""
 
@@ -581,17 +581,17 @@ def test_applying_unchanged_platforms_returns_to_packages(
         await pilot.press("j", "p", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_default_platforms_restrict_the_startup_selection(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Unavailable platforms passed on the command line are dropped."""
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_platforms=[Platform("osx-arm64"), Platform("win-64")]),
         run_before=wait_for_idle,
         terminal_size=TERMINAL_SIZE,
@@ -599,7 +599,7 @@ def test_default_platforms_restrict_the_startup_selection(
 
 
 def test_platform_change_reapplies_matchspec_query(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Changing platforms re-runs the active MatchSpec against the new selection."""
 
@@ -609,13 +609,13 @@ def test_platform_change_reapplies_matchspec_query(
         await pilot.press("p", "j", "space", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_platform_change_reapplies_whoneeds_query(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Changing platforms re-runs the active who-needs query against the new
     selection."""
@@ -626,7 +626,7 @@ def test_platform_change_reapplies_whoneeds_query(
         await pilot.press("p", "j", "space", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
@@ -635,7 +635,7 @@ def test_platform_change_reapplies_whoneeds_query(
 
 
 def test_channel_screen_lists_selected_channels(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``c`` opens the channel dialog: the channels in the order they were
     added, each with a remove button, the field to add one, and ``Apply``."""
@@ -644,7 +644,7 @@ def test_channel_screen_lists_selected_channels(
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -652,7 +652,7 @@ def test_channel_screen_lists_selected_channels(
 
 
 def test_channel_screen_field_takes_input(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The field has focus when the dialog opens; shortcut keys are typed
     into it rather than triggered."""
@@ -663,13 +663,13 @@ def test_channel_screen_field_takes_input(
         await type_text(pilot, "https://prefix.dev/conda-forge")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_adds_channel_at_the_end(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Enter`` in the field appends the channel and clears the field;
     nothing is loaded until ``Apply``."""
@@ -679,13 +679,13 @@ def test_channel_screen_adds_channel_at_the_end(
         await open_channel_screen(pilot)
         await add_channel(pilot, BIOCONDA_CHANNEL)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_rejects_duplicate_channel(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Adding a channel that is already selected is refused and the typed
     name stays in the field."""
@@ -695,13 +695,13 @@ def test_channel_screen_rejects_duplicate_channel(
         await open_channel_screen(pilot)
         await add_channel(pilot, MAIN_CHANNEL)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_rejects_empty_channel(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Submitting a blank field is refused."""
 
@@ -710,13 +710,13 @@ def test_channel_screen_rejects_empty_channel(
         await open_channel_screen(pilot)
         await add_channel(pilot, "  ")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_keeps_last_channel(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The remove button of the only remaining channel is disabled; clicking
     it changes nothing."""
@@ -727,13 +727,13 @@ def test_channel_screen_keeps_last_channel(
         await pilot.click("#channel-remove-0")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_removes_clicked_channel(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Clicking a channel's remove button takes it out of the list and
     returns the focus to the field."""
@@ -744,7 +744,7 @@ def test_channel_screen_removes_clicked_channel(
         await pilot.click("#channel-remove-1")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -752,7 +752,7 @@ def test_channel_screen_removes_clicked_channel(
 
 
 def test_channel_screen_escape_discards_edits(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Escape`` closes the dialog without applying; reopening it shows the
     channels that are actually loaded."""
@@ -765,13 +765,13 @@ def test_channel_screen_escape_discards_edits(
         await wait_for_idle(pilot)
         await open_channel_screen(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_up_focuses_remove_buttons(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Up`` from the field focuses the ``✕`` button of the last channel,
     which is highlighted."""
@@ -782,7 +782,7 @@ def test_channel_screen_up_focuses_remove_buttons(
         await pilot.press("up")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -790,7 +790,7 @@ def test_channel_screen_up_focuses_remove_buttons(
 
 
 def test_channel_screen_enter_on_focused_remove_button(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Up`` twice reaches the first channel's ``✕``; ``Enter`` removes it
     and the focus returns to the field. ``Up`` stops at the top."""
@@ -801,7 +801,7 @@ def test_channel_screen_enter_on_focused_remove_button(
         await pilot.press("up", "up", "up", "enter")
         await pilot.pause()
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -809,7 +809,7 @@ def test_channel_screen_enter_on_focused_remove_button(
 
 
 def test_channel_screen_down_reaches_apply(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Down`` from the field focuses ``Apply``; ``Enter`` loads the added
     channel."""
@@ -821,13 +821,13 @@ def test_channel_screen_down_reaches_apply(
         await pilot.press("down", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_channel_screen_apply_via_keyboard(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Tab`` moves from the field to ``Apply``, and ``Enter`` there loads
     the channels."""
@@ -839,13 +839,13 @@ def test_channel_screen_apply_via_keyboard(
         await pilot.press("tab", "enter")
         await wait_for_idle(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_confirming_unchanged_channels_keeps_the_view(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``Apply`` without edits does not reload anything."""
 
@@ -854,18 +854,18 @@ def test_confirming_unchanged_channels_keeps_the_view(
         await open_channel_screen(pilot)
         await apply_channels(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_startup_channels_list_packages_of_every_channel(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Started with ``-c conda-forge -c bioconda`` the package list merges
     both channels."""
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=wait_for_idle,
         terminal_size=TERMINAL_SIZE,
@@ -873,7 +873,7 @@ def test_startup_channels_list_packages_of_every_channel(
 
 
 def test_adding_channel_lists_packages_of_both_channels(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Adding ``bioconda`` next to ``conda-forge`` loads the packages of both
     channels."""
@@ -884,13 +884,13 @@ def test_adding_channel_lists_packages_of_both_channels(
         await add_channel(pilot, BIOCONDA_CHANNEL)
         await apply_channels(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_switching_channel_lists_its_packages(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Replacing ``conda-forge`` with ``bioconda`` loads that channel's
     packages and previews the first one."""
@@ -899,13 +899,13 @@ def test_switching_channel_lists_its_packages(
         await wait_for_idle(pilot)
         await switch_channel(pilot, BIOCONDA_CHANNEL)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_switching_channel_clears_active_matchspec(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """Switching channels drops the active MatchSpec query along with the old
     channel."""
@@ -915,13 +915,13 @@ def test_switching_channel_clears_active_matchspec(
         await run_matchspec_query(pilot, "*zlib")
         await switch_channel(pilot, BIOCONDA_CHANNEL)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_switching_to_unreachable_channel_restores_previous_view(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A channel without repodata fails to load; the previous view is restored
     with an error toast."""
@@ -930,13 +930,13 @@ def test_switching_to_unreachable_channel_restores_previous_view(
         await open_versions(pilot, package_index=1)
         await switch_channel(pilot, MISSING_CHANNEL)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_adding_unreachable_channel_restores_previous_view(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """An unreachable channel is refused even next to a working one, so a
     typo does not silently browse the other channels; the toast names it."""
@@ -947,13 +947,13 @@ def test_adding_unreachable_channel_restores_previous_view(
         await add_channel(pilot, MISSING_CHANNEL)
         await apply_channels(pilot)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
 def test_matchspec_query_spans_all_channels(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``p*`` matches ``pixi-browse`` and ``polars`` from conda-forge and
     ``pyfaidx`` from bioconda."""
@@ -962,7 +962,7 @@ def test_matchspec_query_spans_all_channels(
         await wait_for_idle(pilot)
         await run_matchspec_query(pilot, "p*")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -970,7 +970,7 @@ def test_matchspec_query_spans_all_channels(
 
 
 def test_whoneeds_query_spans_all_channels(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``pyfaidx`` (bioconda) depends on ``six`` (conda-forge); the reverse
     query crosses the channel boundary and opens the single match."""
@@ -979,7 +979,7 @@ def test_whoneeds_query_spans_all_channels(
         await wait_for_idle(pilot)
         await run_whoneeds_query(pilot, "six")
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
@@ -987,13 +987,13 @@ def test_whoneeds_query_spans_all_channels(
 
 
 def test_enter_on_extra_dependency_opens_matchspec_screen(
-    compare_snapshot: SnapCompare, make_app: AppFactory
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "]", "j", "enter")
         await wait_for_screen(pilot, MatchSpecScreen)
 
-    assert compare_snapshot(
+    assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )

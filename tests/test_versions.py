@@ -1956,7 +1956,16 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
 
             assert (
                 str(screen.query_one("#compare-footer", Static).render())
-                == "Tab/Shift+Tab panes | Enter: file actions | Swap: x | Back: esc | Quit: q | Help: ?"
+                == "Tab/Shift+Tab panes | Enter: file actions | Search: / | Swap: x | "
+                "Back: esc | Quit: q | Help: ?"
+            )
+
+            screen.set_filter_query("lib")
+            await pilot.pause()
+
+            assert (
+                str(screen.query_one("#compare-footer", Static).render())
+                == "Search: lib_"
             )
 
     asyncio.run(_run())
