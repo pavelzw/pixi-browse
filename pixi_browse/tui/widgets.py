@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import Literal, Protocol
 
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
@@ -42,11 +42,13 @@ from pixi_browse.rendering import (
     format_version_details_run_exports,
 )
 from pixi_browse.search import substring_filter
-
-if TYPE_CHECKING:
-    # The app imports this module, so its own type is only available to the
-    # type checker; the ``cast``s below name it as a string.
-    from pixi_browse.tui.app import CondaMetadataTui
+from pixi_browse.tui.list_search import ListSearchState
+from pixi_browse.tui.messages import (
+    FilterIndicatorChanged,
+    ListSearchEnded,
+    PaneSelected,
+    SidebarFocusRequested,
+)
 
 try:
     from textual_diff_view import DiffView
@@ -66,6 +68,11 @@ VERSION_DETAIL_SECTION_COUNT = 3
 
 # Shown instead of the list rows when the ``/`` search matches nothing.
 NO_SEARCH_MATCHES_MESSAGE = "No matches."
+
+# Shown by the sections whose body is a table, in place of an empty one.
+NO_REPODATA_PATCHES_MESSAGE = "No repodata patches."
+NO_COMPARE_METADATA_MESSAGE = "No metadata available."
+NO_COMPARE_DEPENDENCIES_MESSAGE = "No dependency data."
 
 METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
@@ -88,6 +95,13 @@ COMPARE_UNCHANGED_COLOR = ""
 COMPARE_MODIFIED_COLOR = "yellow"
 COMPARE_LEFT_COLOR = "red"
 COMPARE_RIGHT_COLOR = "green"
+# Between two tabs of a section header, and in front of the tabs a header too
+# narrow for the whole strip had to leave out on the left.
+TAB_SEPARATOR = " - "
+CLIPPED_TABS_MARKER = "…"
+# What a section spends on its border on top of the header: the two corners of
+# the top border and the blank on either side of the header.
+BORDER_TITLE_OVERHEAD = 6
 DETAIL_SELECT_METADATA_TAB_ACTION = "select_metadata_tab"
 DETAIL_SELECT_DEPENDENCY_TAB_ACTION = "select_dependency_tab"
 DETAIL_SELECT_FILE_TAB_ACTION = "select_file_tab"
@@ -151,6 +165,45 @@ class FilePreviewContent:
     lexer: str | None = None
 
 
+def render_tab_header(
+    prefix: Text, tabs: Sequence[Text], *, active: int, width: int | None
+) -> Text:
+    """A section header: its ``[n]`` prefix followed by the strip of ``tabs``.
+
+    ``width`` is how many cells the header has, or ``None`` when that is not
+    known yet. A strip too wide for it is clipped from the left -- with an
+    ellipsis for the tabs left out -- until the active tab fits, so that the tab
+    the section shows stays readable instead of falling off the right end, which
+    is where Textual truncates a border title.
+    """
+    for first in range(active):
+        header, active_end = _render_tab_strip(prefix, tabs, first=first, active=active)
+        # Everything fits, or at least the active tab does: Textual's own
+        # truncation ends the strip with an ellipsis, so it needs a cell of its
+        # own for the active tab to stay whole.
+        if width is None or header.cell_len <= width or active_end < width:
+            return header
+    return _render_tab_strip(prefix, tabs, first=active, active=active)[0]
+
+
+def _render_tab_strip(
+    prefix: Text, tabs: Sequence[Text], *, first: int, active: int
+) -> tuple[Text, int]:
+    """The header showing ``tabs`` from ``first`` on, and the cell the active tab
+    ends at."""
+    header = prefix.copy()
+    if first:
+        header.append(CLIPPED_TABS_MARKER, style=INACTIVE_TAB_STYLE)
+    active_end = header.cell_len
+    for index, tab in enumerate(tabs[first:], start=first):
+        if index > first:
+            header.append(TAB_SEPARATOR, style=INACTIVE_TAB_STYLE)
+        header.append_text(tab)
+        if index == active:
+            active_end = header.cell_len
+    return header, active_end
+
+
 def compare_row_styles(row: CompareRow) -> tuple[str, str]:
     if row.changed:
         return COMPARE_LEFT_COLOR, COMPARE_RIGHT_COLOR
@@ -160,15 +213,13 @@ def compare_row_styles(row: CompareRow) -> tuple[str, str]:
 def render_compare_table(
     rows: tuple[CompareRow, ...],
     *,
-    empty_message: str,
     show_label_column: bool,
     label_title: str = "",
     left_title: str = "Left",
     right_title: str = "Right",
-) -> RenderableType:
-    if not rows:
-        return Text(empty_message, style="dim")
-
+) -> Table:
+    """Render ``rows`` side by side. Sections without any row show their empty
+    message instead of a table, through ``DetailSection.show_empty_message``."""
     table = Table(
         box=box.SIMPLE,
         expand=True,
@@ -192,11 +243,10 @@ def render_compare_table(
     return table
 
 
-def render_repodata_patches_body(patches: RepodataPatchDiff) -> RenderableType:
+def render_repodata_patches_body(patches: RepodataPatchDiff) -> Table:
     """Render the unpatched (index.json) vs patched (repodata) diff table."""
     return render_compare_table(
         patches.rows,
-        empty_message="No repodata patches.",
         show_label_column=True,
         label_title="Field",
         left_title="Unpatched (index.json)",
@@ -230,6 +280,9 @@ class DetailSection(Vertical):
         self._on_select_metadata_tab = on_select_metadata_tab
         self._on_select_dependency_tab = on_select_dependency_tab
         self._on_select_file_tab = on_select_file_tab
+        # Set while the header is a tab strip, which is re-rendered whenever the
+        # width it has to fit into changes.
+        self._render_tab_header: Callable[[int | None], Text] | None = None
         del title, show_tabs
         self.auto_links = False
         self.styles.border_title_align = "left"
@@ -240,6 +293,12 @@ class DetailSection(Vertical):
                 id=f"{self._id_prefix}-option-list-{self._index}",
                 classes="detail-option-list",
                 markup=False,
+            )
+            # Takes the list's place when there is nothing to list, so an empty
+            # section reads as a message instead of a one-row list.
+            yield Static(
+                id=f"{self._id_prefix}-empty-{self._index}",
+                classes="detail-empty",
             )
             return
 
@@ -277,21 +336,72 @@ class DetailSection(Vertical):
         self._on_select_file_tab(tab)
 
     def update_header(self, title: str | Text) -> None:
+        self._render_tab_header = None
         self.border_title = title
 
+    def update_tab_header(self, render: Callable[[int | None], Text]) -> None:
+        """Show the tab strip ``render`` draws for a given header width, and draw
+        it again whenever the section is resized."""
+        self._render_tab_header = render
+        self._draw_tab_header()
+
+    def on_resize(self) -> None:
+        if self._render_tab_header is not None:
+            self._draw_tab_header()
+
+    def _draw_tab_header(self) -> None:
+        assert self._render_tab_header is not None
+        self.border_title = self._render_tab_header(self._header_width())
+
+    def _header_width(self) -> int | None:
+        """The cells the border leaves for the header, or ``None`` while the
+        section has no width yet."""
+        width = self.outer_size.width - BORDER_TITLE_OVERHEAD
+        return width if width > 0 else None
+
     def update_body(self, body: RenderableType) -> None:
-        self.query_one(f"#{self._id_prefix}-body-{self._index}", Static).update(body)
+        body_static = self._body_static()
+        body_static.remove_class("detail-empty")
+        body_static.update(body)
 
     def update_options(
         self, labels: list[str | Text | Option], *, highlighted: int = 0
     ) -> None:
-        option_list = self.query_one(
-            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
-        )
+        option_list = self._option_list()
+        self._empty_message_static().display = False
+        option_list.display = True
         option_list.clear_options()
         option_list.add_options(labels)
         if labels:
             option_list.highlighted = max(0, min(highlighted, len(labels) - 1))
+
+    def show_empty_message(self, message: str) -> None:
+        """Report a section with nothing to show as a dimmed message: a list
+        section hides its list for it, a body section shows it as its body. Both
+        wear the same class, so every empty section reads the same."""
+        text = Text(message, style="dim")
+        if not self._use_option_list:
+            body_static = self._body_static()
+            body_static.add_class("detail-empty")
+            body_static.update(text)
+            return
+        option_list = self._option_list()
+        option_list.clear_options()
+        option_list.display = False
+        empty = self._empty_message_static()
+        empty.update(text)
+        empty.display = True
+
+    def _option_list(self) -> DetailOptionList:
+        return self.query_one(
+            f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
+        )
+
+    def _body_static(self) -> Static:
+        return self.query_one(f"#{self._id_prefix}-body-{self._index}", Static)
+
+    def _empty_message_static(self) -> Static:
+        return self.query_one(f"#{self._id_prefix}-empty-{self._index}", Static)
 
     def set_active(self, active: bool) -> None:
         self.set_class(active, "-active")
@@ -405,12 +515,16 @@ class VersionDetailsView(Vertical):
 
     def _end_search_if_scope_changed(self) -> bool:
         """Leave the ``/`` search when the list it narrows is no longer showing,
-        so a search never outlives the tab it was started on."""
+        so a search never outlives the tab it was started on.
+
+        Shows the full lists right away and lets the app catch up with the
+        footer, which is a cycle behind because the message is posted."""
         if self._filter_query is None or self._current_filter_scope() == (
             self._filter_scope
         ):
             return False
-        cast("CondaMetadataTui", self.app)._stop_list_search()
+        self.set_filter_query(None)
+        self.post_message(ListSearchEnded())
         return True
 
     def _search_query_for_dependency_tab(self, tab: DependencyTab) -> str | None:
@@ -626,9 +740,9 @@ class VersionDetailsView(Vertical):
             section.set_active(index == self._active_section)
         if self._details is None:
             return
-        self._section(0).update_header(self._render_metadata_header())
-        self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_file_header())
+        self._section(0).update_tab_header(self._render_metadata_header)
+        self._section(1).update_tab_header(self._render_dependency_header)
+        self._section(2).update_tab_header(self._render_file_header)
 
     def _refresh_sections(self) -> None:
         if self._details is None:
@@ -647,11 +761,13 @@ class VersionDetailsView(Vertical):
             return
 
         metadata_section = self._section(0)
-        metadata_section.update_header(self._render_metadata_header())
+        metadata_section.update_tab_header(self._render_metadata_header)
         if self._active_metadata_tab() == "patches":
-            metadata_section.update_body(
-                render_repodata_patches_body(self._details.repodata_patches)
-            )
+            patches = self._details.repodata_patches
+            if not patches.rows:
+                metadata_section.show_empty_message(NO_REPODATA_PATCHES_MESSAGE)
+                return
+            metadata_section.update_body(render_repodata_patches_body(patches))
             return
         metadata_section.update_body(
             "\n".join(format_version_details_metadata_lines(self._details))
@@ -666,11 +782,11 @@ class VersionDetailsView(Vertical):
         self._dependency_entries = {
             tab: self._dependency_entries_for_tab(tab) for tab in DEPENDENCY_TABS
         }
-        dependency_section.update_header(self._render_dependency_header())
+        dependency_section.update_tab_header(self._render_dependency_header)
         entries = self._dependency_entries[active_tab]
         if not entries:
-            dependency_section.update_options(
-                [self._empty_dependency_message(active_tab)]
+            dependency_section.show_empty_message(
+                self._empty_dependency_message(active_tab)
             )
             return
         dependency_section.update_options(
@@ -687,10 +803,10 @@ class VersionDetailsView(Vertical):
         self._file_entries = {
             tab: self._file_entries_for_details(tab) for tab in FILE_TABS
         }
-        file_section.update_header(self._render_file_header())
+        file_section.update_tab_header(self._render_file_header)
         entries = self._file_entries[active_tab]
         if not entries:
-            file_section.update_options([Text(self._empty_file_message(active_tab))])
+            file_section.show_empty_message(self._empty_file_message(active_tab))
             return
         file_section.update_options(
             [entry.label for entry in entries],
@@ -857,7 +973,7 @@ class VersionDetailsView(Vertical):
             "#detail-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
-    def _render_metadata_tabs(self) -> Text:
+    def _render_metadata_tabs(self) -> tuple[Text, ...]:
         labels: dict[MetadataTab, str]
         if self._details is None:
             labels = {"metadata": "Metadata", "patches": "Repodata patches"}
@@ -868,21 +984,17 @@ class VersionDetailsView(Vertical):
                     f"Repodata patches ({self._details.repodata_patches.change_count})"
                 ),
             }
-        tab_text = Text()
-        for index, tab in enumerate(METADATA_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_metadata_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_metadata_tab(),
-                    pane_active=self._pane_selected and self._active_section == 0,
-                )
+        return tuple(
+            self._render_clickable_metadata_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_metadata_tab(),
+                pane_active=self._pane_selected and self._active_section == 0,
             )
-        return tab_text
+            for tab in METADATA_TABS
+        )
 
-    def _render_dependency_tabs(self) -> Text:
+    def _render_dependency_tabs(self) -> tuple[Text, ...]:
         if self._details is None:
             labels = {
                 "dependencies": "Dependencies",
@@ -909,19 +1021,15 @@ class VersionDetailsView(Vertical):
                 "constraints": f"Constraints ({counts['constraints']})",
                 "run_exports": f"Run exports ({counts['run_exports']})",
             }
-        tab_text = Text()
-        for index, tab in enumerate(DEPENDENCY_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_dependency_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_dependency_tab(),
-                    pane_active=self._pane_selected and self._active_section == 1,
-                )
+        return tuple(
+            self._render_clickable_dependency_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_dependency_tab(),
+                pane_active=self._pane_selected and self._active_section == 1,
             )
-        return tab_text
+            for tab in DEPENDENCY_TABS
+        )
 
     def _dependency_counts(
         self, totals: dict[DependencyTab, int]
@@ -951,7 +1059,7 @@ class VersionDetailsView(Vertical):
             for tab, total in totals.items()
         }
 
-    def _render_file_tabs(self) -> Text:
+    def _render_file_tabs(self) -> tuple[Text, ...]:
         if self._details is None:
             labels = {"pkg": "pkg/", "info": "info/"}
         else:
@@ -965,19 +1073,15 @@ class VersionDetailsView(Vertical):
                 "pkg": f"pkg/ ({counts['pkg']})",
                 "info": f"info/ ({counts['info']})",
             }
-        tab_text = Text()
-        for index, tab in enumerate(FILE_TABS):
-            if index:
-                tab_text.append(" - ", style=INACTIVE_TAB_STYLE)
-            tab_text.append_text(
-                self._render_clickable_file_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_file_tab(),
-                    pane_active=self._pane_selected and self._active_section == 2,
-                )
+        return tuple(
+            self._render_clickable_file_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_file_tab(),
+                pane_active=self._pane_selected and self._active_section == 2,
             )
-        return tab_text
+            for tab in FILE_TABS
+        )
 
     def _render_section_header(self, index: int, label: str) -> Text:
         style = (
@@ -987,20 +1091,29 @@ class VersionDetailsView(Vertical):
         )
         return Text(f"[{index + 1}] {label}", style=style)
 
-    def _render_metadata_header(self) -> Text:
-        header = self._render_section_header(0, "")
-        header.append_text(self._render_metadata_tabs())
-        return header
+    def _render_metadata_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(0, ""),
+            self._render_metadata_tabs(),
+            active=self._metadata_tab_index,
+            width=width,
+        )
 
-    def _render_dependency_header(self) -> Text:
-        header = self._render_section_header(1, "")
-        header.append_text(self._render_dependency_tabs())
-        return header
+    def _render_dependency_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(1, ""),
+            self._render_dependency_tabs(),
+            active=self._dependency_tab_index,
+            width=width,
+        )
 
-    def _render_file_header(self) -> Text:
-        header = self._render_section_header(2, "")
-        header.append_text(self._render_file_tabs())
-        return header
+    def _render_file_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(2, ""),
+            self._render_file_tabs(),
+            active=self._file_tab_index,
+            width=width,
+        )
 
     @staticmethod
     def _render_clickable_metadata_tab(
@@ -1067,9 +1180,10 @@ class MainPanel(Vertical):
     can_focus = True
     _vim_g_pending = False
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, list_search: ListSearchState, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._pane_selected = False
+        self._list_search = list_search
 
     @staticmethod
     def _page_step(height: int) -> int:
@@ -1090,7 +1204,7 @@ class MainPanel(Vertical):
         self._set_placeholder_title(selected=False)
 
     def on_click(self, event: Click) -> None:
-        cast("CondaMetadataTui", self.app)._set_selected_pane("main")
+        self.post_message(PaneSelected("main"))
         self.focus()
         event.stop()
 
@@ -1128,12 +1242,14 @@ class MainPanel(Vertical):
         )
 
     def on_focus(self) -> None:
-        app = cast("CondaMetadataTui", self.app)
-        app._set_selected_pane("main")
-        app._update_filter_indicator()
+        # The redraw is asked for separately from the selection, because the app
+        # drops a selection the focus has already moved on from while the titles
+        # and the footer still have to be redrawn for that move.
+        self.post_message(PaneSelected("main"))
+        self.post_message(FilterIndicatorChanged())
 
     def on_blur(self) -> None:
-        cast("CondaMetadataTui", self.app)._update_filter_indicator()
+        self.post_message(FilterIndicatorChanged())
 
     def set_active_section(self, index: int) -> None:
         self.query_one("#version-details-view", VersionDetailsView).set_active_section(
@@ -1273,8 +1389,7 @@ class MainPanel(Vertical):
     def on_key(self, event: Key) -> None:
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the list and app shortcuts.
-        app = cast("CondaMetadataTui", self.app)
-        if app._consume_list_search_key(event, "details"):
+        if self._list_search.consume_key(event, "details"):
             event.stop()
             return
 
@@ -1362,7 +1477,7 @@ class MainPanel(Vertical):
             event.stop()
             return
         if character == "h":
-            cast("CondaMetadataTui", self.app)._focus_sidebar()
+            self.post_message(SidebarFocusRequested())
             event.stop()
 
 
@@ -1373,11 +1488,14 @@ class CompareDetailsView(Vertical):
     def __init__(
         self,
         compare_data: VersionCompareData,
+        *,
+        list_search: ListSearchState,
     ) -> None:
         super().__init__(
             id="compare-details-view", classes="detail-view -pane-selected"
         )
         self._compare_data = compare_data
+        self._list_search = list_search
         self._active_section = 0
         self._dependency_tab_index = 0
         self._file_tab_index = 0
@@ -1449,12 +1567,16 @@ class CompareDetailsView(Vertical):
 
     def _end_search_if_scope_changed(self) -> bool:
         """Leave the ``/`` search when the list it narrows is no longer showing,
-        so a search never outlives the tab it was started on."""
+        so a search never outlives the tab it was started on.
+
+        Shows the full lists right away and lets the app catch up with the
+        footer, which is a cycle behind because the message is posted."""
         if self._filter_query is None or self._current_filter_scope() == (
             self._filter_scope
         ):
             return False
-        cast("CondaMetadataTui", self.app)._stop_list_search()
+        self.set_filter_query(None)
+        self.post_message(ListSearchEnded())
         return True
 
     def _search_query_for_file_tab(self, tab: FileTab) -> str | None:
@@ -1554,20 +1676,32 @@ class CompareDetailsView(Vertical):
         for index, section in enumerate(self.query(DetailSection)):
             section.set_active(index == self._active_section)
         self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(1).update_header(self._render_dependency_header())
-        self._section(2).update_header(self._render_file_header())
+        self._section(1).update_tab_header(self._render_dependency_header)
+        self._section(2).update_tab_header(self._render_file_header)
 
     def _refresh_sections(self) -> None:
-        self._section(0).update_header(self._render_section_header(0, "Metadata"))
-        self._section(0).update_body(self._render_metadata_body())
+        self._refresh_metadata_section()
         self._refresh_dependency_section()
         self._refresh_file_section()
         self._apply_section_state()
 
+    def _refresh_metadata_section(self) -> None:
+        section = self._section(0)
+        section.update_header(self._render_section_header(0, "Metadata"))
+        rows = self._compare_data.metadata_rows
+        if not rows:
+            section.show_empty_message(NO_COMPARE_METADATA_MESSAGE)
+            return
+        section.update_body(self._render_metadata_body())
+
     def _refresh_dependency_section(self) -> None:
+        active_tab = self._active_dependency_tab()
         section = self._section(1)
-        section.update_header(self._render_dependency_header())
-        section.update_body(self._render_dependency_body(self._active_dependency_tab()))
+        section.update_tab_header(self._render_dependency_header)
+        if not self._dependency_lines(active_tab):
+            section.show_empty_message(NO_COMPARE_DEPENDENCIES_MESSAGE)
+            return
+        section.update_body(self._render_dependency_body(active_tab))
 
     def _refresh_file_section(self) -> None:
         active_tab = self._active_file_tab()
@@ -1575,15 +1709,14 @@ class CompareDetailsView(Vertical):
         self._file_entries = {
             tab: self._file_entries_for_compare_data(tab) for tab in FILE_TABS
         }
-        section.update_header(self._render_file_header())
+        section.update_tab_header(self._render_file_header)
         entries = self._file_entries[active_tab]
         if not entries:
-            message = (
+            section.show_empty_message(
                 NO_SEARCH_MATCHES_MESSAGE
                 if self._search_query_for_file_tab(active_tab) is not None
                 else "No files listed."
             )
-            section.update_options([Option(Text(message, style="dim"))])
             return
         section.update_options(
             [Option(entry.option) for entry in entries],
@@ -1600,38 +1733,40 @@ class CompareDetailsView(Vertical):
             ),
         )
 
-    def _render_dependency_header(self) -> Text:
-        header = self._render_section_header(1, "")
-        header.append_text(self._render_dependency_tabs())
-        return header
+    def _render_dependency_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(1, ""),
+            self._render_dependency_tabs(),
+            active=self._dependency_tab_index,
+            width=width,
+        )
 
-    def _render_dependency_tabs(self) -> Text:
+    def _render_dependency_tabs(self) -> tuple[Text, ...]:
         labels = {
             "dependencies": f"Dependencies ({len(self._compare_data.dependencies)})",
             "extra_depends": f"Extra depends ({len(self._compare_data.extra_depends)})",
             "constraints": f"Constraints ({len(self._compare_data.constraints)})",
             "run_exports": f"Run exports ({len(self._compare_data.run_exports)})",
         }
-        text = Text()
-        for index, tab in enumerate(DEPENDENCY_TABS):
-            if index:
-                text.append(" - ", style=INACTIVE_TAB_STYLE)
-            text.append_text(
-                self._render_clickable_dependency_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_dependency_tab(),
-                    pane_active=self._pane_selected and self._active_section == 1,
-                )
+        return tuple(
+            self._render_clickable_dependency_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_dependency_tab(),
+                pane_active=self._pane_selected and self._active_section == 1,
             )
-        return text
+            for tab in DEPENDENCY_TABS
+        )
 
-    def _render_file_header(self) -> Text:
-        header = self._render_section_header(2, "")
-        header.append_text(self._render_file_tabs())
-        return header
+    def _render_file_header(self, width: int | None = None) -> Text:
+        return render_tab_header(
+            self._render_section_header(2, ""),
+            self._render_file_tabs(),
+            active=self._file_tab_index,
+            width=width,
+        )
 
-    def _render_file_tabs(self) -> Text:
+    def _render_file_tabs(self) -> tuple[Text, ...]:
         totals: dict[FileTab, int] = {
             "pkg": len(self._compare_data.files),
             "info": len(self._compare_data.info_files),
@@ -1646,19 +1781,15 @@ class CompareDetailsView(Vertical):
             "pkg": f"pkg/ ({counts['pkg']})",
             "info": f"info/ ({counts['info']})",
         }
-        text = Text()
-        for index, tab in enumerate(FILE_TABS):
-            if index:
-                text.append(" - ", style=INACTIVE_TAB_STYLE)
-            text.append_text(
-                VersionDetailsView._render_clickable_file_tab(
-                    tab,
-                    labels[tab],
-                    active=tab == self._active_file_tab(),
-                    pane_active=self._pane_selected and self._active_section == 2,
-                )
+        return tuple(
+            VersionDetailsView._render_clickable_file_tab(
+                tab,
+                labels[tab],
+                active=tab == self._active_file_tab(),
+                pane_active=self._pane_selected and self._active_section == 2,
             )
-        return text
+            for tab in FILE_TABS
+        )
 
     @staticmethod
     def _render_clickable_dependency_tab(
@@ -1686,18 +1817,16 @@ class CompareDetailsView(Vertical):
             return self._compare_data.constraints
         return self._compare_data.run_exports
 
-    def _render_metadata_body(self) -> RenderableType:
-        return self._render_compare_table(
+    def _render_metadata_body(self) -> Table:
+        return render_compare_table(
             self._compare_data.metadata_rows,
             label_title="Field",
-            empty_message="No metadata available.",
             show_label_column=True,
         )
 
-    def _render_dependency_body(self, tab: DependencyTab) -> RenderableType:
-        return self._render_compare_table(
+    def _render_dependency_body(self, tab: DependencyTab) -> Table:
+        return render_compare_table(
             self._dependency_lines(tab),
-            empty_message="No dependency data.",
             show_label_column=tab == "extra_depends",
             label_title="Extra",
         )
@@ -1842,26 +1971,10 @@ class CompareDetailsView(Vertical):
             "#compare-option-list-2", DetailOptionList
         ).highlighted = highlighted
 
-    def _render_compare_table(
-        self,
-        rows: tuple[CompareRow, ...],
-        *,
-        empty_message: str,
-        show_label_column: bool,
-        label_title: str = "",
-    ) -> RenderableType:
-        return render_compare_table(
-            rows,
-            empty_message=empty_message,
-            show_label_column=show_label_column,
-            label_title=label_title,
-        )
-
     def on_key(self, event: Key) -> None:
         # While the ``/`` search is on it gets the printable keys first, so the
         # query is typed instead of triggering the pane shortcuts.
-        app = cast("CondaMetadataTui", self.app)
-        if app._consume_list_search_key(event, "compare"):
+        if self._list_search.consume_key(event, "compare"):
             event.stop()
             return
 
@@ -1958,16 +2071,22 @@ class CompareScreen(Screen[None]):
         Binding("q", "quit", show=False),
     ]
 
-    def __init__(self, compare_data: VersionCompareData) -> None:
+    def __init__(
+        self,
+        compare_data: VersionCompareData,
+        *,
+        list_search: ListSearchState,
+    ) -> None:
         super().__init__()
         self._compare_data = compare_data
+        self._list_search = list_search
         # ``None`` while the ``/`` search is off, so the footer keeps its hints.
         self._filter_query: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="compare-root"):
             yield Static(self._title_text(), id="compare-title", markup=False)
-            yield CompareDetailsView(self._compare_data)
+            yield CompareDetailsView(self._compare_data, list_search=self._list_search)
             yield Static(self._footer_text(), id="compare-footer", markup=False)
 
     def on_mount(self) -> None:
@@ -2125,9 +2244,9 @@ class CompareScreen(Screen[None]):
 
 class SidebarPanel(Vertical):
     def on_click(self, event: Click) -> None:
-        app = cast("CondaMetadataTui", self.app)
-        app._set_selected_pane("sidebar")
-        app.query_one("#sidebar-list").focus()
+        # The package list has no focus handler of its own to claim the pane, so
+        # the app both selects the sidebar and focuses the list.
+        self.post_message(SidebarFocusRequested())
         event.stop()
 
 

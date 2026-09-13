@@ -133,6 +133,22 @@ def test_compare_screen_tab_activates_dependencies(
     )
 
 
+def test_compare_screen_reports_an_empty_dependency_tab(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """A tab neither build has anything in shows a dimmed message instead of a
+    table with nothing under its headers."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_compare_screen(pilot)
+        await pilot.press("2", "]")
+        await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
 def test_compare_screen_shift_tab_activates_files(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:

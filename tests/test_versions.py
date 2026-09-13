@@ -70,6 +70,7 @@ from pixi_browse.tui import (
     Empty,
     FileActionScreen,
     FilePreviewScreen,
+    ListSearchState,
     MainPanel,
     MatchSpecScreen,
     VersionDetailsView,
@@ -87,6 +88,7 @@ from pixi_browse.tui.widgets import (
     DetailOptionList,
     FileActionOption,
     render_repodata_patches_body,
+    render_tab_header,
 )
 
 
@@ -496,13 +498,6 @@ def test_render_repodata_patches_body_shows_unpatched_and_patched_columns() -> N
     assert cast(Text, table.columns[2]._cells[0]).plain == "MIT"
     assert cast(Text, table.columns[2]._cells[0]).style == "green"
     assert cast(Text, table.columns[2]._cells[1]).plain == "requests"
-
-
-def test_render_repodata_patches_body_explains_empty_state() -> None:
-    unpatched = cast(Text, render_repodata_patches_body(RepodataPatchDiff()))
-
-    assert unpatched.plain == "No repodata patches."
-    assert unpatched.style == "dim"
 
 
 def test_build_version_artifact_data_includes_package_paths() -> None:
@@ -1569,7 +1564,7 @@ def test_compare_details_view_uses_detail_sections_with_selected_pane_class() ->
         run_exports=(),
         files=(),
     )
-    view = CompareDetailsView(compare_data)
+    view = CompareDetailsView(compare_data, list_search=ListSearchState(lambda: None))
     sections = list(view.compose())
 
     assert "-pane-selected" in view.classes
@@ -1614,6 +1609,78 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
         and span.style.meta.get("@click") == ("select_metadata_tab", ("patches",))
         for span in header.spans
     )
+
+
+def _tab_labels(*labels: str) -> tuple[Text, ...]:
+    return tuple(Text(label) for label in labels)
+
+
+def test_tab_header_shows_every_tab_when_they_all_fit() -> None:
+    tabs = _tab_labels("Dependencies (6)", "Extra depends (0)", "Constraints (0)")
+    strip = "[2] Dependencies (6) - Extra depends (0) - Constraints (0)"
+
+    header = render_tab_header(Text("[2] "), tabs, active=2, width=len(strip))
+
+    assert header.plain == strip
+
+
+def test_tab_header_shows_every_tab_when_the_width_is_unknown() -> None:
+    tabs = _tab_labels("pkg/ (21)", "info/ (11)")
+
+    header = render_tab_header(Text("[3] "), tabs, active=1, width=None)
+
+    assert header.plain == "[3] pkg/ (21) - info/ (11)"
+
+
+def test_tab_header_clips_leading_tabs_until_the_active_one_fits() -> None:
+    """A section too narrow for the whole strip drops tabs from its left end, so
+    that the tab it shows stays readable instead of being truncated away."""
+    tabs = _tab_labels(
+        "Dependencies (6)",
+        "Extra depends (0)",
+        "Constraints (0)",
+        "Run exports (2)",
+    )
+
+    header = render_tab_header(Text("[2] "), tabs, active=2, width=30)
+
+    assert header.plain == "[2] …Constraints (0) - Run exports (2)"
+
+
+def test_tab_header_clips_no_more_tabs_than_the_active_one_needs() -> None:
+    tabs = _tab_labels(
+        "Dependencies (6)",
+        "Extra depends (0)",
+        "Constraints (0)",
+        "Run exports (2)",
+    )
+
+    header = render_tab_header(Text("[2] "), tabs, active=1, width=30)
+
+    assert header.plain == "[2] …Extra depends (0) - Constraints (0) - Run exports (2)"
+
+
+def test_tab_header_keeps_a_cell_for_the_ellipsis_textual_truncates_with() -> None:
+    """Textual ends a border title that does not fit with an ellipsis of its own,
+    so the active tab has to end one cell before the width."""
+    tabs = _tab_labels("Metadata", "Repodata patches (2)")
+
+    assert (
+        render_tab_header(Text("[1] "), tabs, active=1, width=35).plain
+        == "[1] Metadata - Repodata patches (2)"
+    )
+    assert (
+        render_tab_header(Text("[1] "), tabs, active=1, width=34).plain
+        == "[1] …Repodata patches (2)"
+    )
+
+
+def test_tab_header_never_clips_the_first_tab_away() -> None:
+    tabs = _tab_labels("Metadata", "Repodata patches (2)")
+
+    header = render_tab_header(Text("[1] "), tabs, active=0, width=8)
+
+    assert header.plain == "[1] Metadata - Repodata patches (2)"
 
 
 def test_dependency_header_does_not_render_legacy_shortcut_hint() -> None:
@@ -1672,7 +1739,8 @@ def test_compare_table_keeps_unchanged_rows_neutral_and_colors_changed_rows() ->
             constraints=(),
             run_exports=(),
             files=(),
-        )
+        ),
+        list_search=ListSearchState(lambda: None),
     )
 
     table = cast(Table, view._render_metadata_body())
@@ -1728,7 +1796,8 @@ def test_compare_dependency_table_uses_two_columns_with_blank_missing_values() -
             constraints=(),
             run_exports=(),
             files=(),
-        )
+        ),
+        list_search=ListSearchState(lambda: None),
     )
 
     table = cast(Table, view._render_dependency_body("dependencies"))
@@ -1801,7 +1870,8 @@ def test_compare_file_section_renders_option_list_rows_with_status_colors() -> N
                             changed=True,
                         ),
                     ),
-                )
+                ),
+                list_search=ListSearchState(lambda: None),
             )
             app.push_screen(screen)
             await pilot.pause()
@@ -2129,7 +2199,8 @@ def test_compare_screen_renders_footer_with_keybinds() -> None:
                     constraints=(),
                     run_exports=(),
                     files=(),
-                )
+                ),
+                list_search=ListSearchState(lambda: None),
             )
             app.push_screen(screen)
             await pilot.pause()

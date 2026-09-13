@@ -1,0 +1,50 @@
+# GitHub's automatically generated release notes. Categories mirror the labels
+# the release-drafter autolabeler derives from conventional commit PR titles,
+# so both changelog generators produce the same grouping.
+changelog:
+  exclude:
+    labels:
+      - ignore for release
+  categories:
+    - title: ⚠️ Breaking Changes
+      labels:
+        - breaking
+    - title: ✨ New Features
+      labels:
+        - enhancement
+    - title: 🐞 Bug Fixes
+      labels:
+        - fix
+    - title: 🏎️ Performance Improvements
+      labels:
+        - performance
+    - title: 📚 Documentation
+      labels:
+        - documentation
+    - title: ⬆️ Dependencies
+      labels:
+        - dependencies
+    - title: 🏗️ Testing
+      labels:
+        - test
+    - title: ⚙️ Automation
+      labels:
+        - ci
+    - title: 🛠 Builds
+      labels:
+        - build
+    - title: 💎 Code Style
+      labels:
+        - style
+    - title: 📦 Refactorings
+      labels:
+        - refactor
+    - title: ♻️ Chores
+      labels:
+        - chore
+    - title: 🗑 Reverts
+      labels:
+        - revert
+    - title: 🤷🏻 Other Changes
+      labels:
+        - "*"

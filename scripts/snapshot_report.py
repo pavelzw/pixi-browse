@@ -26,6 +26,36 @@ SNAPSHOT_DIRECTORY = PurePosixPath("tests/__snapshots__")
 # Git's status for a rename whose content is byte for byte the same.
 RENAMED_UNCHANGED = "R100"
 
+# Anchors in pytest-textual-snapshot's report template that we extend with a
+# switch flipping every snapshot into its diff view at once.
+SUMMARY_ANCHOR = '<div class="w-100 d-flex gap-1 justify-content-end mb-1 mt-2">'
+BODY_ANCHOR = "</body>"
+
+TOGGLE_ALL_SWITCH = """\
+<div class="form-check form-switch me-3">
+    <input class="form-check-input" type="checkbox" role="switch" id="toggle-all-diffs"
+           onchange="toggleAllOverlays(this.checked)">
+    <label class="form-check-label text-muted" for="toggle-all-diffs">
+        Show all differences
+    </label>
+</div>
+"""
+
+TOGGLE_ALL_SCRIPT = """\
+<script type="application/javascript">
+    function toggleAllOverlays(show) {
+        for (const overlay of document.querySelectorAll(".diff-wrapper-actual")) {
+            overlay.hidden = !show
+        }
+        // Keep the per-snapshot switches in step, so that flipping one of them
+        // afterwards still hides the overlay it belongs to.
+        for (const switch_ of document.querySelectorAll('.card-header input[role="switch"]')) {
+            switch_.checked = show
+        }
+    }
+</script>
+"""
+
 
 @dataclass(frozen=True)
 class SnapshotChange:
@@ -237,6 +267,20 @@ def build_diffs(
     return diffs
 
 
+def add_toggle_all_switch(report: Path) -> None:
+    """Add a switch that shows the diff view of every snapshot at once."""
+    html = report.read_text()
+    for anchor in (SUMMARY_ANCHOR, BODY_ANCHOR):
+        if anchor not in html:
+            raise SystemExit(
+                f"Could not find {anchor!r} in {report}; the report template of "
+                "pytest-textual-snapshot changed."
+            )
+    html = html.replace(SUMMARY_ANCHOR, SUMMARY_ANCHOR + TOGGLE_ALL_SWITCH, 1)
+    html = html.replace(BODY_ANCHOR, TOGGLE_ALL_SCRIPT + BODY_ANCHOR, 1)
+    report.write_text(html)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate snapshot_report.html by comparing Git revisions."
@@ -268,6 +312,7 @@ def main() -> None:
     session = cast("Session", ReportSession(args.output))
     num_snapshots_passing = unchanged_svg_snapshot_count(changes, args.head)
     save_svg_diffs(diffs, session, num_snapshots_passing=num_snapshots_passing)
+    add_toggle_all_switch(args.output)
     print(f"Wrote {args.output} with {len(diffs)} changed snapshot(s).")
 
 
