@@ -79,8 +79,8 @@ def test_versions_view_groups_subdirs_by_latest_version(
 def test_filter_narrows_package_list(
     snap_compare: SnapCompare, make_app: AppFactory
 ) -> None:
-    """Typing ``six`` into the ``/`` search narrows the package list to fuzzy
-    matches and previews the best one."""
+    """Typing ``six`` into the ``/`` search narrows the package list to the
+    packages containing it and previews the best match."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
