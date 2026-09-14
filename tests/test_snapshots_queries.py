@@ -1073,6 +1073,23 @@ def test_switching_channels_shows_the_loading_screen(
     )
 
 
+def test_apply_adds_the_channel_still_typed_in_the_field(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Apply`` with ``bioconda`` typed but not yet added with ``Enter`` loads
+    it next to ``conda-forge``: the package list gains ``pyfaidx``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await type_text(pilot, BIOCONDA_CHANNEL)
+        await apply_channels(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
 def test_switching_to_unreachable_channel_shows_the_failure_screen(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:

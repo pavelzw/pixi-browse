@@ -171,7 +171,7 @@ MatchSpec and who-needs queries run against all of them.
 | -------------------- | ---------------------------------------------------- |
 | Text field           | Type a channel name or URL, `Enter` adds it          |
 | `✕` button           | Remove that channel (the last one cannot be removed) |
-| `Apply` button       | Load the listed channels                             |
+| `Apply` button       | Load the listed channels and the one typed, if any   |
 | `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
 | `Esc`                | Cancel                                               |
 

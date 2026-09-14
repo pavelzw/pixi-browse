@@ -2286,8 +2286,9 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     The selected channels are listed with a ``✕`` button each; the field below
     adds the typed channel to the list on ``Enter``. Nothing is loaded until
-    ``Apply`` is pressed, and ``Escape`` drops every edit. At least one channel
-    always stays, so the app never ends up without anything to show.
+    ``Apply`` is pressed, which also takes a channel still sitting in the
+    field, and ``Escape`` drops every edit. At least one channel always stays,
+    so the app never ends up without anything to show.
 
     ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
     field, ``Apply``. ``Tab`` cycles the same widgets.
@@ -2502,6 +2503,11 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     @on(Button.Pressed, "#channel-apply")
     def _apply_pressed(self, event: Button.Pressed) -> None:
         event.stop()
+        # A channel typed but not yet added with Enter is meant as well; one
+        # that is already listed needs no second entry.
+        typed = self.query_one("#channel-input", Input).value.strip()
+        if typed and typed not in self._channel_names:
+            self._channel_names.append(typed)
         self.dismiss(list(self._channel_names))
 
     async def action_dismiss(self, result: list[str] | None = None) -> None:
