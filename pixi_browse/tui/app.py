@@ -2900,13 +2900,7 @@ class CondaMetadataTui(App[None]):
             # regular focus chain, which this priority binding would swallow.
             self.screen.focus_next()
             return
-        if self._mode != "versions":
-            return
-        if not self._main_panel_shows_version_details():
-            return
-        if not self._main_panel_is_focused():
-            return
-        self._cycle_active_main_section(1)
+        self._tab_between_sections(1)
 
     def action_backtab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):
@@ -2916,13 +2910,26 @@ class CondaMetadataTui(App[None]):
         if isinstance(self.screen, ModalScreen):
             self.screen.focus_previous()
             return
+        self._tab_between_sections(-1)
+
+    def _tab_between_sections(self, direction: int) -> None:
+        """Tab and Shift+Tab in the versions view.
+
+        From the sidebar they move to the details panel, at whichever of its
+        sections is active, so that the next presses cycle through ``[1]``,
+        ``[2]`` and ``[3]`` from there. The sidebar itself is not part of that
+        cycle: ``0``, ``h`` and ``Escape`` lead back to it.
+        """
         if self._mode != "versions":
             return
         if not self._main_panel_shows_version_details():
             return
+        if self._sidebar_is_focused():
+            self._focus_main_panel()
+            return
         if not self._main_panel_is_focused():
             return
-        self._cycle_active_main_section(-1)
+        self._cycle_active_main_section(direction)
 
     def action_quit_or_type_q(self) -> None:
         if self._mode == "packages" and self._filter_mode:

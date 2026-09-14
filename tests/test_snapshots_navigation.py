@@ -314,14 +314,33 @@ def test_shift_tab_cycles_sections_backwards(
     )
 
 
-def test_tab_in_sidebar_does_not_move_focus(
-    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+@pytest.mark.parametrize("key", ["tab", "shift+tab"])
+def test_tab_in_sidebar_focuses_the_active_section(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory, key: str
 ) -> None:
-    """Textual's default focus cycling is suppressed in the versions view."""
+    """``Tab`` and ``Shift+Tab`` move from the version list to the details
+    panel, at the section that was active there (``[2]``), instead of cycling
+    past it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
-        await pilot.press("tab", "shift+tab")
+        await pilot.press("2", "0", key)
+        await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_tab_cycles_sections_after_entering_from_sidebar(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Once ``Tab`` has moved to the details panel, the next ``Tab`` cycles on
+    from the active section ``[2]`` to the file section ``[3]``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("2", "0", "tab", "tab")
         await pilot.pause()
 
     assert snap_compare_palettes(
