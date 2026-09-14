@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_format_version_details_metadata_lines_for_a_tiny_legacy_record
+  tuple(
+    'Package               demo',
+    'Name                  demo',
+    'Version               1.2.3',
+    'Build                 py313h123_0',
+    'Build Number          0',
+    'Subdir                noarch',
+    'File Name             demo-1.2.3-py313h123_0.conda',
+    'Channel               https://conda.anaconda.org/conda-forge/',
+    'Size                  512 B',
+    'Timestamp             2026-01-01T00:00:00+00:00',
+    'License               BSD-3-Clause',
+    'License Family        BSD',
+    'Arch                  x86_64',
+    'Platform              linux',
+    'NoArch                none',
+    'Features              nomkl',
+    'Track Features        nomkl, debug',
+    'Python Site-Packages  lib/python3.13/site-packages',
+    'MD5                   00112233445566778899aabbccddeeff',
+    'SHA256                00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+    'Legacy .tar.bz2 MD5   ffeeddccbbaa99887766554433221100',
+    'Legacy .tar.bz2 Size  900 B',
+    "Package URL           [@click=app.open_external_url('https://example.invalid/demo-1.2.3-py313h123_0.conda')]https://example.invalid/demo-1.2.3-py313h123_0.conda[/]",
+    "Provenance            [@click=app.open_external_url('https://gitlab.com/example/demo-feedstock.git')]https://gitlab.com/example/demo-feedstock.git@0123456789abcdef[/]",
+  )
+# ---

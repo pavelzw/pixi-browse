@@ -208,3 +208,18 @@ def test_file_preview_renders_info_about_json(
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
+
+
+def test_help_screen_closes_with_question_mark(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """A second ``?`` closes the help overlay again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("question_mark", "question_mark")
+        await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
