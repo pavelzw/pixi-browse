@@ -55,15 +55,6 @@ class PlatformDiscoveryProgress:
 DiscoveryProgressCallback = Callable[[PlatformDiscoveryProgress], None]
 
 
-def sharded_repodata_disabled(config: Config) -> bool:
-    """Whether ``repodata-config.disable-sharded`` is set for every channel.
-
-    py-rattler exposes the repodata configuration as an untyped mapping, so
-    only an explicit ``True`` counts. Per-channel overrides are not consulted.
-    """
-    return config.repodata_config.get("disable-sharded") is True
-
-
 def whoneeds_target_label(target: str | PackageRecord) -> str:
     if isinstance(target, str):
         return target

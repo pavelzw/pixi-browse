@@ -70,7 +70,6 @@ from pixi_browse.repodata import (
     query_matchspec_records,
     query_package_records,
     query_whoneeds_records,
-    sharded_repodata_disabled,
     whoneeds_target_label,
 )
 from pixi_browse.search import substring_filter, substring_position
@@ -153,7 +152,6 @@ class CondaMetadataTui(App[None]):
         self._gateway: Gateway = create_gateway(
             client=self._client, config=config, cache_dir=cache_dir
         )
-        self._sharded_disabled = sharded_repodata_disabled(config)
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
@@ -238,10 +236,7 @@ class CondaMetadataTui(App[None]):
 
     async def _load_startup(self) -> None:
         """Load the startup channels behind the repodata loading screen."""
-        loading_screen = RepodataLoadingScreen(
-            channel_names=self._channel_names,
-            sharded_disabled=self._sharded_disabled,
-        )
+        loading_screen = RepodataLoadingScreen(channel_names=self._channel_names)
         self.push_screen(loading_screen, self._handle_repodata_loading_result)
         load_error = await self._load_packages(loading_screen=loading_screen)
         if load_error is not None:

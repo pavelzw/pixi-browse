@@ -2908,12 +2908,12 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
     load runs in a worker and this screen covers the still empty main screen
     in the meantime. It shows the platforms found so far, the ones still being
     checked, how far the probing has come and for how long it has been
-    running. Without sharded repodata the first load of a channel downloads
-    the complete ``repodata.json`` of every subdir, which takes minutes.
+    running; without sharded repodata that can take minutes.
 
     The keys that open dialogs over the package list (which does not exist
     yet) are swallowed here; ``q`` still quits. A failed load stays on this
-    screen with the error and offers ``c`` to pick other channels.
+    screen with the error and offers ``c`` to pick other channels; closing it
+    any other way would leave the app without a package list.
     """
 
     DEFAULT_CSS = """
@@ -2973,9 +2973,9 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
     BINDINGS = [
         Binding("q", "quit_app", show=False),
         Binding("c", "switch_channels", show=False),
-        Binding("escape", "close_if_failed", show=False),
         # The app binds these to dialogs over the package list; while the list
         # is still loading (or failed to load) they have nothing to act on.
+        Binding("escape", "ignore", show=False),
         Binding("p", "ignore", show=False),
         Binding("C", "ignore", show=False),
         Binding("m", "ignore", show=False),
@@ -2986,10 +2986,9 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
 
     _PLATFORM_COLUMNS = 3
 
-    def __init__(self, *, channel_names: Sequence[str], sharded_disabled: bool) -> None:
+    def __init__(self, *, channel_names: Sequence[str]) -> None:
         super().__init__()
         self._channel_names = list(channel_names)
-        self._sharded_disabled = sharded_disabled
         self._progress: PlatformDiscoveryProgress | None = None
         self._collecting_names_for: int | None = None
         self._failed = False
@@ -3021,7 +3020,11 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
                 ),
                 id="repodata-loading-title",
             )
-            yield Static(self._help_text(), id="repodata-loading-help")
+            yield Static(
+                "Fetching the repodata of every platform. The first load can "
+                "take a while; later loads come from the cache.",
+                id="repodata-loading-help",
+            )
             yield Static("", id="repodata-loading-platforms")
             yield ProgressBar(show_eta=False, id="repodata-loading-bar")
             yield Static("", id="repodata-loading-status")
@@ -3035,25 +3038,6 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
         self._render_dialog()
         if not self._failed:
             self._elapsed_timer = self.set_interval(1.0, self.refresh_elapsed)
-
-    def _help_text(self) -> str:
-        if self._sharded_disabled:
-            return (
-                "Sharded repodata is disabled in the configuration, so the "
-                "complete repodata.json of every subdir is downloaded and "
-                "parsed. The first load can take minutes; later loads come "
-                "from the cache."
-            )
-        subject = (
-            "the channel serves"
-            if len(self._channel_names) == 1
-            else "the channels serve"
-        )
-        return (
-            f"Checking which platforms {subject} repodata for. A channel "
-            "without sharded repodata takes a while on the first load; later "
-            "loads come from the cache."
-        )
 
     def report_discovery(self, progress: PlatformDiscoveryProgress) -> None:
         """Show the platform discovery at ``progress``."""
@@ -3104,7 +3088,7 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
         self.query_one("#repodata-loading-bar", ProgressBar).display = False
         self.query_one("#repodata-loading-status", Static).display = False
         self.query_one("#repodata-loading-hint", Static).update(
-            "c to change channels · Esc to close · q to quit"
+            "c to change channels · q to quit"
         )
 
     def _render_platforms(self) -> None:
@@ -3172,10 +3156,6 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
     def action_switch_channels(self) -> None:
         if self._failed:
             self.dismiss("channels")
-
-    def action_close_if_failed(self) -> None:
-        if self._failed:
-            self.dismiss(None)
 
     def action_ignore(self) -> None:
         return None
