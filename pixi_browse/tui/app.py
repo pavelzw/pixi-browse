@@ -101,6 +101,7 @@ from .widgets import (
     HelpScreen,
     MainPanel,
     MatchSpecScreen,
+    QueryLeaveConfirmScreen,
     SidebarPanel,
     WhoNeedsConfirmChoice,
     WhoNeedsConfirmScreen,
@@ -1058,7 +1059,7 @@ class CondaMetadataTui(App[None]):
                 ("gg / G", "Jump to top / bottom"),
                 ("Ctrl+u / Ctrl+d", "Page up / down"),
                 ("Enter", "Open / select"),
-                ("Esc", "Back or close current overlay"),
+                ("Esc", "Back, leave query result, or close overlay"),
             ],
         )
         app = self._format_help_section(
@@ -2941,6 +2942,38 @@ class CondaMetadataTui(App[None]):
 
         if self._filter_mode:
             self._set_filter_mode(False, reset_query=True)
+            return
+
+        if self._query_is_active():
+            self._open_query_leave_confirm_screen()
+
+    def _query_is_active(self) -> bool:
+        return bool(self._matchspec_query) or self._whoneeds_target is not None
+
+    def _active_query_label(self) -> str:
+        if self._matchspec_query:
+            return f"MatchSpec: {self._matchspec_query}"
+        if self._whoneeds_target is not None:
+            return f"Who needs: {whoneeds_target_label(self._whoneeds_target)}"
+        return ""
+
+    def _open_query_leave_confirm_screen(self) -> None:
+        self.push_screen(
+            QueryLeaveConfirmScreen(self._active_query_label()),
+            self._handle_query_leave_confirmation,
+        )
+
+    def _handle_query_leave_confirmation(self, leave: bool | None) -> None:
+        if not leave:
+            return
+        # Clearing the MatchSpec restores the full package list, whichever of
+        # the two queries is active.
+        self.run_worker(
+            self._apply_matchspec_query(None),
+            group="matchspec-selection",
+            exclusive=True,
+            exit_on_error=False,
+        )
 
     def on_key(self, event: Key) -> None:
         if event.key == "w":

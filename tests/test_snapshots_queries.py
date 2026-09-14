@@ -7,7 +7,7 @@ from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 from textual.pilot import Pilot
 
-from pixi_browse.tui import ChannelScreen, MatchSpecScreen
+from pixi_browse.tui import ChannelScreen, MatchSpecScreen, QueryLeaveConfirmScreen
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
@@ -329,6 +329,78 @@ def test_dependency_matchspec_query_opens_dependency_versions(
     )
 
 
+def test_escape_in_matchspec_result_asks_before_leaving(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in a MatchSpec result asks before dropping the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_confirmed_leaves_matchspec_result_for_all_packages(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Confirming the prompt drops the MatchSpec and lists every package again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_on_leave_prompt_keeps_matchspec_result(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` on the prompt itself keeps the MatchSpec result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_from_query_versions_returns_to_query_result(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in the versions a query opened goes back to the query result
+    first, without asking; only the next ``Escape`` leaves the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(
+            default_matchspec=MatchSpec("libzlib >=1.3.2", exact_names_only=False)
+        ),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
 # --- who needs ----------------------------------------------------------------
 
 
@@ -482,6 +554,41 @@ def test_whoneeds_for_artifact_lists_its_exact_dependents(
         await wait_for_idle(pilot)
         await pilot.press("w")
         await pilot.pause()
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_in_whoneeds_result_asks_before_leaving(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in a who-needs result asks before dropping the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "libzlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_confirmed_leaves_whoneeds_result_for_all_packages(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Confirming the prompt drops the who-needs target and lists every
+    package again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "libzlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
