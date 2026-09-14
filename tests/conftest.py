@@ -48,11 +48,13 @@ from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     GatewayFactory,
+    HeldSubdirRequestHandler,
     PaletteScreenshotApp,
     PaletteSVGImageExtension,
     PilotHook,
     RangeRequestHandler,
     SnapComparePalettes,
+    SubdirHold,
     report_palette_comparison,
     still_cursors_after,
 )
@@ -95,10 +97,9 @@ def channel_server(fixture_channels_dir: Path) -> Iterator[str]:
         server.server_close()
 
 
-@pytest.fixture(scope="session")
-def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
-    """Configure the test channels to be served from the local server
-    under the URLs the app resolves their names to."""
+def mirrored_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
+    """Configure the test channels to be served from ``channel_server`` under
+    the URLs the app resolves their names to."""
     mirrors = {
         f"{channel_url}/": [f"{channel_server}{channel_name}/"]
         for channel_name, channel_url in channel_manifest.channels.items()
@@ -110,6 +111,40 @@ def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Co
     config = Config()
     config.set("mirrors", json.dumps(mirrors))
     return config
+
+
+@pytest.fixture(scope="session")
+def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
+    return mirrored_config(channel_manifest, channel_server)
+
+
+@pytest.fixture
+def stalled_linux64_config(
+    channel_manifest: ChannelManifest, fixture_channels_dir: Path
+) -> Iterator[Config]:
+    """A configuration whose ``conda-forge`` mirror never answers for
+    ``linux-64`` while the test runs.
+
+    Every other subdir is served as usual, so the app gets as far as the
+    startup loading screen with all probes but one finished and stays there:
+    the state a slow, unsharded channel leaves a user in for minutes. The
+    held requests are released when the test ends.
+    """
+    hold = SubdirHold(MAIN_CHANNEL, "linux-64")
+    handler = partial(
+        HeldSubdirRequestHandler, directory=str(fixture_channels_dir), hold=hold
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield mirrored_config(
+            channel_manifest, f"http://127.0.0.1:{server.server_port}/"
+        )
+    finally:
+        hold.release.set()
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.fixture(scope="session")
@@ -141,12 +176,13 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
         default_channels: Iterable[str] = (MAIN_CHANNEL,),
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
+        config: Config | None = None,
     ) -> CondaMetadataTui:
         return PaletteScreenshotApp(
             default_channels=default_channels,
             default_platforms=default_platforms,
             default_matchspec=default_matchspec,
-            config=rattler_config,
+            config=config if config is not None else rattler_config,
             cache_dir=rattler_cache_dir,
         )
 

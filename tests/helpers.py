@@ -8,6 +8,7 @@ import io
 import os
 import pickle
 import re
+import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from http import HTTPStatus
@@ -207,6 +208,36 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         return io.BytesIO(body)
 
 
+class SubdirHold:
+    """Holds every response of one channel's subdir until released.
+
+    Requests for other paths are served straight away, so a channel served
+    through ``HeldSubdirRequestHandler`` loads completely except for that one
+    subdir: the app stays on its startup loading screen with every other probe
+    finished, which is a stable state to screenshot or press keys in.
+    """
+
+    def __init__(self, channel_name: str, subdir: str) -> None:
+        self.path_prefix = f"/{channel_name}/{subdir}/"
+        self.release = threading.Event()
+
+    def holds(self, path: str) -> bool:
+        return path.startswith(self.path_prefix)
+
+
+class HeldSubdirRequestHandler(RangeRequestHandler):
+    """``RangeRequestHandler`` that parks the requests of one subdir."""
+
+    def __init__(self, *args: Any, hold: SubdirHold, **kwargs: Any) -> None:
+        self._hold = hold
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self) -> None:  # noqa: N802 - the http.server hook name
+        if self._hold.holds(self.path):
+            self._hold.release.wait()
+        super().do_GET()
+
+
 class PaletteScreenshotApp(CondaMetadataTui):
     """The app under test, screenshotted with every palette in a single run.
 
@@ -342,11 +373,12 @@ async def still_cursors_after(run_before: PilotHook | None, pilot: Pilot[None]) 
 async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
     """Wait until the app finished loading repodata and all workers are done.
 
-    ``on_mount`` awaits the initial repodata load and the previews run in
-    Textual workers, so a snapshot must wait for both before it is stable.
-    Modal screens (query prompts, the who-needs loading screen, ...) may be on
-    top of the main screen while waiting, so the widgets are looked up on the
-    main screen rather than on whatever screen is active.
+    The initial repodata load runs in a Textual worker behind the repodata
+    loading screen and the previews run in workers too, so a snapshot must
+    wait for all of them before it is stable. Modal screens (the loading
+    screen, query prompts, the who-needs loading screen, ...) may be on top of
+    the main screen while waiting, so the widgets are looked up on the main
+    screen rather than on whatever screen is active.
     """
     app = pilot.app
     assert isinstance(app, CondaMetadataTui)
@@ -384,6 +416,23 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
             "app workers failed: "
             + "; ".join(f"{worker.group}: {worker.error!r}" for worker in failed)
         )
+
+
+async def wait_until(
+    pilot: Pilot[None],
+    condition: Callable[[], bool],
+    *,
+    what: str,
+    timeout: float = 10.0,
+) -> None:
+    """Pump the app until ``condition`` holds; ``what`` names it in the timeout."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"waited {timeout}s for {what}")
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+    await pilot.pause()
 
 
 async def wait_for_screen(

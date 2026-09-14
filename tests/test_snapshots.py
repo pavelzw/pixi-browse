@@ -13,15 +13,22 @@ query prompts, the compare screen and the file actions the same way.
 
 from __future__ import annotations
 
+from time import monotonic
+
+from rattler.config import Config
 from textual.pilot import Pilot
 
+from pixi_browse.tui.widgets import RepodataLoadingScreen
 from tests.helpers import (
+    MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
     SnapComparePalettes,
     open_versions,
     type_text,
     wait_for_idle,
+    wait_for_screen,
+    wait_until,
 )
 
 
@@ -31,6 +38,61 @@ def test_packages_view_lists_channel_packages(
     """Startup: the sidebar lists the packages and previews the first one."""
     assert snap_compare_palettes(
         make_app(), run_before=wait_for_idle, terminal_size=TERMINAL_SIZE
+    )
+
+
+async def loading_screen(pilot: Pilot[None]) -> RepodataLoadingScreen:
+    """The startup loading screen, once it is on top."""
+    await wait_for_screen(pilot, RepodataLoadingScreen)
+    screen = pilot.app.screen
+    assert isinstance(screen, RepodataLoadingScreen)
+    return screen
+
+
+def test_startup_loading_screen_reports_progress(
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    stalled_linux64_config: Config,
+) -> None:
+    """Startup: while ``linux-64`` is still downloading, the loading screen
+    lists the platforms found so far and the pending one, and counts the
+    probed subdirs. The elapsed time is wall-clock time, pinned to 31s for the
+    screenshot."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        screen = await loading_screen(pilot)
+        await wait_until(
+            pilot,
+            lambda: (
+                screen.progress is not None
+                and screen.progress.probes_completed == screen.progress.probes_total - 1
+            ),
+            what="every probe but linux-64 to finish",
+        )
+        screen.started_at = monotonic() - 31
+        screen.refresh_elapsed()
+
+    assert snap_compare_palettes(
+        make_app(config=stalled_linux64_config),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_startup_failure_stays_on_loading_screen(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Starting with a channel that has no repodata: the loading screen shows
+    the error and offers to pick other channels."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        screen = await loading_screen(pilot)
+        await wait_until(pilot, lambda: screen.failed, what="the load to fail")
+
+    assert snap_compare_palettes(
+        make_app(default_channels=(MISSING_CHANNEL,)),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
     )
 
 

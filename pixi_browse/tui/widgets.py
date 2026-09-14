@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import PackageName
+from rattler.platform import Platform
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -20,8 +21,16 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
+from textual.timer import Timer
 from textual.widget import Widget
-from textual.widgets import Button, Input, LoadingIndicator, OptionList, Static
+from textual.widgets import (
+    Button,
+    Input,
+    LoadingIndicator,
+    OptionList,
+    ProgressBar,
+    Static,
+)
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
@@ -41,6 +50,7 @@ from pixi_browse.rendering import (
     format_version_details_metadata_lines,
     format_version_details_run_exports,
 )
+from pixi_browse.repodata import PlatformDiscoveryProgress, channels_label
 from pixi_browse.search import substring_filter
 from pixi_browse.tui.list_search import ListSearchState
 from pixi_browse.tui.messages import (
@@ -2884,6 +2894,291 @@ class WhoNeedsLoadingScreen(ModalScreen[None]):
         self.query_one("#whoneeds-loading-elapsed", Static).update(
             Text(f"Elapsed {elapsed:.0f}s", style="dim")
         )
+
+
+RepodataLoadingResult = Literal["channels"] | None
+"""How the repodata loading screen was closed: ``"channels"`` asks the app to
+open the channel selector after a failed load, ``None`` closes it."""
+
+
+class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
+    """Modal shown while the startup repodata load runs.
+
+    Textual only starts handling keys once ``on_mount`` has returned, so the
+    load runs in a worker and this screen covers the still empty main screen
+    in the meantime. It shows the platforms found so far, the ones still being
+    checked, how far the probing has come and for how long it has been
+    running. Without sharded repodata the first load of a channel downloads
+    the complete ``repodata.json`` of every subdir, which takes minutes.
+
+    The keys that open dialogs over the package list (which does not exist
+    yet) are swallowed here; ``q`` still quits. A failed load stays on this
+    screen with the error and offers ``c`` to pick other channels.
+    """
+
+    DEFAULT_CSS = """
+    RepodataLoadingScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #repodata-loading-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        max-height: 90%;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #repodata-loading-title {
+        text-style: bold;
+    }
+
+    #repodata-loading-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #repodata-loading-platforms {
+        margin-top: 1;
+    }
+
+    #repodata-loading-bar {
+        width: 100%;
+        margin-top: 1;
+    }
+
+    #repodata-loading-bar Bar {
+        width: 1fr;
+    }
+
+    #repodata-loading-bar Bar > .bar--bar,
+    #repodata-loading-bar Bar > .bar--complete {
+        color: #ec4899;
+    }
+
+    #repodata-loading-status {
+        color: $text-muted;
+    }
+
+    #repodata-loading-hint {
+        color: $text-muted;
+        text-align: right;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q", "quit_app", show=False),
+        Binding("c", "switch_channels", show=False),
+        Binding("escape", "close_if_failed", show=False),
+        # The app binds these to dialogs over the package list; while the list
+        # is still loading (or failed to load) they have nothing to act on.
+        Binding("p", "ignore", show=False),
+        Binding("C", "ignore", show=False),
+        Binding("m", "ignore", show=False),
+        Binding("w", "ignore", show=False),
+        Binding("slash", "ignore", show=False),
+        Binding("question_mark", "ignore", show=False),
+    ]
+
+    _PLATFORM_COLUMNS = 3
+
+    def __init__(self, *, channel_names: Sequence[str], sharded_disabled: bool) -> None:
+        super().__init__()
+        self._channel_names = list(channel_names)
+        self._sharded_disabled = sharded_disabled
+        self._progress: PlatformDiscoveryProgress | None = None
+        self._collecting_names_for: int | None = None
+        self._failed = False
+        self._error_message = ""
+        self._elapsed_timer: Timer | None = None
+        self.started_at = monotonic()
+        """When the load started (``time.monotonic``); the elapsed counter
+        counts from here."""
+
+    @property
+    def progress(self) -> PlatformDiscoveryProgress | None:
+        """The latest platform discovery progress, ``None`` before the first."""
+        return self._progress
+
+    @property
+    def failed(self) -> bool:
+        """Whether the screen shows a failed load."""
+        return self._failed
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="repodata-loading-dialog"):
+            yield Static(
+                Text.assemble(
+                    "Loading ",
+                    (
+                        channels_label(self._channel_names),
+                        Style(color="#ec4899", bold=True),
+                    ),
+                ),
+                id="repodata-loading-title",
+            )
+            yield Static(self._help_text(), id="repodata-loading-help")
+            yield Static("", id="repodata-loading-platforms")
+            yield ProgressBar(show_eta=False, id="repodata-loading-bar")
+            yield Static("", id="repodata-loading-status")
+            yield Static("q to quit", id="repodata-loading-hint")
+
+    def on_mount(self) -> None:
+        self.started_at = monotonic()
+        # The load starts reporting before this screen has composed (pushing a
+        # screen mounts it a message later), so the widgets are only touched
+        # here and in the renders after this point, from the state kept so far.
+        self._render_dialog()
+        if not self._failed:
+            self._elapsed_timer = self.set_interval(1.0, self.refresh_elapsed)
+
+    def _help_text(self) -> str:
+        if self._sharded_disabled:
+            return (
+                "Sharded repodata is disabled in the configuration, so the "
+                "complete repodata.json of every subdir is downloaded and "
+                "parsed. The first load can take minutes; later loads come "
+                "from the cache."
+            )
+        subject = (
+            "the channel serves"
+            if len(self._channel_names) == 1
+            else "the channels serve"
+        )
+        return (
+            f"Checking which platforms {subject} repodata for. A channel "
+            "without sharded repodata takes a while on the first load; later "
+            "loads come from the cache."
+        )
+
+    def report_discovery(self, progress: PlatformDiscoveryProgress) -> None:
+        """Show the platform discovery at ``progress``."""
+        self._progress = progress
+        self._render_dialog()
+
+    def report_collecting_names(self, platforms: Sequence[Platform]) -> None:
+        """Show that the package names of ``platforms`` are being collected."""
+        self._collecting_names_for = len(platforms)
+        self._render_dialog()
+
+    def show_error(self, message: str) -> None:
+        """Replace the progress with the error ``message`` of a failed load."""
+        self._failed = True
+        self._error_message = message.strip()
+        if self._elapsed_timer is not None:
+            self._elapsed_timer.stop()
+        self._render_dialog()
+
+    def refresh_elapsed(self) -> None:
+        """Re-render the elapsed time; runs every second while loading."""
+        self._render_dialog()
+
+    def _render_dialog(self) -> None:
+        if not self.is_mounted:
+            return
+        if self._failed:
+            self._render_error()
+            return
+        self._render_platforms()
+        self._render_progress()
+        self._render_status()
+
+    def _render_error(self) -> None:
+        self.query_one("#repodata-loading-title", Static).update(
+            Text.assemble(
+                "Failed to load ",
+                (
+                    channels_label(self._channel_names),
+                    Style(color="#ec4899", bold=True),
+                ),
+            )
+        )
+        self.query_one("#repodata-loading-help", Static).update(self._error_message)
+        # Which probes had finished when the load failed is a matter of timing,
+        # so the platforms would be a random subset.
+        self.query_one("#repodata-loading-platforms", Static).display = False
+        self.query_one("#repodata-loading-bar", ProgressBar).display = False
+        self.query_one("#repodata-loading-status", Static).display = False
+        self.query_one("#repodata-loading-hint", Static).update(
+            "c to change channels · Esc to close · q to quit"
+        )
+
+    def _render_platforms(self) -> None:
+        platforms = self.query_one("#repodata-loading-platforms", Static)
+        progress = self._progress
+        cells = (
+            []
+            if progress is None
+            else [
+                Text.assemble(("✓ ", Style(color="#ec4899")), str(platform))
+                for platform in progress.found
+            ]
+            + [
+                Text.assemble(("⋯ ", Style(dim=True)), (str(platform), Style(dim=True)))
+                for platform in progress.checking
+            ]
+        )
+        if not cells:
+            platforms.display = False
+            return
+        grid = Table.grid(padding=(0, 2))
+        for _ in range(self._PLATFORM_COLUMNS):
+            grid.add_column()
+        for start in range(0, len(cells), self._PLATFORM_COLUMNS):
+            grid.add_row(*cells[start : start + self._PLATFORM_COLUMNS])
+        platforms.update(grid)
+        platforms.display = True
+
+    def _render_progress(self) -> None:
+        progress = self._progress
+        if progress is None:
+            return
+        # One step more than the probes: collecting the package names after
+        # the platforms are known.
+        completed = (
+            progress.probes_total
+            if self._collecting_names_for is not None
+            else progress.probes_completed
+        )
+        self.query_one("#repodata-loading-bar", ProgressBar).update(
+            total=progress.probes_total + 1, progress=completed
+        )
+
+    def _render_status(self) -> None:
+        elapsed = f"{int(monotonic() - self.started_at)}s elapsed"
+        if self._collecting_names_for is not None:
+            count = self._collecting_names_for
+            noun = "platform" if count == 1 else "platforms"
+            text = f"Collecting the package names of {count} {noun} · {elapsed}"
+        elif self._progress is None:
+            text = f"Starting · {elapsed}"
+        else:
+            progress = self._progress
+            found = len(progress.found)
+            noun = "platform" if found == 1 else "platforms"
+            text = (
+                f"{progress.probes_completed} of {progress.probes_total} subdirs "
+                f"checked · {found} {noun} found · {elapsed}"
+            )
+        self.query_one("#repodata-loading-status", Static).update(text)
+
+    def action_quit_app(self) -> None:
+        self.app.exit()
+
+    def action_switch_channels(self) -> None:
+        if self._failed:
+            self.dismiss("channels")
+
+    def action_close_if_failed(self) -> None:
+        if self._failed:
+            self.dismiss(None)
+
+    def action_ignore(self) -> None:
+        return None
 
 
 class FileActionScreen(ModalScreen[FileActionOption | None]):
