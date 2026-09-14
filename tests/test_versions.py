@@ -152,6 +152,7 @@ def _make_repo_data_record(
     channel: str = "https://conda.anaconda.org/conda-forge/",
     size: int = 2048,
     timestamp: datetime = datetime(2026, 1, 1, tzinfo=UTC),
+    indexed_timestamp: datetime | None = None,
     license: str = "BSD-3-Clause",
     license_family: str = "BSD",
     arch: str | None = "x86_64",
@@ -197,6 +198,7 @@ def _make_repo_data_record(
         channel=channel,
     )
     record.timestamp = timestamp
+    record.indexed_timestamp = indexed_timestamp
     if features is not None:
         record.features = features
     if track_features is not None:
@@ -525,6 +527,35 @@ def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
                 rattler_build_version="0.47.0",
             )
         )
+    )
+
+
+def test_format_version_details_metadata_lines_include_indexed_timestamp() -> None:
+    """``indexed_timestamp`` is when the channel index first saw the artifact.
+
+    The channel server assigns it (CEP-0047), so it is missing from records of
+    channels that do not publish it yet and is then reported as unavailable.
+    """
+    indexed = build_version_artifact_data(
+        "demo",
+        _make_repo_data_record(
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            indexed_timestamp=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+        ),
+    )
+    not_indexed = build_version_artifact_data(
+        "demo", _make_repo_data_record(indexed_timestamp=None)
+    )
+
+    assert (
+        "Indexed Timestamp     2026-01-02T03:04:05+00:00"
+        in format_version_details_metadata_lines(indexed)
+    )
+    assert "Timestamp             2026-01-01T00:00:00+00:00" in (
+        format_version_details_metadata_lines(indexed)
+    )
+    assert "Indexed Timestamp     not available" in (
+        format_version_details_metadata_lines(not_indexed)
     )
 
 
