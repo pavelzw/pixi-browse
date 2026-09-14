@@ -3009,8 +3009,8 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
 
     The keys that open dialogs over the package list (which does not exist
     yet) are swallowed here; ``q`` still quits. A failed load stays on this
-    screen with the error and offers ``c`` to pick other channels; closing it
-    any other way would leave the app without a package list.
+    screen with the error and offers ``c`` to correct the channels; closing it
+    any other way could leave the app without a package list.
     """
 
     DEFAULT_CSS = """

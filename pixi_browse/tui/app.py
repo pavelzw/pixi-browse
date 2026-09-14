@@ -248,9 +248,15 @@ class CondaMetadataTui(App[None]):
         if self._startup_matchspec is not None:
             await self._apply_matchspec_query(self._startup_matchspec)
 
-    def _handle_repodata_loading_result(self, result: RepodataLoadingResult) -> None:
+    def _handle_repodata_loading_result(
+        self,
+        result: RepodataLoadingResult,
+        channel_names: Sequence[str] | None = None,
+    ) -> None:
+        # After a failed load the selector lists the channels that failed, not
+        # the ones the app fell back to, so a typo can be corrected in place.
         if result == "channels":
-            self._open_channel_screen()
+            self._open_channel_screen(channel_names)
 
     def _close_repodata_loading_screen(self, screen: RepodataLoadingScreen) -> None:
         # Dismissing pops whatever sits on top of the stack, so only the screen
@@ -840,24 +846,22 @@ class CondaMetadataTui(App[None]):
         self._show_main_placeholder(f"# {escape(label)}\n\nLoading repodata...")
         self._update_filter_indicator()
 
-        # The same loading screen as at startup; a failed switch falls back to
-        # the previous channels, so the screen's own failure state is not used.
+        # The same loading screen as at startup, failure state included. The
+        # previous channels are restored underneath, so cancelling the channel
+        # selector the failure state offers leaves a browsable app behind.
         loading_screen = RepodataLoadingScreen(channel_names=channel_names)
-        self.push_screen(loading_screen)
-        try:
-            load_error = await self._load_packages(loading_screen=loading_screen)
-        finally:
-            self._close_repodata_loading_screen(loading_screen)
+        self.push_screen(
+            loading_screen,
+            lambda result: self._handle_repodata_loading_result(result, channel_names),
+        )
+        load_error = await self._load_packages(loading_screen=loading_screen)
         if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
             self._move_focus(package_list)
-            self.notify(
-                f"Failed to load channels: {load_error}",
-                title="Channels",
-                severity="error",
-            )
+            loading_screen.show_error(load_error)
             return
+        self._close_repodata_loading_screen(loading_screen)
 
         noun = "channel" if len(channel_names) == 1 else "channels"
         self.notify(f"Switched to {noun}: {label}", title="Channels")
@@ -2720,9 +2724,11 @@ class CondaMetadataTui(App[None]):
             self._version_search_query = None
             self._render_version_options(prefer_entry=highlighted)
 
-    def _open_channel_screen(self) -> None:
+    def _open_channel_screen(self, channel_names: Sequence[str] | None = None) -> None:
         self.push_screen(
-            ChannelScreen(self._channel_names),
+            ChannelScreen(
+                self._channel_names if channel_names is None else channel_names
+            ),
             self._handle_channel_result,
         )
 

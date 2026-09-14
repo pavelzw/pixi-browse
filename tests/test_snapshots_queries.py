@@ -1073,11 +1073,11 @@ def test_switching_channels_shows_the_loading_screen(
     )
 
 
-def test_switching_to_unreachable_channel_restores_previous_view(
+def test_switching_to_unreachable_channel_shows_the_failure_screen(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """A channel without repodata fails to load; the previous view is restored
-    with an error toast."""
+    """A channel without repodata fails to load; the loading screen stays up
+    with the error over the restored previous view."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
@@ -1088,17 +1088,34 @@ def test_switching_to_unreachable_channel_restores_previous_view(
     )
 
 
-def test_adding_unreachable_channel_restores_previous_view(
+def test_adding_unreachable_channel_shows_the_failure_screen(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """An unreachable channel is refused even next to a working one, so a
-    typo does not silently browse the other channels; the toast names it."""
+    typo does not silently browse the other channels; the error names it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await open_channel_screen(pilot)
         await add_channel(pilot, MISSING_CHANNEL)
         await apply_channels(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_failed_channel_switch_reopens_the_selector_with_the_typed_channels(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``c`` on the failure screen reopens the channel selector with the
+    channels that failed to load, so the typo can be corrected in place."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await switch_channel(pilot, MISSING_CHANNEL)
+        await pilot.press("c")
+        await wait_for_screen(pilot, ChannelScreen)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE

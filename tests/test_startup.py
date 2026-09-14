@@ -1,4 +1,4 @@
-"""The startup repodata load against the offline real-data channel.
+"""The repodata loading screen against the offline real-data channel.
 
 These drive the real app like the snapshot tests do, but assert on what
 happens rather than on how the screen looks: whether a key press during the
