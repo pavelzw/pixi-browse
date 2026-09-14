@@ -1052,7 +1052,7 @@ class CondaMetadataTui(App[None]):
                 ("j / k", "Move selection or scroll"),
                 ("h / l", "Focus left / right pane"),
                 ("1 / 2 / 3", "Focus metadata, deps, or files"),
-                ("Tab / Shift+Tab", "Focus details, then cycle sections"),
+                ("Tab / Shift+Tab", "Cycle focused section"),
                 ("x", "Swap compare left / right"),
                 ("[ / ]", "Cycle section tabs"),
                 ("gg / G", "Jump to top / bottom"),
