@@ -24,6 +24,7 @@ import json
 import shutil
 import threading
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -43,16 +44,19 @@ from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import ChannelManifest, ensure_channel_artifacts
 from tests.helpers import (
     ANACONDA_CHANNELS_URL,
+    BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
     GatewayFactory,
+    HeldSubdirRequestHandler,
     PaletteScreenshotApp,
     PaletteSVGImageExtension,
     PilotHook,
     RangeRequestHandler,
     SnapComparePalettes,
+    SubdirHold,
     report_palette_comparison,
     still_cursors_after,
 )
@@ -95,10 +99,9 @@ def channel_server(fixture_channels_dir: Path) -> Iterator[str]:
         server.server_close()
 
 
-@pytest.fixture(scope="session")
-def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
-    """Configure the test channels to be served from the local server
-    under the URLs the app resolves their names to."""
+def mirrored_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
+    """Configure the test channels to be served from ``channel_server`` under
+    the URLs the app resolves their names to."""
     mirrors = {
         f"{channel_url}/": [f"{channel_server}{channel_name}/"]
         for channel_name, channel_url in channel_manifest.channels.items()
@@ -110,6 +113,65 @@ def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Co
     config = Config()
     config.set("mirrors", json.dumps(mirrors))
     return config
+
+
+@pytest.fixture(scope="session")
+def rattler_config(channel_manifest: ChannelManifest, channel_server: str) -> Config:
+    return mirrored_config(channel_manifest, channel_server)
+
+
+@contextmanager
+def held_subdir_config(
+    channel_manifest: ChannelManifest,
+    channels_dir: Path,
+    channel_name: str,
+    subdir: str,
+) -> Iterator[Config]:
+    """A configuration whose mirror of ``channel_name`` never answers for
+    ``subdir`` while the block runs.
+
+    Every other subdir is served as usual, so the app gets as far as the
+    repodata loading screen with all probes but one finished and stays there:
+    the state a slow, unsharded channel leaves a user in for minutes. The held
+    requests are released on exit.
+    """
+    hold = SubdirHold(channel_name, subdir)
+    handler = partial(HeldSubdirRequestHandler, directory=str(channels_dir), hold=hold)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield mirrored_config(
+            channel_manifest, f"http://127.0.0.1:{server.server_port}/"
+        )
+    finally:
+        hold.release.set()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def stalled_linux64_config(
+    channel_manifest: ChannelManifest, fixture_channels_dir: Path
+) -> Iterator[Config]:
+    """``conda-forge`` with its ``linux-64`` subdir never answering, so the
+    startup load stays on the loading screen."""
+    with held_subdir_config(
+        channel_manifest, fixture_channels_dir, MAIN_CHANNEL, "linux-64"
+    ) as config:
+        yield config
+
+
+@pytest.fixture
+def stalled_bioconda_config(
+    channel_manifest: ChannelManifest, fixture_channels_dir: Path
+) -> Iterator[Config]:
+    """``bioconda`` with its only subdir, ``noarch``, never answering, so a
+    switch to it stays on the loading screen while ``conda-forge`` loads."""
+    with held_subdir_config(
+        channel_manifest, fixture_channels_dir, BIOCONDA_CHANNEL, "noarch"
+    ) as config:
+        yield config
 
 
 @pytest.fixture(scope="session")
@@ -141,12 +203,13 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
         default_channels: Iterable[str] = (MAIN_CHANNEL,),
         default_platforms: Iterable[Platform] | None = None,
         default_matchspec: MatchSpec | None = None,
+        config: Config | None = None,
     ) -> CondaMetadataTui:
         return PaletteScreenshotApp(
             default_channels=default_channels,
             default_platforms=default_platforms,
             default_matchspec=default_matchspec,
-            config=rattler_config,
+            config=config if config is not None else rattler_config,
             cache_dir=rattler_cache_dir,
         )
 

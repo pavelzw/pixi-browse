@@ -37,6 +37,24 @@ class WhoNeedsQueryResult:
     records_by_package: dict[str, list[RepoDataRecord]]
 
 
+@dataclass(frozen=True)
+class PlatformDiscoveryProgress:
+    """How far ``discover_available_platforms`` has come.
+
+    A probe is one channel asked for one subdir. ``found`` and ``checking``
+    span all channels: a platform is found once any channel serves it and is
+    being checked while any channel's probe for it is still running.
+    """
+
+    probes_total: int
+    probes_completed: int
+    found: tuple[Platform, ...]
+    checking: tuple[Platform, ...]
+
+
+DiscoveryProgressCallback = Callable[[PlatformDiscoveryProgress], None]
+
+
 def whoneeds_target_label(target: str | PackageRecord) -> str:
     if isinstance(target, str):
         return target
@@ -78,6 +96,7 @@ async def discover_available_platforms(
     gateway: Gateway,
     channel_names: Sequence[str],
     max_parallel: int = 12,
+    on_progress: DiscoveryProgressCallback | None = None,
 ) -> list[Platform]:
     """Probe which platforms at least one of the channels serves repodata for.
 
@@ -87,24 +106,59 @@ async def discover_available_platforms(
     private channel without access) therefore cannot be browsed at all, and
     its ``GatewayError`` is raised instead of quietly browsing the other
     channels without it. Errors on the other subdirs only drop that platform.
+
+    ``on_progress`` is called whenever a probe starts or finishes. Without
+    sharded repodata a probe downloads and parses the subdir's complete
+    ``repodata.json``, so this is where a slow start spends its time.
     """
     candidates = sorted(
         Platform.all(),
         key=platform_sort_key,
     )
     semaphore = asyncio.Semaphore(max_parallel)
+    probes_total = len(candidates) * len(channel_names)
+    probes_completed = 0
+    found: set[Platform] = set()
+    # Platforms with a running probe, and how many channels are probing them.
+    checking: dict[Platform, int] = {}
+
+    def report() -> None:
+        if on_progress is None:
+            return
+        on_progress(
+            PlatformDiscoveryProgress(
+                probes_total=probes_total,
+                probes_completed=probes_completed,
+                found=tuple(sorted(found, key=platform_sort_key)),
+                checking=tuple(sorted(checking, key=platform_sort_key)),
+            )
+        )
+
+    def finish_probe(platform: Platform, *, serves_repodata: bool) -> None:
+        nonlocal probes_completed
+        probes_completed += 1
+        checking[platform] -= 1
+        if checking[platform] == 0:
+            del checking[platform]
+        if serves_repodata:
+            found.add(platform)
+        report()
 
     async def probe(channel_name: str, platform: Platform) -> Platform | None:
         async with semaphore:
+            checking[platform] = checking.get(platform, 0) + 1
+            report()
             try:
                 names = await gateway.names(
                     sources=[channel_name],
                     platforms=[platform],
                 )
             except GatewayError:
+                finish_probe(platform, serves_repodata=False)
                 if platform == NOARCH_PLATFORM:
                     raise
                 return None
+            finish_probe(platform, serves_repodata=bool(names))
 
         return platform if names else None
 

@@ -59,6 +59,7 @@ from pixi_browse.rendering import (
     syntax_lexer_for_path,
 )
 from pixi_browse.repodata import (
+    DiscoveryProgressCallback,
     MatchSpecQueryResult,
     WhoNeedsQueryResult,
     channels_label,
@@ -102,6 +103,8 @@ from .widgets import (
     MainPanel,
     MatchSpecScreen,
     QueryLeaveConfirmScreen,
+    RepodataLoadingResult,
+    RepodataLoadingScreen,
     SidebarPanel,
     WhoNeedsConfirmChoice,
     WhoNeedsConfirmScreen,
@@ -221,33 +224,80 @@ class CondaMetadataTui(App[None]):
             yield MainPanel(id="main-panel", list_search=self._list_search)
         yield Static(self._footer_text(), id="footer")
 
-    async def on_mount(self) -> None:
+    def on_mount(self) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
         package_list.disabled = True
         package_list.focus()
         self._update_filter_indicator()
-        load_error = await self._load_packages()
-        if load_error is None and self._startup_matchspec is not None:
+        # Textual starts handling keys only once ``on_mount`` has returned, so
+        # the load runs in a worker: the loading screen keeps updating and ``q``
+        # quits a slow (unsharded) load instead of being queued behind it.
+        self.run_worker(self._load_startup(), group="startup-load", exclusive=True)
+
+    async def _load_startup(self) -> None:
+        """Load the startup channels behind the repodata loading screen."""
+        loading_screen = RepodataLoadingScreen(channel_names=self._channel_names)
+        self.push_screen(loading_screen, self._handle_repodata_loading_result)
+        load_error = await self._load_packages(loading_screen=loading_screen)
+        if load_error is not None:
+            loading_screen.show_error(load_error)
+            return
+        self._close_repodata_loading_screen(loading_screen)
+        if self._startup_matchspec is not None:
             await self._apply_matchspec_query(self._startup_matchspec)
 
-    async def _load_packages(self) -> str | None:
+    def _handle_repodata_loading_result(
+        self,
+        result: RepodataLoadingResult,
+        channel_names: Sequence[str] | None = None,
+    ) -> None:
+        # After a failed load the selector lists the channels that failed, not
+        # the ones the app fell back to, so a typo can be corrected in place.
+        if result == "channels":
+            self._open_channel_screen(channel_names)
+
+    def _close_repodata_loading_screen(self, screen: RepodataLoadingScreen) -> None:
+        # Dismissing pops whatever sits on top of the stack, so only the screen
+        # that is actually showing may be dismissed.
+        if self.screen is screen:
+            screen.dismiss(None)
+
+    async def _load_packages(
+        self, *, loading_screen: RepodataLoadingScreen | None = None
+    ) -> str | None:
         """Load the package list of the selected channels and platforms.
 
-        Returns the error message when loading fails, ``None`` on success.
+        Progress is reported to ``loading_screen`` when one is given. Returns
+        the error message when loading fails, ``None`` on success.
         """
+        # The loading screen reports the progress itself; the status line under
+        # the package list then keeps showing what it showed before the load.
         status = self.query_one("#status", Static)
-        status.update("Discovering available platforms...")
+        if loading_screen is None:
+            status.update("Discovering available platforms...")
         try:
-            await self._ensure_available_platforms()
-            status.update(
-                f"Downloading repodata for {self._selected_platforms_text()}..."
+            await self._ensure_available_platforms(
+                on_progress=(
+                    loading_screen.report_discovery
+                    if loading_screen is not None
+                    else None
+                )
             )
+            if loading_screen is None:
+                status.update(
+                    f"Downloading repodata for {self._selected_platforms_text()}..."
+                )
+            else:
+                loading_screen.report_collecting_names(
+                    sorted(self._selected_platform_names, key=platform_sort_key)
+                )
             self._channel_package_names = await self._fetch_package_names_with_gateway()
         except (GatewayError, RuntimeError) as exc:
-            status.update(f"Failed to load repodata: {exc!s}")
             # Rattler appends the failing request as "Caused by" lines; the
             # first line already says what went wrong and for which channel.
-            return str(exc).strip().splitlines()[0]
+            message = str(exc).strip().splitlines()[0]
+            status.update(f"Failed to load repodata: {message}")
+            return message
 
         self._all_package_names = list(self._channel_package_names)
         self._visible_package_names = list(self._all_package_names)
@@ -262,15 +312,22 @@ class CondaMetadataTui(App[None]):
             self._request_package_preview(self._visible_package_names[0])
         return None
 
-    async def _discover_available_platforms(self) -> list[Platform]:
+    async def _discover_available_platforms(
+        self, *, on_progress: DiscoveryProgressCallback | None = None
+    ) -> list[Platform]:
         return await discover_available_platforms(
             gateway=self._gateway,
             channel_names=self._channel_names,
+            on_progress=on_progress,
         )
 
-    async def _ensure_available_platforms(self) -> None:
+    async def _ensure_available_platforms(
+        self, *, on_progress: DiscoveryProgressCallback | None = None
+    ) -> None:
         if not self._available_platform_names:
-            self._available_platform_names = await self._discover_available_platforms()
+            self._available_platform_names = await self._discover_available_platforms(
+                on_progress=on_progress
+            )
         if not self._available_platform_names:
             raise RuntimeError("No reachable platform repodata endpoints found.")
 
@@ -786,22 +843,24 @@ class CondaMetadataTui(App[None]):
 
         label = channels_label(channel_names)
         package_list = self.query_one("#sidebar-list", OptionList)
-        self._render_sidebar_loading_option("Loading packages...")
-        package_list.disabled = True
-        self._show_main_placeholder(f"# {escape(label)}\n\nLoading repodata...")
-        self._update_filter_indicator()
 
-        load_error = await self._load_packages()
+        # The same loading screen as at startup, failure state included. The
+        # view underneath is left as it is until the new channels are listed;
+        # the previous channels are restored on failure, so cancelling the
+        # channel selector the failure state offers leaves a browsable app.
+        loading_screen = RepodataLoadingScreen(channel_names=channel_names)
+        self.push_screen(
+            loading_screen,
+            lambda result: self._handle_repodata_loading_result(result, channel_names),
+        )
+        load_error = await self._load_packages(loading_screen=loading_screen)
         if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)
             self._move_focus(package_list)
-            self.notify(
-                f"Failed to load channels: {load_error}",
-                title="Channels",
-                severity="error",
-            )
+            loading_screen.show_error(load_error)
             return
+        self._close_repodata_loading_screen(loading_screen)
 
         noun = "channel" if len(channel_names) == 1 else "channels"
         self.notify(f"Switched to {noun}: {label}", title="Channels")
@@ -2664,9 +2723,11 @@ class CondaMetadataTui(App[None]):
             self._version_search_query = None
             self._render_version_options(prefer_entry=highlighted)
 
-    def _open_channel_screen(self) -> None:
+    def _open_channel_screen(self, channel_names: Sequence[str] | None = None) -> None:
         self.push_screen(
-            ChannelScreen(self._channel_names),
+            ChannelScreen(
+                self._channel_names if channel_names is None else channel_names
+            ),
             self._handle_channel_result,
         )
 
@@ -3171,6 +3232,11 @@ class CondaMetadataTui(App[None]):
     def _refresh_after_resize(self) -> None:
         self._update_filter_indicator()
         package_list = self.query_one("#sidebar-list", OptionList)
+        if package_list.disabled or isinstance(self.screen, RepodataLoadingScreen):
+            # The list shows a loading label while a query runs, and keeps the
+            # previous channels' rows while new channels load; re-rendering
+            # would replace either with a stale or empty list.
+            return
         if self._mode == "packages":
             self._render_package_options(preserve_position=True)
         elif self._mode == "versions":
