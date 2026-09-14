@@ -2821,6 +2821,102 @@ class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
         self.dismiss(self.CHOICES[event.option_index][1])
 
 
+class QueryLeaveConfirmScreen(ModalScreen[bool]):
+    """Confirm leaving a MatchSpec or who-needs result for the full package list.
+
+    ``Escape`` in a query result goes back to every package of the channel, the
+    same way it goes back from a package to the package list. The result took a
+    query (and for who-needs a long repodata scan) to arrive at, though, and an
+    ``Escape`` too many is a common slip, so leaving it asks first. Dismissing
+    the prompt with ``Escape`` again keeps the result.
+    """
+
+    DEFAULT_CSS = """
+    QueryLeaveConfirmScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #query-leave-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #query-leave-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #query-leave-query {
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    #query-leave-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #query-leave-list {
+        border: none;
+        background: $background;
+        padding: 0 0 0 1;
+    }
+
+    #query-leave-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #query-leave-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    CHOICES: tuple[tuple[str, bool], ...] = (
+        ("Back to all packages", True),
+        ("Keep the result", False),
+    )
+
+    def __init__(self, query_label: str) -> None:
+        super().__init__()
+        self._query_label = query_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="query-leave-dialog"):
+            yield Static("Leave query result", id="query-leave-title")
+            yield Static(self._query_label, id="query-leave-query", markup=False)
+            yield Static(
+                "Going back shows every package of the selected channels again"
+                " and drops this result.",
+                id="query-leave-help",
+            )
+            yield OptionList(
+                *(label for label, _leave in self.CHOICES),
+                id="query-leave-list",
+                markup=False,
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#query-leave-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#query-leave-list")
+    def _select_action(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.CHOICES[event.option_index][1])
+
+
 class WhoNeedsLoadingScreen(ModalScreen[None]):
     """Modal that holds the user in place while a who-needs query runs.
 
