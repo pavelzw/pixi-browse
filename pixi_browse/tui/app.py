@@ -1059,7 +1059,7 @@ class CondaMetadataTui(App[None]):
                 ("gg / G", "Jump to top / bottom"),
                 ("Ctrl+u / Ctrl+d", "Page up / down"),
                 ("Enter", "Open / select"),
-                ("Esc", "Back, leave query result, or close overlay"),
+                ("Esc", "Back or close current overlay"),
             ],
         )
         app = self._format_help_section(

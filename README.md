@@ -133,14 +133,14 @@ uses `conda-forge`.
 
 ### Navigation
 
-| Key                 | Action                                                            |
-| ------------------- | ----------------------------------------------------------------- |
-| `j` / `k`           | Move selection or scroll                                          |
-| `h` / `l`           | Focus left / right pane                                           |
-| `gg` / `G`          | Jump to top / bottom                                              |
-| `Ctrl+u` / `Ctrl+d` | Page up / down                                                    |
-| `Enter`             | Open / select                                                     |
-| `Esc`               | Back, leave a query result (asks first), or close current overlay |
+| Key                 | Action                        |
+| ------------------- | ----------------------------- |
+| `j` / `k`           | Move selection or scroll      |
+| `h` / `l`           | Focus left / right pane       |
+| `gg` / `G`          | Jump to top / bottom          |
+| `Ctrl+u` / `Ctrl+d` | Page up / down                |
+| `Enter`             | Open / select                 |
+| `Esc`               | Back or close current overlay |
 
 ### App
 
