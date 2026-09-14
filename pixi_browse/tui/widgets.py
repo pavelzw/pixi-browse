@@ -2998,11 +2998,12 @@ open the channel selector after a failed load, ``None`` closes it."""
 
 
 class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
-    """Modal shown while the startup repodata load runs.
+    """Modal shown while the repodata of the selected channels loads.
 
-    Textual only starts handling keys once ``on_mount`` has returned, so the
-    load runs in a worker and this screen covers the still empty main screen
-    in the meantime. It shows the platforms found so far, the ones still being
+    Shown at startup and when switching channels. Textual only starts handling
+    keys once ``on_mount`` has returned, so the startup load runs in a worker
+    and this screen covers the still empty main screen in the meantime. It
+    shows the platforms found so far, the ones still being
     checked, how far the probing has come and for how long it has been
     running; without sharded repodata that can take minutes.
 

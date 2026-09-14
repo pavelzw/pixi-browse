@@ -3,11 +3,19 @@ platform selector and channel switching, all against the offline channels."""
 
 from __future__ import annotations
 
+from time import monotonic
+
+from rattler.config import Config
 from rattler.match_spec import MatchSpec
 from rattler.platform import Platform
 from textual.pilot import Pilot
 
-from pixi_browse.tui import ChannelScreen, MatchSpecScreen, QueryLeaveConfirmScreen
+from pixi_browse.tui import (
+    ChannelScreen,
+    MatchSpecScreen,
+    QueryLeaveConfirmScreen,
+    RepodataLoadingScreen,
+)
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
@@ -19,6 +27,7 @@ from tests.helpers import (
     type_text,
     wait_for_idle,
     wait_for_screen,
+    wait_until,
 )
 
 
@@ -1024,6 +1033,43 @@ def test_switching_channel_clears_active_matchspec(
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_switching_channels_shows_the_loading_screen(
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    stalled_bioconda_config: Config,
+) -> None:
+    """Switching to ``bioconda`` while its ``noarch`` is still downloading:
+    the loading screen names the new channel and the pending subdir. The
+    elapsed time is wall-clock time, pinned to 31s for the screenshot."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.click("#channel-remove-0")
+        await pilot.pause()
+        await pilot.click("#channel-apply")
+        await wait_for_screen(pilot, RepodataLoadingScreen)
+        screen = pilot.app.screen
+        assert isinstance(screen, RepodataLoadingScreen)
+        await wait_until(
+            pilot,
+            lambda: (
+                screen.progress is not None
+                and screen.progress.probes_completed == screen.progress.probes_total - 1
+            ),
+            what="every probe but noarch to finish",
+        )
+        screen.started_at = monotonic() - 31
+        screen.refresh_elapsed()
+
+    assert snap_compare_palettes(
+        make_app(config=stalled_bioconda_config),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
     )
 
 

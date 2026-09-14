@@ -126,10 +126,11 @@ settings (including per-channel overrides) and `concurrency.downloads` are
 applied to the gateway. Who-needs queries scan the full channel repodata,
 even when sharded repodata is enabled for browsing.
 
-With sharded repodata disabled, the first start downloads the complete
-`repodata.json` of every subdir, which can take minutes; later starts use the
-cache. The startup screen shows which platforms were found so far and how far
-the load has come, and `q` quits at any point.
+With sharded repodata disabled, the first load of a channel downloads the
+complete `repodata.json` of every subdir, which can take minutes; later loads
+use the cache. A loading screen at startup and on channel switches shows which
+platforms were found so far and how far the load has come; `q` quits at any
+point.
 
 Explicit `-c` flags replace `default-channels`. If neither is set, pixi-browse
 uses `conda-forge`.

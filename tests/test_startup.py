@@ -12,7 +12,7 @@ import asyncio
 from rattler.config import Config
 from textual.screen import ModalScreen
 
-from pixi_browse.tui.widgets import ChannelScreen, RepodataLoadingScreen
+from pixi_browse.tui import ChannelScreen, RepodataLoadingScreen
 from tests.helpers import (
     MISSING_CHANNEL,
     TERMINAL_SIZE,

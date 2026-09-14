@@ -840,7 +840,14 @@ class CondaMetadataTui(App[None]):
         self._show_main_placeholder(f"# {escape(label)}\n\nLoading repodata...")
         self._update_filter_indicator()
 
-        load_error = await self._load_packages()
+        # The same loading screen as at startup; a failed switch falls back to
+        # the previous channels, so the screen's own failure state is not used.
+        loading_screen = RepodataLoadingScreen(channel_names=channel_names)
+        self.push_screen(loading_screen)
+        try:
+            load_error = await self._load_packages(loading_screen=loading_screen)
+        finally:
+            self._close_repodata_loading_screen(loading_screen)
         if load_error is not None:
             self._restore_channel_state(previous_state)
             self._restore_ui_from_snapshot(previous_state)

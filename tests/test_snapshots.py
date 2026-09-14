@@ -18,7 +18,7 @@ from time import monotonic
 from rattler.config import Config
 from textual.pilot import Pilot
 
-from pixi_browse.tui.widgets import RepodataLoadingScreen
+from pixi_browse.tui import RepodataLoadingScreen
 from tests.helpers import (
     MISSING_CHANNEL,
     TERMINAL_SIZE,
