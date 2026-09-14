@@ -226,7 +226,6 @@ class CondaMetadataTui(App[None]):
 
     def on_mount(self) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
-        self._render_sidebar_loading_option("Loading packages...")
         package_list.disabled = True
         package_list.focus()
         self._update_filter_indicator()
@@ -241,7 +240,6 @@ class CondaMetadataTui(App[None]):
         self.push_screen(loading_screen, self._handle_repodata_loading_result)
         load_error = await self._load_packages(loading_screen=loading_screen)
         if load_error is not None:
-            self._render_sidebar_loading_option("No packages loaded")
             loading_screen.show_error(load_error)
             return
         self._close_repodata_loading_screen(loading_screen)
@@ -272,8 +270,11 @@ class CondaMetadataTui(App[None]):
         Progress is reported to ``loading_screen`` when one is given. Returns
         the error message when loading fails, ``None`` on success.
         """
+        # The loading screen reports the progress itself; the status line under
+        # the package list then keeps showing what it showed before the load.
         status = self.query_one("#status", Static)
-        status.update("Discovering available platforms...")
+        if loading_screen is None:
+            status.update("Discovering available platforms...")
         try:
             await self._ensure_available_platforms(
                 on_progress=(
@@ -282,10 +283,11 @@ class CondaMetadataTui(App[None]):
                     else None
                 )
             )
-            status.update(
-                f"Downloading repodata for {self._selected_platforms_text()}..."
-            )
-            if loading_screen is not None:
+            if loading_screen is None:
+                status.update(
+                    f"Downloading repodata for {self._selected_platforms_text()}..."
+                )
+            else:
                 loading_screen.report_collecting_names(
                     sorted(self._selected_platform_names, key=platform_sort_key)
                 )
@@ -841,14 +843,11 @@ class CondaMetadataTui(App[None]):
 
         label = channels_label(channel_names)
         package_list = self.query_one("#sidebar-list", OptionList)
-        self._render_sidebar_loading_option("Loading packages...")
-        package_list.disabled = True
-        self._show_main_placeholder(f"# {escape(label)}\n\nLoading repodata...")
-        self._update_filter_indicator()
 
         # The same loading screen as at startup, failure state included. The
-        # previous channels are restored underneath, so cancelling the channel
-        # selector the failure state offers leaves a browsable app behind.
+        # view underneath is left as it is until the new channels are listed;
+        # the previous channels are restored on failure, so cancelling the
+        # channel selector the failure state offers leaves a browsable app.
         loading_screen = RepodataLoadingScreen(channel_names=channel_names)
         self.push_screen(
             loading_screen,
@@ -3233,9 +3232,10 @@ class CondaMetadataTui(App[None]):
     def _refresh_after_resize(self) -> None:
         self._update_filter_indicator()
         package_list = self.query_one("#sidebar-list", OptionList)
-        if package_list.disabled:
-            # The list shows a loading label while the packages or a query
-            # load; re-rendering would replace it with a stale or empty list.
+        if package_list.disabled or isinstance(self.screen, RepodataLoadingScreen):
+            # The list shows a loading label while a query runs, and keeps the
+            # previous channels' rows while new channels load; re-rendering
+            # would replace either with a stale or empty list.
             return
         if self._mode == "packages":
             self._render_package_options(preserve_position=True)
