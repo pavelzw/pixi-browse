@@ -310,6 +310,7 @@ def _metadata_rows_for_record(
         ("Channel", format_record_value(record.channel)),
         ("Size", format_byte_size(record.size)),
         ("Timestamp", format_record_value(record.timestamp)),
+        ("Indexed Timestamp", format_record_value(record.indexed_timestamp)),
         ("License", format_record_value(record.license)),
         ("License Family", format_record_value(record.license_family)),
         ("Arch", format_record_value(record.arch)),
@@ -436,7 +437,9 @@ def build_repodata_patch_diff(
     https://github.com/conda-forge/conda-forge-repodata-patches-feedstock/blob/98e5f9bcb6a31f56d168a7e343c7ad70c784e194/recipe/gen_patch_json.py#L600-L603
 
     ``purls`` and ``repodata_revision`` are available on ``IndexJson`` but not on
-    py-rattler's ``PackageRecord``, so they cannot be compared.
+    py-rattler's ``PackageRecord``, so they cannot be compared. ``indexed_timestamp``
+    is the other way around: the channel index assigns it (CEP-0047), so it exists
+    only on the record and is not a patch of anything the package was built with.
     """
     scalar_fields: tuple[tuple[str, object, object], ...] = (
         ("version", index_json.version, record.version),

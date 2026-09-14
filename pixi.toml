@@ -11,7 +11,6 @@ dev = "textual run --dev pixi_browse/__main__.py"
 console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
-py-rattler = "0d"
 typer = "0d"
 pytest-textual-snapshot = "0d"
 
@@ -26,7 +25,7 @@ hatchling = "*"
 [package.run-dependencies]
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
-py-rattler = ">=0.26.0,<0.27"
+py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.
