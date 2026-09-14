@@ -138,6 +138,7 @@ class TestSource:
 
     @property
     def location(self) -> str:
+        """Where the function starts, as ``<module path>:<line>``."""
         return f"{self.module_path}:{self.line_number}"
 
 
@@ -173,6 +174,17 @@ def run_git(*arguments: str) -> str:
         message = error.stderr.strip() or error.stdout.strip()
         raise SystemExit(message) from error
     return result.stdout
+
+
+def read_committed_file(revision: str, path: PurePosixPath) -> str | None:
+    """The content of ``path`` in ``revision``, or None if it has no such file."""
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{path}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout if result.returncode == 0 else None
 
 
 def validate_revision(revision: str) -> None:
@@ -271,7 +283,12 @@ def report_test_name(snapshot_path: PurePosixPath) -> str:
 
 
 def test_source(revision: str, snapshot_path: PurePosixPath) -> TestSource | None:
-    """Read a snapshot's test function from its committed Python module."""
+    """Read a snapshot's test function from its committed Python module.
+
+    Returns None when the revision has no such module or the module no
+    longer defines the test, so a stale snapshot still lands in the report,
+    just without a source popup.
+    """
     parts = snapshot_path.parts
     try:
         snapshot_directory_index = parts.index("__snapshots__")
@@ -281,7 +298,9 @@ def test_source(revision: str, snapshot_path: PurePosixPath) -> TestSource | Non
     # A snapshot sits in a directory named after its test module.
     module_name = snapshot_path.parent.name
     module_path = PurePosixPath(*parts[:snapshot_directory_index], f"{module_name}.py")
-    module_source = run_git("show", f"{revision}:{module_path}")
+    module_source = read_committed_file(revision, module_path)
+    if module_source is None:
+        return None
     module = ast.parse(module_source)
     test_name = test_name_and_palette(snapshot_path)[0].partition("[")[0]
 
@@ -358,6 +377,7 @@ def build_diffs(
 
 
 def template_changed(anchor: str, report: Path) -> SystemExit:
+    """The error for a report anchor that pytest-textual-snapshot moved."""
     return SystemExit(
         f"Could not find {anchor!r} in {report}; the report template of "
         "pytest-textual-snapshot changed."
