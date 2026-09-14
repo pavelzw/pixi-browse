@@ -222,11 +222,13 @@ def test_platform_selector(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``p`` turns the sidebar into the platform selector with the current
-    selection ticked."""
+    selection ticked; ``j`` moves the highlight on to the next platform."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
         await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("j")
         await pilot.pause()
 
     assert snap_compare_palettes(
