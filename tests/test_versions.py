@@ -1194,7 +1194,7 @@ def test_help_text_includes_expected_keybinds() -> None:
     assert "h / l             Focus left / right pane" in help_text
     assert "1 / 2 / 3         Focus metadata, deps, or files" in help_text
     assert "Tab / Shift+Tab" in help_text
-    assert "Cycle focused section" in help_text
+    assert "Focus details, then cycle sections" in help_text
     assert "x                 Swap compare left / right" in help_text
     assert "[ / ]             Cycle section tabs" in help_text
     assert "Ctrl+u / Ctrl+d   Page up / down" in help_text
