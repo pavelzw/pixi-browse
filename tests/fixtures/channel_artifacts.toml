@@ -12,6 +12,8 @@
 [channels]
 conda-forge = "https://conda.anaconda.org/conda-forge"
 bioconda = "https://conda.anaconda.org/bioconda"
+# No artifacts: indexed into a channel whose only subdir, noarch, is empty.
+empty = "https://conda.anaconda.org/empty"
 
 [[artifacts]]
 channel = "conda-forge"

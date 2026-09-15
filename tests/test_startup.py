@@ -11,9 +11,11 @@ import asyncio
 
 from rattler.config import Config
 from textual.screen import ModalScreen
+from textual.widgets import Static
 
 from pixi_browse.tui import ChannelScreen, RepodataLoadingScreen
 from tests.helpers import (
+    EMPTY_CHANNEL,
     MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
@@ -71,6 +73,22 @@ def test_startup_load_closes_the_loading_screen(make_app: AppFactory) -> None:
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
             await wait_for_idle(pilot)
             assert not isinstance(app.screen, ModalScreen)
+            app.exit()
+
+    asyncio.run(run())
+
+
+def test_empty_channel_loads_without_packages(make_app: AppFactory) -> None:
+    """A channel with valid but empty repodata is not a failed load: the
+    loading screen closes and the app lists no packages."""
+
+    async def run() -> None:
+        app = make_app(default_channels=(EMPTY_CHANNEL,))
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await wait_for_idle(pilot)
+            assert not isinstance(app.screen, ModalScreen)
+            status = app.query_one("#status", Static)
+            assert str(status.content) == "0 packages in selection."
             app.exit()
 
     asyncio.run(run())

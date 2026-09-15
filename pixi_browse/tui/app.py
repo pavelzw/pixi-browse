@@ -325,11 +325,11 @@ class CondaMetadataTui(App[None]):
         self, *, on_progress: DiscoveryProgressCallback | None = None
     ) -> None:
         if not self._available_platform_names:
+            # Never empty: discovery lists at least ``noarch`` for channels it
+            # could reach, and raises for the ones it could not.
             self._available_platform_names = await self._discover_available_platforms(
                 on_progress=on_progress
             )
-        if not self._available_platform_names:
-            raise RuntimeError("No reachable platform repodata endpoints found.")
 
         self._selected_platform_names = {
             platform

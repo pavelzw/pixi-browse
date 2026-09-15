@@ -13,8 +13,9 @@ users, without network access and with deterministic data.
 
 The manifest lists artifacts of more than one channel (``bioconda`` next to
 ``conda-forge``), each served under its own name, so channel switching runs
-for real. ``missing`` is mirrored too but has no repodata at all, so loading
-it fails.
+for real. ``empty`` has no artifacts and is indexed into a channel with valid
+but empty repodata, the state of a freshly created channel. ``missing`` is
+mirrored too but has no repodata at all, so loading it fails.
 """
 
 from __future__ import annotations
@@ -77,6 +78,8 @@ def fixture_channels_dir(
     channels_dir = tmp_path_factory.mktemp("channels")
     for channel_name in channel_manifest.channels:
         channel_dir = channels_dir / channel_name
+        # Indexing an empty directory writes an empty noarch repodata.
+        channel_dir.mkdir()
         for artifact in channel_manifest.artifacts_of(channel_name):
             destination = channel_dir / artifact.subdir / artifact.file_name
             destination.parent.mkdir(parents=True, exist_ok=True)

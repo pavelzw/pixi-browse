@@ -44,6 +44,8 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
+# Indexed from the manifest without artifacts: valid, empty repodata.
+EMPTY_CHANNEL = "empty"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)

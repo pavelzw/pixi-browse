@@ -107,6 +107,14 @@ async def discover_available_platforms(
     its ``GatewayError`` is raised instead of quietly browsing the other
     channels without it. Errors on the other subdirs only drop that platform.
 
+    A platform counts once any channel lists a package for it: rattler answers
+    a subdir the channel does not have with an empty list too, so a missing
+    subdir and an empty one cannot be told apart. When no platform lists a
+    package at all, the channels are reachable (their ``noarch`` probes
+    succeeded) but empty, and ``noarch`` is returned as the one subdir they
+    are known to serve, so that an empty channel opens with an empty package
+    list rather than failing to load.
+
     ``on_progress`` is called whenever a probe starts or finishes. Without
     sharded repodata a probe downloads and parses the subdir's complete
     ``repodata.json``, so this is where a slow start spends its time.
@@ -169,10 +177,10 @@ async def discover_available_platforms(
             for platform in candidates
         )
     )
-    return sorted(
-        {platform for platform in discovered if platform is not None},
-        key=platform_sort_key,
-    )
+    available = {platform for platform in discovered if platform is not None}
+    if not available:
+        return [NOARCH_PLATFORM]
+    return sorted(available, key=platform_sort_key)
 
 
 async def fetch_package_names(

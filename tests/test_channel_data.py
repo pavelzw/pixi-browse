@@ -36,6 +36,7 @@ from pixi_browse.tui.version_loader import VersionDataLoader
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     CHANNEL_PLATFORMS,
+    EMPTY_CHANNEL,
     MAIN_CHANNEL,
     MISSING_CHANNEL,
     GatewayFactory,
@@ -77,6 +78,43 @@ def test_discover_available_platforms_merges_the_channels(
         Platform("osx-arm64"),
         Platform("noarch"),
     ]
+
+
+def test_discover_available_platforms_lists_noarch_of_an_empty_channel(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``empty`` serves repodata without a single package. It is reachable, so
+    it is browsable: ``noarch``, the subdir every channel has, is listed, and
+    the channel adds nothing to the platforms of a channel with packages."""
+    gateway = make_gateway()
+
+    assert asyncio.run(
+        discover_available_platforms(gateway=gateway, channel_names=[EMPTY_CHANNEL])
+    ) == [Platform("noarch")]
+    assert asyncio.run(
+        discover_available_platforms(
+            gateway=gateway, channel_names=[EMPTY_CHANNEL, MAIN_CHANNEL]
+        )
+    ) == [
+        Platform("linux-64"),
+        Platform("osx-arm64"),
+        Platform("noarch"),
+    ]
+
+
+def test_fetch_package_names_of_an_empty_channel_is_empty(
+    make_gateway: GatewayFactory,
+) -> None:
+    platforms, names = asyncio.run(
+        fetch_package_names(
+            gateway=make_gateway(),
+            channel_names=[EMPTY_CHANNEL],
+            selected_platforms=[Platform("noarch")],
+        )
+    )
+
+    assert platforms == [Platform("noarch")]
+    assert names == []
 
 
 def test_discover_available_platforms_rejects_channel_without_noarch(

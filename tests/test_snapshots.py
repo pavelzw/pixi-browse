@@ -20,6 +20,7 @@ from textual.pilot import Pilot
 
 from pixi_browse.tui import RepodataLoadingScreen
 from tests.helpers import (
+    EMPTY_CHANNEL,
     MISSING_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
@@ -92,6 +93,18 @@ def test_startup_failure_stays_on_loading_screen(
     assert snap_compare_palettes(
         make_app(default_channels=(MISSING_CHANNEL,)),
         run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_startup_with_empty_channel_lists_no_packages(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Starting with a channel that serves repodata without any package: the
+    app opens with an empty package list instead of a failed load."""
+    assert snap_compare_palettes(
+        make_app(default_channels=(EMPTY_CHANNEL,)),
+        run_before=wait_for_idle,
         terminal_size=TERMINAL_SIZE,
     )
 
