@@ -115,15 +115,10 @@ from .widgets import (
 
 _PREVIEW_MAX_BYTES = 256 * 1024
 # How many list entries next to the highlighted one, in each direction, are
-# loaded before they are highlighted, and how many at the end of the list.
+# loaded before they are highlighted, and how many at either end of the list.
 _PREFETCH_WINDOW = 5
+_PREFETCH_HEAD = 2
 _PREFETCH_TAIL = 2
-# Concurrent prefetch loads. A package load is one repodata query, a version
-# load is a handful of range requests into one archive, so the highlighted
-# entry's own load, which does not count against this, keeps its share of the
-# connection.
-_PREFETCH_PACKAGES_PARALLEL = 4
-_PREFETCH_VERSIONS_PARALLEL = 3
 
 
 class CondaMetadataTui(App[None]):
@@ -232,14 +227,16 @@ class CondaMetadataTui(App[None]):
         self._compare_selection: CompareSelection | None = None
         self._compare_screen_open = False
         # Load the entries around the highlighted one ahead of time, so moving
-        # on to them shows their details without a loading placeholder.
+        # on to them shows their details without a loading placeholder. As
+        # many run at once as rattler's ``concurrency.downloads`` setting
+        # allows; the highlighted entry's own load does not count against it.
         self._package_prefetcher: Prefetcher[str] = Prefetcher(
             name="prefetch packages",
             load=self._get_package_records,
             needs_load=self._package_records_need_load,
             spawn=self._spawn_prefetch,
             log=self.log.info,
-            max_parallel=_PREFETCH_PACKAGES_PARALLEL,
+            max_parallel=config.concurrency_downloads,
         )
         self._version_prefetcher: Prefetcher[VersionEntry] = Prefetcher(
             name="prefetch versions",
@@ -248,7 +245,7 @@ class CondaMetadataTui(App[None]):
             spawn=self._spawn_prefetch,
             log=self.log.info,
             describe=self._describe_version_entry,
-            max_parallel=_PREFETCH_VERSIONS_PARALLEL,
+            max_parallel=config.concurrency_downloads,
         )
 
     def compose(self) -> ComposeResult:
@@ -1016,12 +1013,13 @@ class CondaMetadataTui(App[None]):
 
     def _prefetch_around_sidebar_highlight(self, option_index: int) -> None:
         """Queue the loads of the entries ``option_index`` is likely to be
-        left for: its neighbours, a page away, and the end of the list."""
+        left for: its neighbours, a page away, and either end of the list."""
         indices = likely_next_indices(
             option_index,
             self._sidebar_option_count(),
             window=_PREFETCH_WINDOW,
             page=self._sidebar_page_size(),
+            head=_PREFETCH_HEAD,
             tail=_PREFETCH_TAIL,
         )
         if self._mode == "packages":

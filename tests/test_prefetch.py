@@ -26,17 +26,19 @@ from tests.helpers import (
 )
 
 
-def test_likely_next_indices_lists_neighbours_then_pages_then_the_tail() -> None:
-    indices = likely_next_indices(10, 100, window=2, page=20, tail=2)
+def test_likely_next_indices_lists_neighbours_pages_then_both_ends() -> None:
+    indices = likely_next_indices(10, 100, window=2, page=20, head=2, tail=2)
 
-    assert indices == [11, 9, 12, 8, 30, 0, 99, 98]
+    # j/k window, Ctrl+d, Ctrl+u, G, then gg (0 already listed by Ctrl+u).
+    assert indices == [11, 9, 12, 8, 30, 0, 99, 98, 1]
 
 
 def test_likely_next_indices_stays_inside_the_list_and_skips_repeats() -> None:
-    assert likely_next_indices(0, 3, window=5, page=10, tail=2) == [1, 2]
-    assert likely_next_indices(2, 3, window=1, page=10, tail=2) == [1, 0]
-    assert likely_next_indices(0, 1, window=5, page=10, tail=2) == []
-    assert likely_next_indices(0, 0, window=5, page=10, tail=2) == []
+    assert likely_next_indices(0, 3, window=5, page=10, head=2, tail=2) == [1, 2]
+    assert likely_next_indices(2, 3, window=1, page=10, head=2, tail=2) == [1, 0]
+    assert likely_next_indices(50, 100, window=0, page=0, head=1, tail=1) == [99, 0]
+    assert likely_next_indices(0, 1, window=5, page=10, head=2, tail=2) == []
+    assert likely_next_indices(0, 0, window=5, page=10, head=2, tail=2) == []
 
 
 class _ControlledLoads:
@@ -169,6 +171,7 @@ def test_prefetcher_logs_and_reraises_a_failed_load() -> None:
             needs_load=lambda key: True,
             spawn=lambda load: tasks.append(asyncio.ensure_future(load)),
             log=log.append,
+            max_parallel=1,
         )
         prefetcher.schedule(["a"])
         await asyncio.sleep(0)

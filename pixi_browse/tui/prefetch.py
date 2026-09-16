@@ -22,6 +22,7 @@ def likely_next_indices(
     *,
     window: int,
     page: int,
+    head: int,
     tail: int,
 ) -> list[int]:
     """The indices a user highlighting ``index`` of ``count`` entries is
@@ -29,17 +30,23 @@ def likely_next_indices(
 
     That is the next ``window`` entries in both directions, alternating and
     down before up because lists are read top to bottom, then the entries a
-    page down and a page up (``Ctrl+d`` / ``Ctrl+u``) land on, and finally
-    the last ``tail`` entries ``G`` jumps to. ``index`` itself and repeats are
-    left out.
+    page down and a page up (``Ctrl+d`` / ``Ctrl+u``) land on, then the last
+    ``tail`` entries ``G`` jumps to and the first ``head`` entries ``gg``
+    jumps to. ``index`` itself and repeats are left out.
     """
     candidates: list[int] = []
+    # j / k, a few steps in either direction
     for distance in range(1, window + 1):
         candidates.append(index + distance)
         candidates.append(index - distance)
+    # Ctrl+d
     candidates.append(min(index + page, count - 1))
+    # Ctrl+u
     candidates.append(max(index - page, 0))
+    # G
     candidates.extend(range(count - 1, count - 1 - tail, -1))
+    # gg
+    candidates.extend(range(head))
 
     indices: list[int] = []
     for candidate in candidates:
@@ -117,7 +124,7 @@ class Prefetcher[KeyT: Hashable]:
         spawn: Callable[[Awaitable[None]], None],
         log: Callable[[str], None],
         describe: Callable[[KeyT], str] = str,
-        max_parallel: int = 3,
+        max_parallel: int,
     ) -> None:
         if max_parallel < 1:
             raise ValueError("max_parallel must be at least 1")
