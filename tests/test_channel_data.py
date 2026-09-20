@@ -418,3 +418,58 @@ def test_app_creates_a_default_client_without_config() -> None:
 
     assert isinstance(app._client, Client)
     assert app._version_loader._client is app._client
+
+
+def test_prefetch_defers_symlink_targets_until_foreground_load(
+    make_gateway: GatewayFactory,
+    rattler_client: Client,
+    snapshot: SnapshotAssertion,
+) -> None:
+    async def run() -> dict[str, list[tuple[str, str | None]]]:
+        records = await query_package_records(
+            gateway=make_gateway(),
+            channel_names=["conda-forge"],
+            platforms=[Platform("linux-64")],
+            package_name="libzlib",
+        )
+        record = records[0]
+        key = (
+            "libzlib",
+            str(record.version),
+            record.build,
+            record.build_number,
+            record.subdir,
+            record.file_name,
+        )
+        loader = VersionDataLoader(client=rattler_client, max_parallel_loads=2)
+        loader.prefetch("libzlib", {key: record})
+        await loader.wait_for_prefetch()
+        metadata = loader._metadata_cache[key]
+        links = [
+            (path.path, path.link_target)
+            for path in metadata.file_paths
+            if path.is_symlink
+        ]
+        assert links and all(target is None for _, target in links)
+        assert not loader.has_artifact_data(key)
+        assert key not in loader.paths_cache
+
+        # Concurrent foreground callers share the link-resolution load too.
+        first, second = await asyncio.gather(
+            *(
+                loader.load_version_details("libzlib", record, preview_key=key)
+                for _ in range(2)
+            )
+        )
+        assert first is second
+        assert loader.has_artifact_data(key)
+        assert key not in loader._metadata_cache
+        resolved = [
+            (path.path, path.link_target)
+            for path in first.file_paths
+            if path.is_symlink
+        ]
+        assert all(target is not None for _, target in resolved)
+        return {"prefetched": links, "foreground": resolved}
+
+    assert asyncio.run(run()) == snapshot

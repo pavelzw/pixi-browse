@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Hashable, Iterable
+from dataclasses import dataclass, field
 from functools import partial
-from time import perf_counter
 
 
 def likely_next_indices(
@@ -57,73 +57,32 @@ def likely_next_indices(
     return indices
 
 
-# Loads nobody is waiting for that may queue for a slot, at most. Holding down
-# an arrow key asks for one load per keypress, far more than can ever run at
-# once; by the time a slot comes free only the last few of them are still worth
-# having.
+# Retain only a few abandoned foreground requests while the user scrolls.
 MAX_WAITING_LOADS = 8
 
 
 def _discard_log(message: str) -> None:
-    return None
+    pass
 
 
-class _Slot[KeyT]:
-    """A load's place in the queue in front of the semaphore.
-
-    A slot is made by the load it belongs to, so the task waiting on it is
-    whichever one is running right now: the ``owner``. Cancelling a queued load
-    means cancelling that task, and a slot whose owner gave up is a slot that
-    must not be handed over -- nobody is left to pass it on.
-
-    Places are kept as slots rather than as keys because there can be two loads
-    of one key for a moment: one being given up on, which is forgotten while it
-    is still unwinding, and the load a fresh request starts in its place. Keyed
-    by key, the second would take the place of the first, and the first would
-    then wait for a place that no longer exists -- for good, with everyone
-    waiting on it.
-    """
-
-    __slots__ = ("granted", "key", "owner", "ready")
-
-    def __init__(self, key: KeyT) -> None:
-        self.key = key
-        self.granted = False
-        self.owner = asyncio.current_task()
-        self.ready = asyncio.Event()
+@dataclass(eq=False)
+class _Load[KeyT, ValueT]:
+    key: KeyT
+    fetch: Callable[[], Awaitable[ValueT]]
+    result: asyncio.Future[ValueT] = field(
+        default_factory=lambda: asyncio.get_running_loop().create_future()
+    )
+    task: asyncio.Task[ValueT] | None = None
+    waiters: int = 0
+    speculative: bool = False
 
 
 class InFlightLoads[KeyT: Hashable, ValueT]:
-    """One running load per key, at most ``max_parallel`` of them at a time.
+    """Deduplicate loads and schedule foreground work before neighboring keys.
 
-    A caller that is cancelled only stops waiting: the load itself runs on,
-    because the cache it fills is what the next request for the key reads,
-    and because cancelling a request rattler coalesced other requests onto
-    fails those too. That leaves a load behind on every entry a held-down
-    arrow key moves the highlight over, so the number of them running at once
-    is capped here instead: without a cap they all fetch at the same time over
-    the same connection and every one of them crawls.
-
-    A load that has not started has nothing to lose, so the queue in front of
-    the semaphore is where requests are given up on. Slots go to the newest
-    load queued, because the entry highlighted a moment ago is the one being
-    waited for while the one highlighted ten presses ago is not, and once more
-    than ``max_waiting`` loads queue up, the ones queued longest are cancelled.
-
-    Which of them are cancelled is decided by who is waiting, counted as
-    callers come and go rather than fixed when the load starts: a ``background``
-    load -- one started only in case its entry is highlighted next -- has
-    nobody, and so has the load of an entry whose highlight has moved on, which
-    is a prefetch in all but name from then on. Those are the last of the queue
-    to be given a slot and the first to be given up on, and **a load somebody is
-    waiting for is never given up on at all**: it is the entry on screen, and a
-    loading placeholder that never goes away is worse than a queue a few places
-    too long.
-
-    Every step is logged. What a load does with its slot goes to ``log_detail``,
-    since there is a line of it for every keypress; what should be noticed
-    without looking for it -- a load given up on, every load dropped -- goes to
-    ``log``.
+    Started loads are shielded: cancelling a rattler query can also fail other
+    requests coalesced onto it. Queued work can be discarded safely. Prefetch
+    reserves one slot for foreground work and follows the supplied key order.
     """
 
     def __init__(
@@ -136,43 +95,43 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         log_detail: Callable[[str], None] = _discard_log,
         describe: Callable[[KeyT], str] = str,
     ) -> None:
-        if max_parallel < 1:
-            raise ValueError("max_parallel must be at least 1")
-        if max_waiting < 1:
-            raise ValueError("max_waiting must be at least 1")
+        if max_parallel < 1 or max_waiting < 1:
+            raise ValueError("load limits must be at least 1")
         self._max_parallel = max_parallel
         self._max_waiting = max_waiting
         self._name = name
         self._log = log
         self._log_detail = log_detail
         self._describe = describe
-        self._tasks: dict[KeyT, asyncio.Future[ValueT]] = {}
-        # The loads queued for a slot, the one queued longest first.
-        self._queue: list[_Slot[KeyT]] = []
-        # How many callers are waiting for each key right now.
-        self._waiters: dict[KeyT, int] = {}
-        self._running = 0
+        self._loads: dict[KeyT, _Load[KeyT, ValueT]] = {}
+        self._queue: list[_Load[KeyT, ValueT]] = []
+        self._active: set[_Load[KeyT, ValueT]] = set()
 
     def __contains__(self, key: KeyT) -> bool:
-        return key in self._tasks
+        return key in self._loads
 
     def __len__(self) -> int:
-        return len(self._tasks)
+        return len(self._loads)
 
     @property
     def running(self) -> int:
-        """How many loads hold a slot and are fetching right now."""
-        return self._running
+        return len(self._active)
 
     @property
     def waiting(self) -> list[KeyT]:
-        """The keys queued for a slot, the one queued longest first."""
-        return [slot.key for slot in self._queue]
+        return [job.key for job in self._queue]
 
     @property
     def waited_for(self) -> list[KeyT]:
-        """The keys a caller is waiting for right now, queued or running."""
-        return list(self._waiters)
+        return [job.key for job in self._loads.values() if job.waiters]
+
+    def _new(
+        self, key: KeyT, fetch: Callable[[], Awaitable[ValueT]]
+    ) -> _Load[KeyT, ValueT]:
+        job = _Load(key, fetch)
+        self._loads[key] = job
+        self._queue.append(job)
+        return job
 
     async def run(
         self,
@@ -181,354 +140,113 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         *,
         background: bool = False,
     ) -> ValueT:
-        """Await the load of ``key``, starting ``load()`` unless one is running.
-
-        ``background`` marks a caller that is not waiting for the load to
-        finish, only asking for it to be started.
-        """
-        if background:
-            return await self._joined(key, load)
-        # Counted while the caller waits and only while it waits: a highlight
-        # that has moved on leaves its load running, and that load is worth no
-        # more than a prefetch from then on.
-        self._waiters[key] = self._waiters.get(key, 0) + 1
+        job = self._loads.get(key)
+        if job is None or (job.task is not None and job.task.cancelled()):
+            job = self._new(key, load)
+        elif job in self._queue:
+            self._queue.remove(job)
+            self._queue.append(job)
+        if not background:
+            job.waiters += 1
+        self._pump()
+        self._trim()
         try:
-            return await self._joined(key, load)
+            return await asyncio.shield(job.result)
         finally:
-            remaining = self._waiters[key] - 1
-            if remaining:
-                self._waiters[key] = remaining
-            else:
-                del self._waiters[key]
+            if not background:
+                job.waiters -= 1
+            self._trim()
+            self._pump()
 
-    async def _joined(self, key: KeyT, load: Callable[[], Awaitable[ValueT]]) -> ValueT:
-        """Await the load of ``key``, sharing one that is already going."""
-        task = self._tasks.get(key)
-        if task is None or task.cancelled():
-            # A cancelled load is a load given up on, and awaiting it would hand
-            # its cancellation to a caller that has just asked for the key. It
-            # is only in the table until its own callback runs; a fresh load
-            # takes its place here and now.
-            task = asyncio.ensure_future(self._gated(key, load))
-            self._tasks[key] = task
-            task.add_done_callback(partial(self._forget, key))
-        else:
-            still_waiting = self._requeue(key)
-            place = "queued" if still_waiting else "running"
-            self._log_detail(
-                f"{self._name}: {self._describe(key)} joins the load already "
-                f"{place}, {self.state}"
-            )
-        return await asyncio.shield(task)
-
-    @property
-    def state(self) -> str:
-        """How full the semaphore and the queue in front of it are."""
-        return (
-            f"running={self._running}/{self._max_parallel} "
-            f"waiting={len(self._queue)}/{self._max_waiting} "
-            f"loads={len(self._tasks)}"
-        )
-
-    def _waited_on(self, key: KeyT) -> bool:
-        """Whether a caller is waiting for ``key`` right now."""
-        return self._waiters.get(key, 0) > 0
-
-    async def _gated(self, key: KeyT, load: Callable[[], Awaitable[ValueT]]) -> ValueT:
-        await self._acquire(key)
-        try:
-            return await load()
-        finally:
-            # What the load itself found is logged by whoever runs it; what it
-            # leaves behind is its slot, taken over here by the next load in
-            # the queue if there is one.
-            self._release()
-            self._log_detail(
-                f"{self._name}: {self._describe(key)} released its slot, {self.state}"
-            )
-
-    async def _acquire(self, key: KeyT) -> None:
-        """Wait for one of the ``max_parallel`` slots.
-
-        Nothing is awaited before the slot count is read, so a burst of
-        requests within one tick queues up rather than all slipping through.
-        """
-        label = self._describe(key)
-        kind = "waited on" if self._waited_on(key) else "prefetch"
-        if self._running < self._max_parallel:
-            self._running += 1
-            self._log_detail(f"{self._name}: {label} starts ({kind}), {self.state}")
-            return
-
-        slot = _Slot(key)
-        self._queue.append(slot)
-        if self._drop_longest_waiting(slot):
-            # The queue was one too long with this load in it, and this load is
-            # the one it gave up on -- a prefetch, since a load being waited on
-            # is never given up on. Its place is gone, so waiting for it to come
-            # up would be waiting for good; nothing was started, so there is
-            # nothing to unwind either. Giving up looks to the caller like any
-            # other load dropped from the queue.
-            raise asyncio.CancelledError(
-                f"{self._name}: gave up on {label} before it started"
-            )
-        queued = perf_counter()
-        self._log_detail(f"{self._name}: {label} queued ({kind}), {self.state}")
-        try:
-            await slot.ready.wait()
-        except asyncio.CancelledError:
-            if slot in self._queue:
-                self._queue.remove(slot)
-            if slot.granted:
-                # A slot was handed over just before this load was dropped;
-                # pass it on rather than let it go to waste.
-                self._release()
-            raise
-        self._log_detail(
-            f"{self._name}: {label} starts ({kind}) after queueing for "
-            f"{perf_counter() - queued:.3f}s, {self.state}"
-        )
-
-    def _release(self) -> None:
-        """Hand the slot on to the load most worth running, or give it up."""
-        while (slot := self._next_waiting()) is not None:
-            self._queue.remove(slot)
-            if slot.owner is None or slot.owner.done():
-                # The load gave up while its place was coming up. Handing the
-                # slot over would lose it: nothing of that load runs any more
-                # to give it back. The next load in the queue gets it instead.
-                continue
-            slot.granted = True
-            slot.ready.set()
-            return
-        self._running -= 1
-
-    def _next_waiting(self) -> _Slot[KeyT] | None:
-        """The newest queued load, the ones being waited for going first."""
-        newest: _Slot[KeyT] | None = None
-        for slot in reversed(self._queue):
-            if self._waited_on(slot.key):
-                return slot
-            if newest is None:
-                newest = slot
-        return newest
-
-    def _most_droppable(self) -> _Slot[KeyT] | None:
-        """The load queued longest that nobody is waiting for, if there is one."""
-        for slot in self._queue:
-            if not self._waited_on(slot.key):
-                return slot
-        return None
-
-    def _requeue(self, key: KeyT) -> bool:
-        """Move a queued load to the end of the queue: it was asked for again,
-        so it is the freshest request there is.
-
-        Returns whether the load was still queued rather than already running.
-        """
-        for index, slot in enumerate(self._queue):
-            if slot.key == key:
-                self._queue.append(self._queue.pop(index))
-                return True
-        return False
-
-    def _drop_longest_waiting(self, mine: _Slot[KeyT]) -> bool:
-        """Give up on the loads queued longest, down to ``max_waiting``.
-
-        Only on loads nobody is waiting for: the highlighted entry queues here
-        too, and giving up on that one leaves a loading placeholder on screen
-        with nothing left to replace it. A queue of loads that are all being
-        waited for is left over long instead -- there are only ever as many of
-        those as there are callers.
-
-        Returns whether ``mine`` -- the load queueing right now -- was one of
-        them: it cannot be stopped by cancelling it, because a task that cancels
-        itself carries on to its next ``await`` first, which is one await too
-        many when what it awaits is the place it just lost. It is told to stop
-        itself instead.
-        """
-        dropped_itself = False
-        while len(self._queue) > self._max_waiting:
-            slot = self._most_droppable()
-            if slot is None:
-                self._log(
-                    f"{self._name}: {len(self._queue)} loads queued and every one "
-                    f"of them is being waited for, keeping them all, {self.state}"
-                )
-                break
-            self._queue.remove(slot)
-            # Forgetting the load here, rather than waiting for the cancelled
-            # task's callback, lets a request that comes back for this key start
-            # a load again instead of joining a doomed one. Only this load
-            # though: the key may already have a newer one of its own.
-            if self._tasks.get(slot.key) is slot.owner:
-                del self._tasks[slot.key]
-            self._log(
-                f"{self._name}: gave up on {self._describe(slot.key)} before it "
-                f"started, {self.state}"
-            )
-            if slot is mine:
-                dropped_itself = True
-            elif slot.owner is not None:
-                slot.owner.cancel()
-        return dropped_itself
-
-    def _forget(self, key: KeyT, task: asyncio.Future[ValueT]) -> None:
-        if self._tasks.get(key) is task:
-            del self._tasks[key]
-        # Every waiter may have been cancelled by the time the load fails;
-        # reading the exception keeps asyncio from reporting it as never
-        # retrieved.
-        if not task.cancelled():
-            task.exception()
-
-    def cancel(self) -> None:
-        """Cancel every running load; their results would be stale."""
-        if self._tasks or self._queue:
-            self._log(f"{self._name}: dropping every load, {self.state}")
-        # The queued loads by their slots rather than by the keys they are
-        # registered under: a load dropped from the queue is forgotten while it
-        # is still unwinding, and one waiting on a place that is being cleared
-        # here has to be stopped whether it is still registered or not.
-        doomed: list[asyncio.Future[ValueT] | asyncio.Task[object]] = [
-            *self._tasks.values(),
-            *(slot.owner for slot in self._queue if slot.owner is not None),
-        ]
-        self._tasks.clear()
-        self._queue.clear()
-        for task in doomed:
-            task.cancel()
-
-
-class Prefetcher[KeyT: Hashable]:
-    """Loads the keys near the highlighted entry, a few at a time.
-
-    ``schedule`` replaces the queue with the keys given, in the order they
-    should load, and starts loads while fewer than ``max_parallel`` run. Keys
-    that ``needs_load`` reports as loaded or loading are skipped. A running
-    load is never cancelled: its key was next to the highlight a moment ago,
-    so its result is worth keeping in the cache either way.
-
-    Loads run through ``spawn`` so the app can run them as workers. They are
-    handed over as a callable rather than as a coroutine, so that a load whose
-    worker is cancelled before the worker ever runs is never started at all.
-
-    Every step is written to a log, so a loading placeholder that does show can
-    be traced back to why the entry was not ready: the step-by-step of the queue
-    goes to ``log_detail``, only a prefetch given up on or failed to ``log``.
-    """
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        load: Callable[[KeyT], Awaitable[object]],
-        needs_load: Callable[[KeyT], bool],
-        spawn: Callable[[Callable[[], Awaitable[None]]], None],
-        log: Callable[[str], None] = _discard_log,
-        log_detail: Callable[[str], None] = _discard_log,
-        describe: Callable[[KeyT], str] = str,
-        max_parallel: int,
+    def schedule(
+        self, keys: Iterable[KeyT], load: Callable[[KeyT], Awaitable[ValueT]]
     ) -> None:
-        if max_parallel < 1:
-            raise ValueError("max_parallel must be at least 1")
-        self._name = name
-        self._load = load
-        self._needs_load = needs_load
-        self._spawn = spawn
-        self._log = log
-        self._log_detail = log_detail
-        self._describe = describe
-        self._max_parallel = max_parallel
-        self._queue: list[KeyT] = []
-        self._running: set[KeyT] = set()
-
-    @property
-    def queued(self) -> list[KeyT]:
-        return list(self._queue)
-
-    @property
-    def running(self) -> set[KeyT]:
-        return set(self._running)
-
-    def is_running(self, key: KeyT) -> bool:
-        return key in self._running
-
-    @property
-    def state(self) -> str:
-        """How many of the prefetch slots are taken, and how many keys are
-        still queued for one."""
-        return (
-            f"running={len(self._running)}/{self._max_parallel} "
-            f"queued={len(self._queue)}"
-        )
-
-    def schedule(self, keys: Iterable[KeyT]) -> None:
-        """Replace the queue with ``keys`` and start loading."""
-        wanted: list[KeyT] = []
-        for key in keys:
-            if key in wanted or key in self._running or not self._needs_load(key):
-                continue
-            wanted.append(key)
-        dropped = [key for key in self._queue if key not in wanted]
-        self._queue = wanted
-        if wanted or dropped:
-            self._log_detail(
-                f"{self._name}: queued {len(wanted)} "
-                f"[{', '.join(self._describe(key) for key in wanted)}]"
-                f" dropped={len(dropped)} {self.state}"
-            )
-        self._start_queued()
+        """Replace speculative work; callers omit cached keys."""
+        wanted = list(dict.fromkeys(keys)) if self._max_parallel > 1 else []
+        for queued in list(self._queue):
+            if queued.speculative and not queued.waiters and queued.key not in wanted:
+                self._drop(queued)
+        for key in wanted:
+            job = self._loads.get(key)
+            if job is None:
+                job = self._new(key, partial(load, key))
+                job.speculative = True
+            if job.speculative and job in self._queue:
+                self._queue.remove(job)
+                self._queue.append(job)
+        self._pump()
 
     def clear(self) -> None:
-        """Drop the queue; the loads already running finish on their own."""
-        if self._queue:
-            self._log_detail(
-                f"{self._name}: dropped {len(self._queue)} queued, {self.state}"
+        """Discard speculative work that has not started."""
+        for job in list(self._queue):
+            if job.speculative and not job.waiters:
+                self._drop(job)
+
+    def _pump(self) -> None:
+        while self._queue and self.running < self._max_parallel:
+            foreground = [job for job in self._queue if job.waiters]
+            abandoned = [job for job in self._queue if not job.speculative]
+            job = (
+                foreground[-1]
+                if foreground
+                else (abandoned[-1] if abandoned else self._queue[0])
             )
-        self._queue.clear()
+            if (
+                not job.waiters
+                and job.speculative
+                and self.running >= self._max_parallel - 1
+            ):
+                return
+            self._queue.remove(job)
+            self._active.add(job)
+            job.task = asyncio.create_task(self._fetch(job))
+            job.task.add_done_callback(partial(self._finished, job))
+            self._log_detail(f"{self._name}: loading {self._describe(job.key)}")
+
+    async def _fetch(self, job: _Load[KeyT, ValueT]) -> ValueT:
+        return await job.fetch()
+
+    def _finished(self, job: _Load[KeyT, ValueT], task: asyncio.Task[ValueT]) -> None:
+        # Task callbacks also run when cancellation precedes the first step.
+        self._active.discard(job)
+        if self._loads.get(job.key) is job:
+            del self._loads[job.key]
+        if task.cancelled():
+            job.result.cancel()
+        elif (error := task.exception()) is not None:
+            self._log(f"{self._name}: failed {self._describe(job.key)}: {error!r}")
+            job.result.set_exception(error)
+            job.result.exception()  # A speculative load may have no waiter.
+        else:
+            job.result.set_result(task.result())
+        self._pump()
+
+    def _drop(self, job: _Load[KeyT, ValueT]) -> None:
+        self._queue.remove(job)
+        if self._loads.get(job.key) is job:
+            del self._loads[job.key]
+        job.result.cancel()
+
+    def _trim(self) -> None:
+        abandoned = [job for job in self._queue if not job.speculative]
+        for job in abandoned:
+            if len(abandoned) <= self._max_waiting:
+                break
+            if not job.waiters:
+                self._drop(job)
+                abandoned = [other for other in abandoned if other is not job]
+
+    async def wait(self) -> None:
+        """Wait for scheduled work, including failures, without cancelling it."""
+        results = [job.result for job in self._loads.values()]
+        if results:
+            await asyncio.shield(asyncio.gather(*results, return_exceptions=True))
 
     def cancel(self) -> None:
-        """Drop the queue and the slots the running loads hold, for a caller
-        that is cancelling the loads themselves.
-
-        A load gives its slot back on the way out, but a load cancelled before
-        it ever ran never gets to: nothing of it runs, not even its cleanup.
-        Waiting for it to hand the slot over would mean waiting forever, so the
-        slots are given up here instead.
-        """
-        if self._queue or self._running:
-            self._log(f"{self._name}: dropping every prefetch, {self.state}")
-        self._queue.clear()
-        self._running.clear()
-
-    def _start_queued(self) -> None:
-        while self._queue and len(self._running) < self._max_parallel:
-            key = self._queue.pop(0)
-            if key in self._running or not self._needs_load(key):
-                continue
-            self._running.add(key)
-            self._spawn(partial(self._run, key))
-
-    async def _run(self, key: KeyT) -> None:
-        label = self._describe(key)
-        self._log_detail(f"{self._name}: loading {label} {self.state}")
-        started = perf_counter()
-        try:
-            await self._load(key)
-        except asyncio.CancelledError:
-            self._log_detail(f"{self._name}: cancelled {label}")
-            raise
-        except Exception as exc:
-            self._log(
-                f"{self._name}: failed {label} after "
-                f"{perf_counter() - started:.3f}s: {exc!r}"
-            )
-            raise
-        else:
-            self._log_detail(
-                f"{self._name}: loaded {label} in {perf_counter() - started:.3f}s"
-            )
-        finally:
-            self._running.discard(key)
-            self._start_queued()
+        """Discard queued work and cancel active loads on cache invalidation."""
+        for job in list(self._queue):
+            self._drop(job)
+        for job in self._active:
+            assert job.task is not None
+            job.task.cancel()
+        self._loads.clear()

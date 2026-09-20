@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from time import perf_counter
 
@@ -50,10 +50,7 @@ class VersionDataLoader:
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
-        # The artifact loads running right now, so that the highlighted
-        # version and the prefetch of its neighbours never fetch one archive
-        # twice, and so that scrolling the list cannot pile up more fetches
-        # than the connection has room for.
+        self._metadata_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
         self._artifact_data_loads: InFlightLoads[
             VersionPreviewKey, VersionArtifactData
         ] = InFlightLoads(
@@ -70,10 +67,32 @@ class VersionDataLoader:
     def has_artifact_data(self, preview_key: VersionPreviewKey) -> bool:
         return preview_key in self.artifact_data_cache
 
+    def prefetch(
+        self, package_name: str, records: Mapping[VersionPreviewKey, RepoDataRecord]
+    ) -> None:
+        self._artifact_data_loads.schedule(
+            (
+                key
+                for key in records
+                if key not in self.artifact_data_cache
+                and key not in self._metadata_cache
+            ),
+            lambda key: self._fetch_version_artifact_data(
+                package_name, records[key], preview_key=key
+            ),
+        )
+
+    def clear_prefetch(self) -> None:
+        self._artifact_data_loads.clear()
+
+    async def wait_for_prefetch(self) -> None:
+        await self._artifact_data_loads.wait()
+
     def clear_caches(self) -> None:
         # A load still running belongs to the selection being replaced and
         # must not fill the cleared caches with its results.
         self._artifact_data_loads.cancel()
+        self._metadata_cache.clear()
         self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
@@ -88,6 +107,7 @@ class VersionDataLoader:
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
         self._artifact_data_loads.cancel()
+        self._metadata_cache.clear()
         self.archive_cache.clear()
         self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
@@ -135,7 +155,11 @@ class VersionDataLoader:
         return str(rattler_build_version)
 
     async def get_package_paths(
-        self, preview_key: VersionPreviewKey, archive: PackageArchive
+        self,
+        preview_key: VersionPreviewKey,
+        archive: PackageArchive,
+        *,
+        resolve_links: bool = True,
     ) -> list[PackageFile]:
         cached = self.paths_cache.get(preview_key)
         if cached is not None:
@@ -161,6 +185,8 @@ class VersionDataLoader:
             for path in paths_json.paths
         ]
         symlink_paths = {path.path for path in paths if path.is_symlink}
+        if symlink_paths and not resolve_links:
+            return paths
         if symlink_paths:
             link_targets: dict[str, str | None] = {}
             async for entry in archive.stream("pkg"):
@@ -299,13 +325,30 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
+        metadata = self._metadata_cache.get(preview_key)
+        if metadata is None:
+            metadata = await self._artifact_data_loads.run(
+                preview_key,
+                lambda: self._fetch_version_artifact_data(
+                    package_name, record, preview_key=preview_key
+                ),
+                background=background,
+            )
+        if background or preview_key in self.artifact_data_cache:
+            return metadata
         return await self._artifact_data_loads.run(
-            preview_key,
-            lambda: self._fetch_version_artifact_data(
-                package_name, record, preview_key=preview_key
-            ),
-            background=background,
+            preview_key, lambda: self._resolve_artifact_links(preview_key, metadata)
         )
+
+    async def _resolve_artifact_links(
+        self, preview_key: VersionPreviewKey, metadata: VersionArtifactData
+    ) -> VersionArtifactData:
+        archive = self.archive_cache[preview_key]
+        paths = await self.get_package_paths(preview_key, archive)
+        complete = replace(metadata, file_paths=tuple(paths))
+        self.artifact_data_cache[preview_key] = complete
+        self._metadata_cache.pop(preview_key, None)
+        return complete
 
     async def _fetch_version_artifact_data(
         self,
@@ -314,11 +357,11 @@ class VersionDataLoader:
         *,
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
-        # The start is announced by the load taking its slot (see
-        # ``InFlightLoads``), so only what the fetch found is logged here.
         started = perf_counter()
         archive = await self.get_package_archive(preview_key, str(record.url))
-        package_paths = await self.get_package_paths(preview_key, archive)
+        package_paths = await self.get_package_paths(
+            preview_key, archive, resolve_links=False
+        )
         info_files = await self.get_info_files(archive)
         about_urls = AboutUrls()
         run_exports: RunExportsJson | None = None
@@ -354,7 +397,13 @@ class VersionDataLoader:
             run_exports=run_exports,
             repodata_patches=repodata_patches,
         )
-        self.artifact_data_cache[preview_key] = artifact_data
+        # Symlink targets require reading the pkg payload, only on demand.
+        cache = (
+            self._metadata_cache
+            if any(path.is_symlink for path in package_paths)
+            else self.artifact_data_cache
+        )
+        cache[preview_key] = artifact_data
         self._log(
             f"package: fetched {record.subdir}/{record.file_name} in "
             f"{perf_counter() - started:.3f}s "

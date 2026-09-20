@@ -7,12 +7,8 @@ offline channel; see ``test_snapshots.py`` for how snapshots are reviewed.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-from rattler.config import Config
 from textual.pilot import Pilot
-from textual.widgets import OptionList
 
 from tests.helpers import (
     NARROW_TERMINAL_SIZE,
@@ -22,95 +18,6 @@ from tests.helpers import (
     open_versions,
     wait_for_idle,
 )
-
-
-@pytest.mark.parametrize("downloads", [1, 4])
-def test_rapid_version_navigation_debounces_loads(
-    snap_compare_palettes: SnapComparePalettes,
-    make_app: AppFactory,
-    rattler_config: Config,
-    downloads: int,
-) -> None:
-    rattler_config.set("concurrency.downloads", str(downloads))
-    app = make_app(config=rattler_config)
-
-    async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
-        sidebar = app.query_one("#sidebar-list", OptionList)
-        entries = [
-            (index, app._version_preview_key("pixi-browse", row.entry))
-            for index, row in enumerate(app._version_rows)
-            if row.kind == "entry" and row.entry is not None
-        ]
-        first, second, third, last = entries
-        cached = app._version_artifact_data_cache[first[1]]
-        app._version_loader.clear_caches()
-        app._version_artifact_data_cache[first[1]] = cached
-
-        # Move faster than the debounce, giving workers a turn after each move.
-        # Neither foreground downloads nor prefetch should start for these rows.
-        for index, key in (second, third):
-            app._set_sidebar_highlight(index)
-            await asyncio.sleep(0)
-            assert not app._version_loader.is_loading(key)
-            assert not app._version_prefetcher.running
-            assert not app._version_prefetcher.queued
-        assert set(app._version_artifact_data_cache) == {first[1]}
-
-        request = app._version_preview_request
-        app.on_option_list_option_highlighted(
-            OptionList.OptionHighlighted(
-                sidebar, sidebar.get_option_at_index(second[0]), second[0]
-            )
-        )
-        assert app._pending_preview_version_key == third[1]
-        assert app._version_preview_request is request
-
-        # Returning to a cached row renders immediately, without the pause.
-        app._set_sidebar_highlight(first[0])
-        assert app._previewed_version_key == first[1]
-        assert app._main_panel_shows_version_details()
-
-        app._set_sidebar_highlight(last[0])
-        await wait_for_idle(pilot)
-        assert app._previewed_version_key == last[1]
-        expected = (
-            {first[1], last[1]} if downloads == 1 else {key for _, key in entries}
-        )
-        assert set(app._version_artifact_data_cache) == expected
-
-    assert snap_compare_palettes(
-        app, run_before=run_before, terminal_size=TERMINAL_SIZE
-    )
-
-
-def test_single_download_slot_skips_prefetch(
-    snap_compare_palettes: SnapComparePalettes,
-    make_app: AppFactory,
-    rattler_config: Config,
-) -> None:
-    """One download slot belongs to the selected entry, in both lists."""
-    rattler_config.set("concurrency.downloads", "1")
-    app = make_app(config=rattler_config)
-
-    async def run_before(pilot: Pilot[None]) -> None:
-        await wait_for_idle(pilot)
-        assert set(app._package_records_cache) == {app._visible_package_names[0]}
-        assert not app._package_prefetcher.running
-        assert not app._package_prefetcher.queued
-
-        await open_versions(pilot, package_index=1)
-        entry = app._highlighted_version_entry()
-        assert entry is not None
-        key = app._version_preview_key("pixi-browse", entry)
-        assert set(app._version_artifact_data_cache) == {key}
-        assert app._previewed_version_key == key
-        assert not app._version_prefetcher.running
-        assert not app._version_prefetcher.queued
-
-    assert snap_compare_palettes(
-        app, run_before=run_before, terminal_size=TERMINAL_SIZE
-    )
 
 
 @pytest.mark.parametrize("key", ["l", "1"])
