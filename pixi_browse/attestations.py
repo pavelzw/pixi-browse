@@ -17,8 +17,6 @@ and nothing is enforced.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from rattler.networking import Client
 from rattler.repo_data import RepoDataRecord
 from rattler.sigstore import (
@@ -66,29 +64,38 @@ async def verify_record(record: RepoDataRecord, *, client: Client) -> Attestatio
     if record.attestations_sha256 is None:
         return AttestationData()
 
-    sidecar = AttestationData(
-        status="unverified",
-        sidecar_url=sidecar_url(record),
-        sidecar_sha256=record.attestations_sha256.hex(),
-    )
+    url = sidecar_url(record)
+    digest = record.attestations_sha256.hex()
     try:
         outcome = await verify_attestation(record, BROWSE_POLICY, client)
     except Exception as exc:
         # `BROWSE_POLICY` reports rather than raises, so this is the transport
         # and the unforeseen: a sidecar the channel does not serve after all,
         # a trusted root that cannot be loaded.
-        return replace(sidecar, warnings=(str(exc),))
+        return AttestationData(
+            status="unverified",
+            sidecar_url=url,
+            sidecar_sha256=digest,
+            warnings=(str(exc),),
+        )
 
     attestation = outcome.attestation
+    warnings = tuple(outcome.warnings)
     if attestation is None:
-        return replace(sidecar, warnings=tuple(outcome.warnings))
-    return replace(
-        sidecar,
+        return AttestationData(
+            status="unverified",
+            sidecar_url=url,
+            sidecar_sha256=digest,
+            warnings=warnings,
+        )
+    return AttestationData(
         status="verified",
+        sidecar_url=url,
+        sidecar_sha256=digest,
         identity=attestation.identity,
         issuer=attestation.issuer,
         integrated_time=attestation.integrated_time,
         target_channel=attestation.target_channel,
         bundle_index=attestation.index,
-        warnings=tuple(outcome.warnings),
+        warnings=warnings,
     )
