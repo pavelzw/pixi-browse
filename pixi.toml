@@ -7,12 +7,19 @@ preview = ["pixi-build"]
 
 [tasks]
 demo = "vhs .github/assets/demo-dark.tape && vhs .github/assets/demo-light.tape"
-dev = "textual run --dev pixi_browse/__main__.py"
+# Every log line also lands in textual.log (gitignored), including the debug
+# detail the console below filters out, so a run can be read back afterwards.
+dev = { cmd = "textual run --dev pixi_browse/__main__.py", env = { TEXTUAL_LOG = "textual.log" } }
 console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
-py-rattler = "0d"
 typer = "0d"
+# The macOS 27 SDK tags its .tbd stubs with the new arm64e.x1 target, which
+# libtapi only learned to skip in tapi 1600.0.11.8 build 4 (2026-09-17). Without
+# it the conda-forge linker ignores libSystem and every source build of
+# py-rattler fails to link. Can be dropped once that build ages past the
+# workspace cutoff.
+tapi = "0d"
 
 [package]
 name = "pixi-browse"
@@ -25,7 +32,7 @@ hatchling = "*"
 [package.run-dependencies]
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
-py-rattler = ">=0.26.0,<0.27"
+py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.

@@ -77,6 +77,37 @@ def channel_manifest() -> ChannelManifest:
     return ensure_channel_artifacts()
 
 
+# A publication (CEP-0047) is assigned by the indexer, so it lands one day
+# after the artifact was built rather than at a time the artifact itself knows.
+INDEXED_TIMESTAMP_DELAY_MS = 24 * 60 * 60 * 1000
+# Artifacts too old to carry a build timestamp still need a publication, so they
+# share this one: 2026-01-01T00:00:00Z in Unix milliseconds.
+INDEXED_TIMESTAMP_FALLBACK_MS = 1767225600000
+
+
+def _freeze_indexed_timestamps(channel_dir: Path) -> None:
+    """Rewrite the ``indexed_timestamp`` of every indexed record to a value
+    derived from the artifact's build timestamp.
+
+    ``index_fs`` stamps records it publishes for the first time with the current
+    time, which would change every snapshot on every run. Reindexing preserves
+    the publications already in ``repodata.json``, so rewriting them there and
+    indexing once more spreads the frozen values to the zstd and sharded
+    repodata the app actually reads.
+    """
+    for repodata_path in sorted(channel_dir.glob("*/repodata.json")):
+        repodata = json.loads(repodata_path.read_text())
+        for key in ("packages", "packages.conda"):
+            for record in repodata.get(key, {}).values():
+                build_timestamp = record.get("timestamp")
+                record["indexed_timestamp"] = (
+                    build_timestamp + INDEXED_TIMESTAMP_DELAY_MS
+                    if build_timestamp is not None
+                    else INDEXED_TIMESTAMP_FALLBACK_MS
+                )
+        repodata_path.write_text(json.dumps(repodata))
+
+
 @pytest.fixture(scope="session")
 def fixture_channels_dir(
     channel_manifest: ChannelManifest, tmp_path_factory: pytest.TempPathFactory
@@ -90,6 +121,8 @@ def fixture_channels_dir(
             destination = channel_dir / artifact.subdir / artifact.file_name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact.local_path, destination)
+        asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
+        _freeze_indexed_timestamps(channel_dir)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
         notices_path = CHANNEL_NOTICES_DIR / f"{channel_name}.json"
         if notices_path.exists():

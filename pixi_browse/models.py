@@ -14,7 +14,7 @@ DependencyTab = Literal["dependencies", "extra_depends", "constraints", "run_exp
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 # Mirrors the return type of py-rattler's `FileMode.mode`, so it can be assigned
-# straight from there once https://github.com/conda/rattler/pull/2789 lands.
+# straight from there.
 PrefixReplacementMode = Literal["binary", "text", "unknown"]
 MetadataRow = tuple[str, str]
 
