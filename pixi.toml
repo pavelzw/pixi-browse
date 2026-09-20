@@ -13,6 +13,12 @@ console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 [exclude-newer]
 typer = "0d"
 pytest-textual-snapshot = "0d"
+# The macOS 27 SDK tags its .tbd stubs with the new arm64e.x1 target, which
+# libtapi only learned to skip in tapi 1600.0.11.8 build 4 (2026-09-17). Without
+# it the conda-forge linker ignores libSystem and every source build of
+# py-rattler fails to link. Can be dropped once that build ages past the
+# workspace cutoff.
+tapi = "0d"
 
 [package]
 name = "pixi-browse"
