@@ -127,6 +127,7 @@ _PREFETCH_TAIL = 2
 # connection long before that, and every fetch past this one only takes
 # bandwidth away from the entry the user is looking at.
 _MAX_PARALLEL_LOADS = 4
+_SIDEBAR_LOAD_DELAY = 0.1
 
 
 class CondaMetadataTui(App[None]):
@@ -645,6 +646,7 @@ class CondaMetadataTui(App[None]):
         # it must not block the next request for the same key.
         self.workers.cancel_group(self, "package-preview")
         self.workers.cancel_group(self, "version-preview")
+        self.workers.cancel_group(self, "prefetch-delay")
         self._package_preview_request = None
         self._version_preview_request = None
         # The prefetch workers go the same way, so the prefetchers are told to
@@ -658,6 +660,7 @@ class CondaMetadataTui(App[None]):
         self.workers.cancel_group(self, "prefetch")
 
     def _clear_version_state(self) -> None:
+        self.workers.cancel_group(self, "prefetch-delay")
         self._current_versions.clear()
         self._version_subdirs.clear()
         self._versions_by_subdir.clear()
@@ -1051,6 +1054,33 @@ class CondaMetadataTui(App[None]):
     def _spawn_prefetch(self, load: Callable[[], Awaitable[None]]) -> None:
         self.run_worker(load, group="prefetch", exit_on_error=False)
 
+    def _schedule_sidebar_prefetch(self, option_index: int) -> None:
+        # Stop replenishing the old neighbourhood while keys repeat. Downloads
+        # already running can still finish and populate the cache.
+        self._package_prefetcher.clear()
+        self._version_prefetcher.clear()
+        sidebar = self.query_one("#sidebar-list", OptionList)
+        option = sidebar.get_option_at_index(option_index)
+        mode = self._mode
+        package_name = self._selected_package
+
+        async def after_pause() -> None:
+            await asyncio.sleep(_SIDEBAR_LOAD_DELAY)
+            if (
+                self._mode == mode
+                and self._selected_package == package_name
+                and sidebar.highlighted == option_index
+                and sidebar.get_option_at_index(option_index) is option
+            ):
+                self._prefetch_around_sidebar_highlight(option_index)
+
+        self.run_worker(
+            after_pause(),
+            group="prefetch-delay",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
     def _prefetch_around_sidebar_highlight(self, option_index: int) -> None:
         """Queue the loads of the entries ``option_index`` is likely to be
         left for: its neighbours, a page away, and either end of the list."""
@@ -1235,7 +1265,10 @@ class CondaMetadataTui(App[None]):
             return
         package_list = self.query_one("#sidebar-list", OptionList)
         highlighted = max(0, min(index, option_count - 1))
-        package_list.highlighted = highlighted
+        # This path updates the preview synchronously. Suppress the duplicate
+        # notification, which could arrive after a later keypress.
+        with package_list.prevent(OptionList.OptionHighlighted):
+            package_list.highlighted = highlighted
         self._update_main_panel_for_sidebar_highlight(highlighted)
 
     def _move_sidebar_highlight(self, delta: int) -> None:
@@ -1566,6 +1599,9 @@ class CondaMetadataTui(App[None]):
     async def _load_and_render_selected_version_preview(
         self, package_name: str, entry: VersionEntry, preview_key: VersionPreviewKey
     ) -> None:
+        await asyncio.sleep(_SIDEBAR_LOAD_DELAY)
+        if self._mode != "versions" or self._pending_preview_version_key != preview_key:
+            return
         record = await self._get_record_for_version_entry(package_name, entry)
         if self._mode != "versions":
             return
@@ -1629,6 +1665,7 @@ class CondaMetadataTui(App[None]):
             self.log.info(f"preview: {label} not in cache, fetching it now")
         # The details come from the archive itself (paths, about, run exports)
         # as much as from the repodata record.
+        self._previewed_version_key = None
         self._show_main_placeholder(
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
             "Loading package information..."
@@ -2424,6 +2461,9 @@ class CondaMetadataTui(App[None]):
         self._previewed_package = package_name
 
     async def _load_and_render_package_preview(self, package_name: str) -> None:
+        await asyncio.sleep(_SIDEBAR_LOAD_DELAY)
+        if self._mode != "packages" or self._pending_preview_package != package_name:
+            return
         records = await self._get_current_package_records(package_name)
         if self._mode != "packages":
             return
@@ -2464,6 +2504,7 @@ class CondaMetadataTui(App[None]):
             )
         else:
             self.log.info(f"preview: {package_name} not in cache, querying it now")
+        self._previewed_package = None
         self._show_main_placeholder(f"# {package_name}\n\nLoading repodata...")
         worker = self.run_worker(
             self._load_and_render_package_preview(package_name),
@@ -3501,7 +3542,7 @@ class CondaMetadataTui(App[None]):
             if option_index < 0 or option_index >= len(self._visible_package_names):
                 return
             self._request_package_preview(self._visible_package_names[option_index])
-            self._prefetch_around_sidebar_highlight(option_index)
+            self._schedule_sidebar_prefetch(option_index)
             return
 
         if self._mode != "versions":
@@ -3514,7 +3555,7 @@ class CondaMetadataTui(App[None]):
         if package_name is None:
             return
 
-        self._prefetch_around_sidebar_highlight(option_index)
+        self._schedule_sidebar_prefetch(option_index)
         if row.kind == "entry" and row.entry is not None:
             self._request_selected_version_preview(package_name, row.entry)
             return
@@ -3543,6 +3584,14 @@ class CondaMetadataTui(App[None]):
         self, event: OptionList.OptionHighlighted
     ) -> None:
         if event.option_list.id != "sidebar-list":
+            return
+        # Mouse / built-in navigation and list rebuilds still send messages.
+        # Ignore those superseded by another highlight or a replacement list.
+        if (
+            event.option_list.highlighted != event.option_index
+            or event.option_list.get_option_at_index(event.option_index)
+            is not event.option
+        ):
             return
         if self._sidebar_is_focused() and self._selected_pane != "sidebar":
             self._set_selected_pane("sidebar")
