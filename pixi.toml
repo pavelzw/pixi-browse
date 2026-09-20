@@ -13,7 +13,6 @@ console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 [exclude-newer]
 py-rattler = "0d"
 typer = "0d"
-pytest-textual-snapshot = "0d"
 
 [package]
 name = "pixi-browse"
@@ -87,8 +86,12 @@ lint = "lefthook run pre-commit --all-files"
 python = "3.13.*"
 [feature.py314.dependencies]
 python = "3.14.*"
+[feature.py314t.dependencies]
+python = "3.14.*"
+python_abi = { version = "*", build = "*_cp314t" }
 
 [environments]
 default = ["test", "build", "lint"]
 py313 = ["py313", "test"]
 py314 = ["py314", "test"]
+py314t = ["py314t", "test"]
