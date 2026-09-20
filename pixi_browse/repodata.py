@@ -12,6 +12,7 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import (
+    ChannelNotice,
     Gateway,
     PackageRecord,
     RepoDataRecord,
@@ -23,6 +24,14 @@ from pixi_browse.platform_utils import platform_sort_key
 DEFAULT_CHANNEL = "conda-forge"
 # The one subdir every conda channel must serve.
 NOARCH_PLATFORM = Platform("noarch")
+
+
+# Most urgent first, the order the channel dialog lists notices in.
+CHANNEL_NOTICE_LEVEL_ORDER: dict[str, int] = {
+    "critical": 0,
+    "warning": 1,
+    "info": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -172,6 +181,29 @@ async def discover_available_platforms(
     return sorted(
         {platform for platform in discovered if platform is not None},
         key=platform_sort_key,
+    )
+
+
+async def fetch_channel_notices(
+    *,
+    gateway: Gateway,
+    channel_names: Sequence[str],
+) -> list[ChannelNotice]:
+    """The CEP-6 notices the channels publish, most urgent first.
+
+    Rattler fetches each channel's ``notices.json``, drops expired notices and
+    treats a missing or malformed file as "no notices". The results share the
+    gateway's in-memory cache, which expires with the earliest notice, so
+    calling this whenever the notices are shown costs at most one small
+    request per channel and picks up new and expired notices. Rattler's order
+    (by channel, then as published) breaks ties between equal levels.
+    """
+    notices = await gateway.channel_notices(list(channel_names))
+    return sorted(
+        notices,
+        key=lambda notice: CHANNEL_NOTICE_LEVEL_ORDER.get(
+            notice.level, len(CHANNEL_NOTICE_LEVEL_ORDER)
+        ),
     )
 
 

@@ -27,6 +27,8 @@ MANIFEST_PATH = FIXTURES_DIR / "channel_artifacts.toml"
 CHANNELS_DIR = FIXTURES_DIR / "channels"
 # Serializes the download across processes; inside the git-ignored directory.
 LOCK_PATH = CHANNELS_DIR / ".lock"
+# Committed CEP-6 ``notices.json`` files, one per channel name that has notices.
+CHANNEL_NOTICES_DIR = FIXTURES_DIR / "channel_notices"
 
 
 @dataclass(frozen=True)
