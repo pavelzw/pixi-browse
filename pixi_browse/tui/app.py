@@ -65,6 +65,7 @@ from pixi_browse.repodata import (
     channels_label,
     create_gateway,
     discover_available_platforms,
+    fetch_channel_notices,
     fetch_package_names,
     normalize_channel_names,
     query_matchspec_records,
@@ -2724,12 +2725,30 @@ class CondaMetadataTui(App[None]):
             self._render_version_options(prefer_entry=highlighted)
 
     def _open_channel_screen(self, channel_names: Sequence[str] | None = None) -> None:
-        self.push_screen(
-            ChannelScreen(
-                self._channel_names if channel_names is None else channel_names
-            ),
-            self._handle_channel_result,
+        screen = ChannelScreen(
+            self._channel_names if channel_names is None else channel_names
         )
+        self.push_screen(screen, self._handle_channel_result)
+        self.run_worker(
+            self._load_channel_notices(screen),
+            group="channel-notices",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    async def _load_channel_notices(self, screen: ChannelScreen) -> None:
+        """Show the CEP-6 notices of the loaded channels in the open dialog.
+
+        The notices are fetched every time the dialog opens: the gateway
+        caches them until the earliest one expires, so this is a cache hit in
+        the common case and an expired or newly published notice shows up
+        without reloading the channels.
+        """
+        notices = await fetch_channel_notices(
+            gateway=self._gateway, channel_names=self._channel_names
+        )
+        if screen.is_attached:
+            await screen.show_notices(notices)
 
     def _handle_channel_result(self, result: list[str] | None) -> None:
         if result is None:

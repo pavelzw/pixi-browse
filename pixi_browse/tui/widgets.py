@@ -9,6 +9,7 @@ from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import PackageName
 from rattler.platform import Platform
+from rattler.repo_data import ChannelNotice
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -49,6 +50,8 @@ from pixi_browse.rendering import (
     format_human_byte_size,
     format_version_details_metadata_lines,
     format_version_details_run_exports,
+    render_channel_notice_heading,
+    render_channel_notice_message,
 )
 from pixi_browse.repodata import PlatformDiscoveryProgress, channels_label
 from pixi_browse.search import substring_filter
@@ -2281,6 +2284,22 @@ class ChannelRow(Horizontal):
         )
 
 
+class ChannelNoticeView(Vertical):
+    """One CEP-6 channel notice: its heading with the message indented below."""
+
+    def __init__(self, notice: ChannelNotice) -> None:
+        super().__init__(classes="channel-notice")
+        self._notice = notice
+
+    def compose(self) -> ComposeResult:
+        yield Static(render_channel_notice_heading(self._notice), markup=False)
+        yield Static(
+            render_channel_notice_message(self._notice),
+            classes="channel-notice-message",
+            markup=False,
+        )
+
+
 class ChannelScreen(ModalScreen[list[str] | None]):
     """Edit the list of channels the app browses.
 
@@ -2289,6 +2308,13 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     ``Apply`` is pressed, which also takes a channel still sitting in the
     field, and ``Escape`` drops every edit. At least one channel always stays,
     so the app never ends up without anything to show.
+
+    When the loaded channels published CEP-6 notices (``notices.json`` at the
+    channel root, e.g. a security advisory or a deprecation), the app fetches
+    them as the dialog opens and :meth:`show_notices` lists them under the
+    channels, most urgent first. The notices belong to the channels as loaded:
+    adding a channel in the dialog shows its notices only after ``Apply``
+    loaded it.
 
     ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
     field, ``Apply``. ``Tab`` cycles the same widgets.
@@ -2317,6 +2343,26 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     #channel-rows {
         height: auto;
         max-height: 10;
+    }
+
+    #channel-notices {
+        height: auto;
+        max-height: 12;
+        margin-top: 1;
+    }
+
+    #channel-notices-title {
+        text-style: bold;
+    }
+
+    .channel-notice {
+        height: auto;
+        padding: 0 1;
+        margin-top: 1;
+    }
+
+    .channel-notice-message {
+        padding-left: 3;
     }
 
     .channel-row {
@@ -2419,6 +2465,25 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         self.query_one("#channel-input", Input).focus()
 
     # -- rendering -------------------------------------------------------------
+
+    async def show_notices(self, notices: Sequence[ChannelNotice]) -> None:
+        """List ``notices`` between the channels and the field, replacing any
+        notices shown before. Nothing is shown for an empty list."""
+        for previous in self.query("#channel-notices"):
+            await previous.remove()
+        if not notices:
+            return
+        count = len(notices)
+        title = f"{count} channel notice{'s' if count != 1 else ''}"
+        await self.query_one("#channel-dialog", Vertical).mount(
+            VerticalScroll(
+                Static(title, id="channel-notices-title"),
+                *(ChannelNoticeView(notice) for notice in notices),
+                id="channel-notices",
+                can_focus=False,
+            ),
+            after=self.query_one("#channel-rows", VerticalScroll),
+        )
 
     def _channel_rows(self) -> list[ChannelRow]:
         removable = len(self._channel_names) > 1
