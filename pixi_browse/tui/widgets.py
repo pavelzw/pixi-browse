@@ -35,6 +35,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -48,6 +49,7 @@ from pixi_browse.models import (
 )
 from pixi_browse.rendering import (
     format_human_byte_size,
+    format_version_details_attestation_lines,
     format_version_details_metadata_lines,
     format_version_details_run_exports,
     render_channel_notice_heading,
@@ -87,7 +89,15 @@ NO_REPODATA_PATCHES_MESSAGE = "No repodata patches."
 NO_COMPARE_METADATA_MESSAGE = "No metadata available."
 NO_COMPARE_DEPENDENCIES_MESSAGE = "No dependency data."
 
-METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
+METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches", "attestation")
+# Suffixed to the ``Attestation`` tab label. An unsigned artifact gets nothing:
+# most packages are unsigned, and a glyph on every one of them would say less
+# about the few that are signed.
+ATTESTATION_TAB_GLYPHS: dict[AttestationStatus, str] = {
+    "unsigned": "",
+    "verified": " ✓",
+    "unverified": " ✗",
+}
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
     "extra_depends",
@@ -775,12 +785,22 @@ class VersionDetailsView(Vertical):
 
         metadata_section = self._section(0)
         metadata_section.update_tab_header(self._render_metadata_header)
-        if self._active_metadata_tab() == "patches":
+        active_tab = self._active_metadata_tab()
+        if active_tab == "patches":
             patches = self._details.repodata_patches
             if not patches.rows:
                 metadata_section.show_empty_message(NO_REPODATA_PATCHES_MESSAGE)
                 return
             metadata_section.update_body(render_repodata_patches_body(patches))
+            return
+        if active_tab == "attestation":
+            # An unsigned artifact needs no empty message: saying so is the
+            # whole content of the tab.
+            metadata_section.update_body(
+                "\n".join(
+                    format_version_details_attestation_lines(self._details.attestation)
+                )
+            )
             return
         metadata_section.update_body(
             "\n".join(format_version_details_metadata_lines(self._details))
@@ -989,12 +1009,21 @@ class VersionDetailsView(Vertical):
     def _render_metadata_tabs(self) -> tuple[Text, ...]:
         labels: dict[MetadataTab, str]
         if self._details is None:
-            labels = {"metadata": "Metadata", "patches": "Repodata patches"}
+            labels = {
+                "metadata": "Metadata",
+                "patches": "Repodata patches",
+                "attestation": "Attestation",
+            }
         else:
             labels = {
                 "metadata": "Metadata",
                 "patches": (
                     f"Repodata patches ({self._details.repodata_patches.change_count})"
+                ),
+                # The glyph puts signedness in the header, so it can be read
+                # without opening the tab, the way the patch count already is.
+                "attestation": (
+                    f"Attestation{ATTESTATION_TAB_GLYPHS[self._details.attestation.status]}"
                 ),
             }
         return tuple(

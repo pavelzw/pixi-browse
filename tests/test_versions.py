@@ -29,6 +29,8 @@ from textual.widgets import OptionList, Static
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry
 from pixi_browse.models import (
+    AttestationData,
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -130,6 +132,7 @@ def _make_artifact_data(
     run_exports: RunExportsJson | None = None,
     file_paths: tuple[PackageFile, ...] = (),
     info_files: tuple[PackageFile, ...] = (),
+    attestation: AttestationData = AttestationData(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=metadata_rows,
@@ -138,6 +141,7 @@ def _make_artifact_data(
         file_paths=file_paths,
         info_files=info_files,
         run_exports=run_exports,
+        attestation=attestation,
     )
 
 
@@ -1450,14 +1454,18 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
     view._pane_selected = True
     view._active_section = 0
 
-    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches"
+    assert view._render_metadata_header().plain == (
+        "[1] Metadata - Repodata patches - Attestation"
+    )
 
     view._details = _make_artifact_data()
-    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches (0)"
+    assert view._render_metadata_header().plain == (
+        "[1] Metadata - Repodata patches (0) - Attestation"
+    )
 
     view._details = _patched_artifact_data(2)
     header = view._render_metadata_header()
-    assert header.plain == "[1] Metadata - Repodata patches (2)"
+    assert header.plain == "[1] Metadata - Repodata patches (2) - Attestation"
     assert any(
         span.style == ACTIVE_TAB_STYLE
         and header.plain[span.start : span.end] == "Metadata"
@@ -1469,6 +1477,27 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
         and span.style.meta.get("@click") == ("select_metadata_tab", ("patches",))
         for span in header.spans
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [
+        ("unsigned", "Attestation"),
+        ("verified", "Attestation ✓"),
+        ("unverified", "Attestation ✗"),
+    ],
+)
+def test_metadata_header_marks_the_attestation_tab_by_status(
+    status: AttestationStatus, label: str
+) -> None:
+    """The glyph makes signedness readable from the header alone; an unsigned
+    artifact, which nearly every package is, gets none."""
+    view = VersionDetailsView()
+    view._pane_selected = True
+    view._active_section = 0
+    view._details = _make_artifact_data(attestation=AttestationData(status=status))
+
+    assert view._render_metadata_header().plain.endswith(f" - {label}")
 
 
 def _tab_labels(*labels: str) -> tuple[Text, ...]:

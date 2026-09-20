@@ -44,6 +44,11 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
+# The manifest channel whose package carries Sigstore attestations. Spelled as a
+# URL, both because a bare name resolves to anaconda.org and because the
+# attestations bind to this exact channel.
+SKILL_FORGE_CHANNEL = "https://prefix.dev/skill-forge"
+SKILL_FORGE_PACKAGE = "agent-skill-conda-forge"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)

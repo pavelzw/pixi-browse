@@ -9,13 +9,14 @@ from rattler.version import Version
 ViewMode = Literal["packages", "versions", "platforms"]
 VersionRowKind = Literal["back", "section", "entry", "empty"]
 VersionPreviewKey = tuple[str, str, str, int, str, str]
-MetadataTab = Literal["metadata", "patches"]
+MetadataTab = Literal["metadata", "patches", "attestation"]
 DependencyTab = Literal["dependencies", "extra_depends", "constraints", "run_exports"]
 FileTab = Literal["pkg", "info"]
 PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 # Mirrors the return type of py-rattler's `FileMode.mode`, so it can be assigned
 # straight from there.
 PrefixReplacementMode = Literal["binary", "text", "unknown"]
+AttestationStatus = Literal["unsigned", "verified", "unverified"]
 MetadataRow = tuple[str, str]
 
 
@@ -89,6 +90,37 @@ class RepodataPatchDiff:
 
 
 @dataclass(frozen=True)
+class AttestationData:
+    """What the Sigstore attestations of an artifact say about it.
+
+    A channel advertises the attestations of a package through the
+    ``attestations_sha256`` field of its repodata record and serves them in a
+    sidecar next to the archive. Verifying one binds a signing identity to this
+    exact file, and CEP 27 binds it to the channel it was published to.
+
+    ``unsigned`` means the record advertises no attestations, which is decided
+    from the record alone and costs no request. ``unverified`` means
+    attestations are advertised but none of them was accepted; ``warnings``
+    then says why, one entry per rejected bundle plus whatever went wrong
+    before the bundles were reached.
+    """
+
+    status: AttestationStatus = "unsigned"
+    sidecar_url: str | None = None
+    sidecar_sha256: str | None = None
+    identity: str | None = None
+    issuer: str | None = None
+    integrated_time: str | None = None
+    target_channel: str | None = None
+    bundle_index: int | None = None
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def is_verified(self) -> bool:
+        return self.status == "verified"
+
+
+@dataclass(frozen=True)
 class VersionArtifactData:
     metadata_rows: tuple[MetadataRow, ...]
     dependencies: tuple[str, ...]
@@ -106,6 +138,7 @@ class VersionArtifactData:
     provenance_sha: str | None = None
     rattler_build_version: str | None = None
     repodata_patches: RepodataPatchDiff = RepodataPatchDiff()
+    attestation: AttestationData = AttestationData()
 
 
 @dataclass(frozen=True)

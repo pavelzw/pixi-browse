@@ -33,7 +33,9 @@ hatchling = "*"
 [package.run-dependencies]
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
-py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
+# The Sigstore attestation bindings of conda/rattler#2814, which the
+# attestation tab needs. Point this back at `main` once that PR has landed.
+py-rattler = { git = "https://github.com/conda/rattler", branch = "codex/sigstore-python", subdirectory = "py-rattler" }
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.

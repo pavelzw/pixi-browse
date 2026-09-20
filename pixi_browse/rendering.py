@@ -15,6 +15,8 @@ from rich.markup import escape
 from rich.text import Text
 
 from pixi_browse.models import (
+    AttestationData,
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -417,6 +419,7 @@ def build_version_artifact_data(
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
     repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
+    attestation: AttestationData = AttestationData(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=_metadata_rows_for_record(
@@ -448,6 +451,7 @@ def build_version_artifact_data(
         provenance_sha=provenance_sha,
         rattler_build_version=rattler_build_version,
         repodata_patches=repodata_patches,
+        attestation=attestation,
     )
 
 
@@ -942,6 +946,60 @@ def format_version_details_metadata_lines(
             continue
         clickable_rows.append((label, value))
     return tuple(format_detail_rows(clickable_rows))
+
+
+ATTESTATION_STATUS_TEXT: dict[AttestationStatus, str] = {
+    "unsigned": "unsigned - this channel advertises no attestations for the artifact",
+    "verified": "verified",
+    "unverified": "not verified - see the warnings below",
+}
+
+
+def build_attestation_rows(attestation: AttestationData) -> tuple[MetadataRow, ...]:
+    """Describe an attestation outcome as detail rows, omitting absent values.
+
+    Everything below ``Status`` comes from a verified bundle, so an unsigned or
+    rejected artifact is left with the status and, when the channel advertised
+    attestations at all, the sidecar it would have been verified from.
+    """
+    rows: list[MetadataRow] = [("Status", ATTESTATION_STATUS_TEXT[attestation.status])]
+    if attestation.identity is not None:
+        # The identity is a certificate SAN, not a page: a GitHub Actions one
+        # spells out the workflow and ref (`…/package.yml@refs/heads/main`) and
+        # resolves to nothing when opened. Shown verbatim rather than linked.
+        rows.append(("Identity", escape(attestation.identity)))
+    if attestation.issuer is not None:
+        rows.append(("Issuer", escape(attestation.issuer)))
+    if attestation.integrated_time is not None:
+        rows.append(("Signed at", escape(attestation.integrated_time)))
+    if attestation.target_channel is not None:
+        rows.append(("Target channel", escape(attestation.target_channel)))
+    if attestation.bundle_index is not None:
+        # Rattler counts sidecar bundles from zero; the row reads as a position.
+        rows.append(("Bundle", f"#{attestation.bundle_index + 1}"))
+    if attestation.sidecar_url is not None:
+        rows.append(("Sidecar", escape(attestation.sidecar_url)))
+    return tuple(rows)
+
+
+def format_version_details_attestation_lines(
+    attestation: AttestationData,
+) -> tuple[str, ...]:
+    clickable_rows = [
+        # The sidecar is the one value here that is a URL worth following: it is
+        # what a user would fetch to inspect the bundles by hand.
+        (label, format_clickable_url(attestation.sidecar_url or ""))
+        if label == "Sidecar"
+        else (label, value)
+        for label, value in build_attestation_rows(attestation)
+    ]
+    lines = list(format_detail_rows(clickable_rows))
+    if attestation.warnings:
+        # Kept out of the aligned block: a warning is a sentence, not a value,
+        # and one long label would pad every row above it.
+        lines.append("")
+        lines.extend(f"Warning  {escape(warning)}" for warning in attestation.warnings)
+    return tuple(lines)
 
 
 def format_version_details_run_exports(

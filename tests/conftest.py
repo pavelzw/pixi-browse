@@ -16,6 +16,12 @@ The manifest lists artifacts of more than one channel (``bioconda`` next to
 for real. ``missing`` is mirrored too but has no repodata at all, so loading
 it fails.
 
+``skill-forge`` carries a package with real Sigstore attestations, whose sidecar
+is laid out beside the archive before indexing so that the repodata advertises
+it. Verifying one loads the Sigstore trusted root over the network, so the tests
+that assert a *successful* verification are marked ``network``;
+``pixi run test -m "not network"`` is the fully offline subset.
+
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
 such a file exists (``bioconda`` has one, ``conda-forge`` has none). Rattler
@@ -48,6 +54,7 @@ from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import (
     CHANNEL_NOTICES_DIR,
+    ChannelArtifact,
     ChannelManifest,
     ensure_channel_artifacts,
 )
@@ -108,6 +115,28 @@ def _freeze_indexed_timestamps(channel_dir: Path) -> None:
         repodata_path.write_text(json.dumps(repodata))
 
 
+def _copy_attestations(artifact: ChannelArtifact, destination: Path) -> None:
+    """Lay out the attestation sidecar of ``artifact`` the way CEP 27 wants it.
+
+    A channel publishes the sidecar twice: ``<package>.sigs`` is the mutable
+    name a publisher appends to, and ``<package>.sigs.<sha256>`` is the
+    immutable copy clients fetch. ``index_fs`` reads the mutable one, insists
+    the content-addressed one exists and matches, and only then advertises the
+    digest as ``attestations_sha256`` in the repodata.
+    """
+    sidecar_path = artifact.attestations_local_path
+    if sidecar_path is None or artifact.attestations_sha256 is None:
+        return
+    mutable = destination.with_name(f"{destination.name}.sigs")
+    shutil.copyfile(sidecar_path, mutable)
+    shutil.copyfile(
+        sidecar_path,
+        destination.with_name(
+            f"{destination.name}.sigs.{artifact.attestations_sha256}"
+        ),
+    )
+
+
 @pytest.fixture(scope="session")
 def fixture_channels_dir(
     channel_manifest: ChannelManifest, tmp_path_factory: pytest.TempPathFactory
@@ -121,6 +150,7 @@ def fixture_channels_dir(
             destination = channel_dir / artifact.subdir / artifact.file_name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact.local_path, destination)
+            _copy_attestations(artifact, destination)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
         _freeze_indexed_timestamps(channel_dir)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))

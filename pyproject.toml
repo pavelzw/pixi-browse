@@ -17,6 +17,9 @@ requires-python = ">=3.13"
 readme = "README.md"
 dependencies = [
   "textual >=8.2.8,<9",
+  # TODO: 0.26 has no `rattler.sigstore`, which the attestation tab imports, so
+  # this has to be bumped to the first release carrying the bindings of
+  # https://github.com/conda/rattler/pull/2814 before a wheel can be published.
   "py-rattler >=0.26.0,<0.27",
   "typer >=0.27.2,<0.28",
   "pyyaml >=6.0.3,<7",
@@ -76,3 +79,9 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  # Verifying a Sigstore attestation loads the production trusted root over
+  # TUF, which no fixture can serve. `pytest -m "not network"` is the offline
+  # subset of the suite.
+  "network: needs internet access",
+]

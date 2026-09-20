@@ -5,6 +5,10 @@ committed. They are fetched into the git-ignored ``tests/fixtures/channels``
 directory (one subdirectory per channel) on first use and verified by SHA256,
 so the test-suite is deterministic and works offline once the files are
 present. Run ``pixi run fetch-test-channel`` to pre-download them.
+
+An artifact can name a Sigstore attestation sidecar as well, which is fetched
+and verified beside the archive; :mod:`tests.conftest` then gives it the file
+names CEP 27 expects before indexing.
 """
 
 from __future__ import annotations
@@ -37,6 +41,10 @@ class ChannelArtifact:
     subdir: str
     file_name: str
     sha256: str
+    #: The name the channel serves the Sigstore attestation sidecar of this
+    #: artifact under, where it publishes one at all.
+    attestations_file_name: str | None = None
+    attestations_sha256: str | None = None
 
     def url(self, channel_url: str) -> str:
         return f"{channel_url}/{self.subdir}/{self.file_name}"
@@ -44,6 +52,22 @@ class ChannelArtifact:
     @property
     def local_path(self) -> Path:
         return CHANNELS_DIR / self.channel / self.subdir / self.file_name
+
+    @property
+    def attestations_local_path(self) -> Path | None:
+        if self.attestations_file_name is None:
+            return None
+        return self.local_path.with_name(self.attestations_file_name)
+
+
+@dataclass(frozen=True)
+class RemoteFile:
+    """One file of the fixture channels: where it comes from, where it belongs
+    and what it has to hash to."""
+
+    url: str
+    path: Path
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -60,6 +84,30 @@ class ChannelManifest:
             artifact for artifact in self.artifacts if artifact.channel == channel
         )
 
+    def remote_files(self) -> tuple[RemoteFile, ...]:
+        """Every file to download, the attestation sidecars among them."""
+        files: list[RemoteFile] = []
+        for artifact in self.artifacts:
+            url = self.url(artifact)
+            files.append(
+                RemoteFile(url=url, path=artifact.local_path, sha256=artifact.sha256)
+            )
+            sidecar_path = artifact.attestations_local_path
+            if sidecar_path is None or artifact.attestations_sha256 is None:
+                continue
+            files.append(
+                RemoteFile(
+                    url=f"{url.rsplit('/', 1)[0]}/{artifact.attestations_file_name}",
+                    path=sidecar_path,
+                    sha256=artifact.attestations_sha256,
+                )
+            )
+        return tuple(files)
+
+
+def _optional_str(value: object) -> str | None:
+    return None if value is None else str(value)
+
 
 def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
     manifest = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -72,12 +120,24 @@ def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
             subdir=str(entry["subdir"]),
             file_name=str(entry["file_name"]),
             sha256=str(entry["sha256"]),
+            attestations_file_name=_optional_str(entry.get("attestations_file_name")),
+            attestations_sha256=_optional_str(entry.get("attestations_sha256")),
         )
         for entry in manifest["artifacts"]
     )
     unknown = sorted({a.channel for a in artifacts} - channels.keys())
     if unknown:
         raise ValueError(f"artifacts reference undefined channels: {unknown}")
+    half_specified = sorted(
+        artifact.file_name
+        for artifact in artifacts
+        if (artifact.attestations_file_name is None)
+        != (artifact.attestations_sha256 is None)
+    )
+    if half_specified:
+        raise ValueError(
+            f"attestations need both a file name and a sha256: {half_specified}"
+        )
     return ChannelManifest(channels=channels, artifacts=artifacts)
 
 
@@ -85,43 +145,38 @@ def _sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _is_valid(artifact: ChannelArtifact) -> bool:
-    path = artifact.local_path
-    return path.is_file() and _sha256_of(path) == artifact.sha256
+def _is_valid(remote: RemoteFile) -> bool:
+    return remote.path.is_file() and _sha256_of(remote.path) == remote.sha256
 
 
-async def _download(
-    client: Client, manifest: ChannelManifest, artifact: ChannelArtifact
-) -> None:
-    path = artifact.local_path
-    path.parent.mkdir(parents=True, exist_ok=True)
+async def _download(client: Client, remote: RemoteFile) -> None:
+    remote.path.parent.mkdir(parents=True, exist_ok=True)
     # The partial file is process-specific so that parallel test workers
     # (``pytest -n auto``) downloading the same artifact cannot delete or
     # rename each other's in-progress download. The final rename is atomic and
     # every writer produces the same, hash-verified bytes.
-    partial_path = path.with_name(f"{path.name}.{os.getpid()}.part")
-    url = manifest.url(artifact)
+    partial_path = remote.path.with_name(f"{remote.path.name}.{os.getpid()}.part")
     try:
-        await download_to_path(client, url, partial_path)
+        await download_to_path(client, remote.url, partial_path)
         digest = _sha256_of(partial_path)
-        if digest != artifact.sha256:
+        if digest != remote.sha256:
             raise RuntimeError(
-                f"{url}: expected sha256 {artifact.sha256}, got {digest}"
+                f"{remote.url}: expected sha256 {remote.sha256}, got {digest}"
             )
-        partial_path.replace(path)
+        partial_path.replace(remote.path)
     finally:
         partial_path.unlink(missing_ok=True)
 
 
 async def _download_missing(manifest: ChannelManifest) -> int:
-    missing = [artifact for artifact in manifest.artifacts if not _is_valid(artifact)]
+    missing = [remote for remote in manifest.remote_files() if not _is_valid(remote)]
     if not missing:
         return 0
 
     client = Client.default_client(user_agent="pixi-browse-tests")
-    for artifact in missing:
-        print(f"fetching  {manifest.url(artifact)}", file=sys.stderr)
-        await _download(client, manifest, artifact)
+    for remote in missing:
+        print(f"fetching  {remote.url}", file=sys.stderr)
+        await _download(client, remote)
     return len(missing)
 
 
@@ -156,10 +211,10 @@ def ensure_channel_artifacts() -> ChannelManifest:
 def main() -> int:
     manifest = load_manifest()
     fetched = _download_missing_exclusively(manifest)
+    total = len(manifest.remote_files())
     print(
-        f"{len(manifest.artifacts)} artifacts of {len(manifest.channels)} channels "
-        f"in {CHANNELS_DIR} ({fetched} downloaded, "
-        f"{len(manifest.artifacts) - fetched} cached)"
+        f"{total} files of {len(manifest.channels)} channels "
+        f"in {CHANNELS_DIR} ({fetched} downloaded, {total - fetched} cached)"
     )
     return 0
 
