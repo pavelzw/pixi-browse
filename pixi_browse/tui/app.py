@@ -22,7 +22,12 @@ from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
 from rattler.platform import Platform
-from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
+from rattler.repo_data import (
+    ChannelNotice,
+    Gateway,
+    PackageRecord,
+    RepoDataRecord,
+)
 from rattler.version import Version
 from rich.markup import escape
 from rich.text import Text
@@ -38,7 +43,6 @@ from textual.worker import Worker
 
 from pixi_browse import __version__
 from pixi_browse.models import (
-    ChannelNoticeItem,
     CompareFileRow,
     CompareSelection,
     PackageFile,
@@ -164,7 +168,7 @@ class CondaMetadataTui(App[None]):
         if not self._channel_names:
             raise ValueError("At least one channel is required.")
         # The CEP-6 notices of the loaded channels, most urgent first.
-        self._channel_notices: list[ChannelNoticeItem] = []
+        self._channel_notices: list[ChannelNotice] = []
         self._mode: ViewMode = "packages"
         self._search_query = ""
         self._channel_package_names: list[str] = []

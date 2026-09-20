@@ -149,8 +149,8 @@ def test_fetch_package_names_merges_all_channels(
 def test_fetch_package_names_returns_channel_notices(
     make_gateway: GatewayFactory, snapshot: SnapshotAssertion
 ) -> None:
-    """The notices of ``bioconda``'s ``notices.json`` come back attributed to
-    the channel name, most urgent first, without the expired one."""
+    """The notices of ``bioconda``'s ``notices.json`` come back most urgent
+    first, without the expired one, and render under the channel's name."""
     result = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
@@ -159,29 +159,27 @@ def test_fetch_package_names_returns_channel_notices(
         )
     )
 
-    assert [
-        (item.channel_name, item.level, item.notice.id) for item in result.notices
-    ] == [
-        (BIOCONDA_CHANNEL, "critical", "pyfaidx-security"),
-        (BIOCONDA_CHANNEL, "warning", "python-3.9-eol"),
-        (BIOCONDA_CHANNEL, "info", "mirror"),
+    assert [(notice.level, notice.id) for notice in result.notices] == [
+        ("critical", "pyfaidx-security"),
+        ("warning", "python-3.9-eol"),
+        ("info", "mirror"),
     ]
     assert [
         {
-            "channel": item.notice.channel,
-            "created_at": item.notice.created_at,
-            "expires_at": item.notice.expires_at,
-            "interval": item.notice.interval,
-            "message": item.notice.message,
+            "channel": notice.channel,
+            "created_at": notice.created_at,
+            "expires_at": notice.expires_at,
+            "interval": notice.interval,
+            "message": notice.message,
         }
-        for item in result.notices
+        for notice in result.notices
     ] == snapshot
     assert [
         (
-            render_channel_notice_heading(item).plain,
-            render_channel_notice_message(item).plain,
+            render_channel_notice_heading(notice).plain,
+            render_channel_notice_message(notice).plain,
         )
-        for item in result.notices
+        for notice in result.notices
     ] == snapshot
 
 

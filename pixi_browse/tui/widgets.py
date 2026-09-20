@@ -9,6 +9,7 @@ from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import PackageName
 from rattler.platform import Platform
+from rattler.repo_data import ChannelNotice
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -34,7 +35,6 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
-    ChannelNoticeItem,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -2287,14 +2287,14 @@ class ChannelRow(Horizontal):
 class ChannelNoticeView(Vertical):
     """One CEP-6 channel notice: its heading with the message indented below."""
 
-    def __init__(self, item: ChannelNoticeItem) -> None:
+    def __init__(self, notice: ChannelNotice) -> None:
         super().__init__(classes="channel-notice")
-        self._item = item
+        self._notice = notice
 
     def compose(self) -> ComposeResult:
-        yield Static(render_channel_notice_heading(self._item), markup=False)
+        yield Static(render_channel_notice_heading(self._notice), markup=False)
         yield Static(
-            render_channel_notice_message(self._item),
+            render_channel_notice_message(self._notice),
             classes="channel-notice-message",
             markup=False,
         )
@@ -2448,7 +2448,7 @@ class ChannelScreen(ModalScreen[list[str] | None]):
         self,
         channel_names: Sequence[str],
         *,
-        notices: Sequence[ChannelNoticeItem] = (),
+        notices: Sequence[ChannelNotice] = (),
     ) -> None:
         super().__init__()
         self._channel_names = list(channel_names)
@@ -2463,7 +2463,7 @@ class ChannelScreen(ModalScreen[list[str] | None]):
             if self._notices:
                 yield VerticalScroll(
                     Static(self._notices_title(), id="channel-notices-title"),
-                    *(ChannelNoticeView(item) for item in self._notices),
+                    *(ChannelNoticeView(notice) for notice in self._notices),
                     id="channel-notices",
                     can_focus=False,
                 )

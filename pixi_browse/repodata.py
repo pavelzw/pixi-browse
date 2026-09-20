@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
-from rattler.channel import Channel
 from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
@@ -19,7 +18,6 @@ from rattler.repo_data import (
     RepoDataRecord,
 )
 
-from pixi_browse.models import ChannelNoticeItem, ChannelNoticeLevel
 from pixi_browse.platform_utils import platform_sort_key
 
 # The channel the app browses when none is given.
@@ -29,7 +27,7 @@ NOARCH_PLATFORM = Platform("noarch")
 
 
 # Most urgent first, the order the channel dialog lists notices in.
-CHANNEL_NOTICE_LEVEL_ORDER: dict[ChannelNoticeLevel, int] = {
+CHANNEL_NOTICE_LEVEL_ORDER: dict[str, int] = {
     "critical": 0,
     "warning": 1,
     "info": 2,
@@ -40,7 +38,8 @@ CHANNEL_NOTICE_LEVEL_ORDER: dict[ChannelNoticeLevel, int] = {
 class PackageNamesResult:
     platforms: list[Platform]
     package_names: list[str]
-    notices: list[ChannelNoticeItem]
+    #: The CEP-6 notices of the channels, most urgent first.
+    notices: list[ChannelNotice]
 
 
 @dataclass(frozen=True)
@@ -193,36 +192,13 @@ async def discover_available_platforms(
     )
 
 
-def resolve_channel_notices(
-    notices: Iterable[ChannelNotice],
-    channel_names: Sequence[str],
-) -> list[ChannelNoticeItem]:
-    """Attach the browsed channel names to rattler's notices and order them.
-
-    Rattler identifies the channel of a notice by its base URL; the app
-    resolves every selected channel name the same way rattler does to map the
-    URL back. A notice of a channel that is not selected (which cannot happen
-    for the gateway's own results) keeps the URL as its label. The notices are
-    listed most urgent first, then in the order of the channels, then in the
-    order the channel published them.
-    """
-    names_by_url: dict[str, str] = {}
-    for channel_name in channel_names:
-        names_by_url.setdefault(Channel(channel_name).base_url, channel_name)
-    channel_order = {name: index for index, name in enumerate(channel_names)}
-
-    items = [
-        ChannelNoticeItem(
-            channel_name=names_by_url.get(notice.channel, notice.channel),
-            notice=notice,
-        )
-        for notice in notices
-    ]
+def sort_channel_notices(notices: Iterable[ChannelNotice]) -> list[ChannelNotice]:
+    """Order notices most urgent first; rattler's order (by channel, then as
+    published) breaks ties."""
     return sorted(
-        items,
-        key=lambda item: (
-            CHANNEL_NOTICE_LEVEL_ORDER[item.level],
-            channel_order.get(item.channel_name, len(channel_order)),
+        notices,
+        key=lambda notice: CHANNEL_NOTICE_LEVEL_ORDER.get(
+            notice.level, len(CHANNEL_NOTICE_LEVEL_ORDER)
         ),
     )
 
@@ -251,7 +227,7 @@ async def fetch_package_names(
     return PackageNamesResult(
         platforms=platforms,
         package_names=sorted({name.normalized for name in names}),
-        notices=resolve_channel_notices(names.notices, channel_names),
+        notices=sort_channel_notices(names.notices),
     )
 
 

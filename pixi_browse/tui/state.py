@@ -4,10 +4,9 @@ from dataclasses import dataclass
 
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
-from rattler.repo_data import PackageRecord, RepoDataRecord
+from rattler.repo_data import ChannelNotice, PackageRecord, RepoDataRecord
 
 from pixi_browse.models import (
-    ChannelNoticeItem,
     CompareSelection,
     PackageFile,
     VersionArtifactData,
@@ -32,7 +31,7 @@ class AboutUrls:
 @dataclass(frozen=True)
 class ChannelStateSnapshot:
     channel_names: list[str]
-    channel_notices: list[ChannelNoticeItem]
+    channel_notices: list[ChannelNotice]
     mode: ViewMode
     draft_selected_platform_names: set[Platform] | None
     current_versions: list[VersionEntry]

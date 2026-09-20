@@ -6,16 +6,15 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
+from rattler.channel import Channel
 from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import IndexJson, NoArchType, RunExportsJson
-from rattler.repo_data import RepoDataRecord
+from rattler.repo_data import ChannelNotice, RepoDataRecord
 from rich.markup import escape
 from rich.text import Text
 
 from pixi_browse.models import (
-    ChannelNoticeItem,
-    ChannelNoticeLevel,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -215,7 +214,7 @@ def format_human_byte_size(value: int) -> str:
 
 
 # Marker and colour of a channel notice, by CEP-6 level.
-CHANNEL_NOTICE_STYLES: dict[ChannelNoticeLevel, tuple[str, str]] = {
+CHANNEL_NOTICE_STYLES: dict[str, tuple[str, str]] = {
     "critical": ("!!", "bold red"),
     "warning": ("!", "yellow"),
     "info": ("i", "cyan"),
@@ -232,28 +231,35 @@ def format_channel_notice_date(timestamp: str | None) -> str | None:
         return timestamp
 
 
-def render_channel_notice_heading(item: ChannelNoticeItem) -> Text:
+def channel_notice_channel_label(notice: ChannelNotice) -> str:
+    """The channel a notice belongs to, as a short name where rattler can
+    derive one from the channel URL (``bioconda`` for
+    ``https://conda.anaconda.org/bioconda/``), otherwise the URL itself."""
+    return Channel(notice.channel).name or notice.channel
+
+
+def render_channel_notice_heading(notice: ChannelNotice) -> Text:
     """Render the heading line of a channel notice for the channel dialog.
 
     It names the level, the channel and the publication date in the level's
     colour. The message is shown separately, indented under the heading, so a
     long or multi-line message wraps without hiding where it came from.
     """
-    marker, style = CHANNEL_NOTICE_STYLES[item.level]
+    marker, style = CHANNEL_NOTICE_STYLES[notice.level]
     text = Text()
     text.append(f"{marker:>2} ", style=style)
-    text.append(item.level.upper(), style=style)
+    text.append(notice.level.upper(), style=style)
     text.append(" · ", style="dim")
-    text.append(item.channel_name, style=style)
-    created = format_channel_notice_date(item.notice.created_at)
+    text.append(channel_notice_channel_label(notice), style=style)
+    created = format_channel_notice_date(notice.created_at)
     if created is not None:
         text.append(f" · {created}", style="dim")
     return text
 
 
-def render_channel_notice_message(item: ChannelNoticeItem) -> Text:
+def render_channel_notice_message(notice: ChannelNotice) -> Text:
     """The message of a channel notice, as plain text (never Rich markup)."""
-    return Text(item.notice.message.strip())
+    return Text(notice.message.strip())
 
 
 def render_package_preview(
