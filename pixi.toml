@@ -14,7 +14,6 @@ console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
 typer = "0d"
-pytest-textual-snapshot = "0d"
 # The macOS 27 SDK tags its .tbd stubs with the new arm64e.x1 target, which
 # libtapi only learned to skip in tapi 1600.0.11.8 build 4 (2026-09-17). Without
 # it the conda-forge linker ignores libSystem and every source build of
@@ -94,8 +93,12 @@ lint = "lefthook run pre-commit --all-files"
 python = "3.13.*"
 [feature.py314.dependencies]
 python = "3.14.*"
+[feature.py314t.dependencies]
+python = "3.14.*"
+python_abi = { version = "*", build = "*_cp314t" }
 
 [environments]
 default = ["test", "build", "lint"]
 py313 = ["py313", "test"]
 py314 = ["py314", "test"]
+py314t = ["py314t", "test"]

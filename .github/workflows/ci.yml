@@ -37,6 +37,7 @@ jobs:
         environment:
           - py313
           - py314
+          - py314t
         os:
           - ubuntu-latest
           - macos-latest
