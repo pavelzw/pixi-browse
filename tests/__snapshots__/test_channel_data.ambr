@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_fetch_package_names_returns_channel_notices
+# name: test_fetch_channel_notices_lists_live_notices
   list([
     dict({
       'channel': 'https://conda.anaconda.org/bioconda/',
@@ -27,7 +27,7 @@
     }),
   ])
 # ---
-# name: test_fetch_package_names_returns_channel_notices.1
+# name: test_fetch_channel_notices_lists_live_notices.1
   list([
     tuple(
       '!! CRITICAL · bioconda · 2025-12-15',

@@ -2310,10 +2310,11 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     so the app never ends up without anything to show.
 
     When the loaded channels published CEP-6 notices (``notices.json`` at the
-    channel root, e.g. a security advisory or a deprecation), they are listed
-    under the channels, most urgent first. The notices belong to the channels
-    as loaded: adding a channel in the dialog shows its notices only after
-    ``Apply`` loaded it.
+    channel root, e.g. a security advisory or a deprecation), the app fetches
+    them as the dialog opens and :meth:`show_notices` lists them under the
+    channels, most urgent first. The notices belong to the channels as loaded:
+    adding a channel in the dialog shows its notices only after ``Apply``
+    loaded it.
 
     ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
     field, ``Apply``. ``Tab`` cycles the same widgets.
@@ -2444,15 +2445,9 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     HELP = "Enter adds the typed channel. Up/Down: move between fields | Esc: cancel"
 
-    def __init__(
-        self,
-        channel_names: Sequence[str],
-        *,
-        notices: Sequence[ChannelNotice] = (),
-    ) -> None:
+    def __init__(self, channel_names: Sequence[str]) -> None:
         super().__init__()
         self._channel_names = list(channel_names)
-        self._notices = list(notices)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="channel-dialog"):
@@ -2460,13 +2455,6 @@ class ChannelScreen(ModalScreen[list[str] | None]):
             yield VerticalScroll(
                 *self._channel_rows(), id="channel-rows", can_focus=False
             )
-            if self._notices:
-                yield VerticalScroll(
-                    Static(self._notices_title(), id="channel-notices-title"),
-                    *(ChannelNoticeView(notice) for notice in self._notices),
-                    id="channel-notices",
-                    can_focus=False,
-                )
             yield Input(placeholder="Add a channel name or URL", id="channel-input")
             yield Static("", id="channel-error")
             with Horizontal(id="channel-actions"):
@@ -2478,9 +2466,24 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     # -- rendering -------------------------------------------------------------
 
-    def _notices_title(self) -> str:
-        count = len(self._notices)
-        return f"{count} channel notice{'s' if count != 1 else ''}"
+    async def show_notices(self, notices: Sequence[ChannelNotice]) -> None:
+        """List ``notices`` between the channels and the field, replacing any
+        notices shown before. Nothing is shown for an empty list."""
+        for previous in self.query("#channel-notices"):
+            await previous.remove()
+        if not notices:
+            return
+        count = len(notices)
+        title = f"{count} channel notice{'s' if count != 1 else ''}"
+        await self.query_one("#channel-dialog", Vertical).mount(
+            VerticalScroll(
+                Static(title, id="channel-notices-title"),
+                *(ChannelNoticeView(notice) for notice in notices),
+                id="channel-notices",
+                can_focus=False,
+            ),
+            after=self.query_one("#channel-rows", VerticalScroll),
+        )
 
     def _channel_rows(self) -> list[ChannelRow]:
         removable = len(self._channel_names) > 1

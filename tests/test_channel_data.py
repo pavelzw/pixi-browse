@@ -27,6 +27,7 @@ from pixi_browse.rendering import (
 )
 from pixi_browse.repodata import (
     discover_available_platforms,
+    fetch_channel_notices,
     fetch_package_names,
     normalize_channel_names,
     query_matchspec_records,
@@ -110,8 +111,7 @@ def test_normalize_channel_names_strips_and_dedupes() -> None:
 def test_fetch_package_names_lists_channel_packages(
     make_gateway: GatewayFactory,
 ) -> None:
-    """``conda-forge`` has no ``notices.json``; that is not an error."""
-    result = asyncio.run(
+    platforms, names = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL],
@@ -119,15 +119,14 @@ def test_fetch_package_names_lists_channel_packages(
         )
     )
 
-    assert result.platforms == list(CHANNEL_PLATFORMS)
-    assert result.package_names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
-    assert result.notices == []
+    assert platforms == list(CHANNEL_PLATFORMS)
+    assert names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
 
 
 def test_fetch_package_names_merges_all_channels(
     make_gateway: GatewayFactory,
 ) -> None:
-    result = asyncio.run(
+    _platforms, names = asyncio.run(
         fetch_package_names(
             gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
@@ -135,7 +134,7 @@ def test_fetch_package_names_merges_all_channels(
         )
     )
 
-    assert result.package_names == [
+    assert names == [
         "libzlib",
         "pixi-browse",
         "polars",
@@ -146,20 +145,30 @@ def test_fetch_package_names_merges_all_channels(
     ]
 
 
-def test_fetch_package_names_returns_channel_notices(
+def test_fetch_channel_notices_without_notices_file(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``conda-forge`` has no ``notices.json``; that is not an error."""
+    notices = asyncio.run(
+        fetch_channel_notices(gateway=make_gateway(), channel_names=[MAIN_CHANNEL])
+    )
+
+    assert notices == []
+
+
+def test_fetch_channel_notices_lists_live_notices(
     make_gateway: GatewayFactory, snapshot: SnapshotAssertion
 ) -> None:
     """The notices of ``bioconda``'s ``notices.json`` come back most urgent
     first, without the expired one, and render under the channel's name."""
     result = asyncio.run(
-        fetch_package_names(
+        fetch_channel_notices(
             gateway=make_gateway(),
             channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
-            selected_platforms=CHANNEL_PLATFORMS,
         )
     )
 
-    assert [(notice.level, notice.id) for notice in result.notices] == [
+    assert [(notice.level, notice.id) for notice in result] == [
         ("critical", "pyfaidx-security"),
         ("warning", "python-3.9-eol"),
         ("info", "mirror"),
@@ -172,14 +181,14 @@ def test_fetch_package_names_returns_channel_notices(
             "interval": notice.interval,
             "message": notice.message,
         }
-        for notice in result.notices
+        for notice in result
     ] == snapshot
     assert [
         (
             render_channel_notice_heading(notice).plain,
             render_channel_notice_message(notice).plain,
         )
-        for notice in result.notices
+        for notice in result
     ] == snapshot
 
 

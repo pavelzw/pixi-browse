@@ -50,6 +50,8 @@ async def run_whoneeds_query(pilot: Pilot[None], query: str) -> None:
 async def open_channel_screen(pilot: Pilot[None]) -> None:
     await pilot.press("c")
     await wait_for_screen(pilot, ChannelScreen)
+    # The dialog fetches the channel notices in a worker once it is open.
+    await wait_for_idle(pilot)
 
 
 async def add_channel(pilot: Pilot[None], channel_name: str) -> None:

@@ -22,12 +22,7 @@ from rattler.package_streaming import (
     download_to_path as package_download_to_path,
 )
 from rattler.platform import Platform
-from rattler.repo_data import (
-    ChannelNotice,
-    Gateway,
-    PackageRecord,
-    RepoDataRecord,
-)
+from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.markup import escape
 from rich.text import Text
@@ -70,6 +65,7 @@ from pixi_browse.repodata import (
     channels_label,
     create_gateway,
     discover_available_platforms,
+    fetch_channel_notices,
     fetch_package_names,
     normalize_channel_names,
     query_matchspec_records,
@@ -167,8 +163,6 @@ class CondaMetadataTui(App[None]):
         self._channel_names: list[str] = normalize_channel_names(default_channels)
         if not self._channel_names:
             raise ValueError("At least one channel is required.")
-        # The CEP-6 notices of the loaded channels, most urgent first.
-        self._channel_notices: list[ChannelNotice] = []
         self._mode: ViewMode = "packages"
         self._search_query = ""
         self._channel_package_names: list[str] = []
@@ -351,14 +345,12 @@ class CondaMetadataTui(App[None]):
     async def _fetch_package_names_with_gateway(self) -> list[str]:
         await self._ensure_available_platforms()
 
-        result = await fetch_package_names(
+        self._platforms, package_names = await fetch_package_names(
             gateway=self._gateway,
             channel_names=self._channel_names,
             selected_platforms=self._selected_platform_names,
         )
-        self._platforms = result.platforms
-        self._channel_notices = result.notices
-        return result.package_names
+        return package_names
 
     def _render_package_options(self, *, preserve_position: bool = False) -> None:
         package_list = self.query_one("#sidebar-list", OptionList)
@@ -618,7 +610,6 @@ class CondaMetadataTui(App[None]):
         self._clear_compare_state()
         self._platforms = []
         self._available_platform_names = []
-        self._channel_notices = []
         self._channel_package_names = []
         self._all_package_names = []
         self._visible_package_names = []
@@ -682,7 +673,6 @@ class CondaMetadataTui(App[None]):
         package_list = self.query_one("#sidebar-list", OptionList)
         return ChannelStateSnapshot(
             channel_names=list(self._channel_names),
-            channel_notices=list(self._channel_notices),
             mode=self._mode,
             draft_selected_platform_names=(
                 set(self._draft_selected_platform_names)
@@ -734,7 +724,6 @@ class CondaMetadataTui(App[None]):
 
     def _restore_channel_state(self, snapshot: ChannelStateSnapshot) -> None:
         self._channel_names = list(snapshot.channel_names)
-        self._channel_notices = list(snapshot.channel_notices)
         self._mode = snapshot.mode
         self._draft_selected_platform_names = snapshot.draft_selected_platform_names
         self._current_versions = snapshot.current_versions
@@ -2736,13 +2725,30 @@ class CondaMetadataTui(App[None]):
             self._render_version_options(prefer_entry=highlighted)
 
     def _open_channel_screen(self, channel_names: Sequence[str] | None = None) -> None:
-        self.push_screen(
-            ChannelScreen(
-                self._channel_names if channel_names is None else channel_names,
-                notices=self._channel_notices,
-            ),
-            self._handle_channel_result,
+        screen = ChannelScreen(
+            self._channel_names if channel_names is None else channel_names
         )
+        self.push_screen(screen, self._handle_channel_result)
+        self.run_worker(
+            self._load_channel_notices(screen),
+            group="channel-notices",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    async def _load_channel_notices(self, screen: ChannelScreen) -> None:
+        """Show the CEP-6 notices of the loaded channels in the open dialog.
+
+        The notices are fetched every time the dialog opens: the gateway
+        caches them until the earliest one expires, so this is a cache hit in
+        the common case and an expired or newly published notice shows up
+        without reloading the channels.
+        """
+        notices = await fetch_channel_notices(
+            gateway=self._gateway, channel_names=self._channel_names
+        )
+        if screen.is_attached:
+            await screen.show_notices(notices)
 
     def _handle_channel_result(self, result: list[str] | None) -> None:
         if result is None:

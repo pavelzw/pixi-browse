@@ -35,14 +35,6 @@ CHANNEL_NOTICE_LEVEL_ORDER: dict[str, int] = {
 
 
 @dataclass(frozen=True)
-class PackageNamesResult:
-    platforms: list[Platform]
-    package_names: list[str]
-    #: The CEP-6 notices of the channels, most urgent first.
-    notices: list[ChannelNotice]
-
-
-@dataclass(frozen=True)
 class MatchSpecQueryResult:
     package_names: list[str]
     records_by_package: dict[str, list[RepoDataRecord]]
@@ -192,9 +184,21 @@ async def discover_available_platforms(
     )
 
 
-def sort_channel_notices(notices: Iterable[ChannelNotice]) -> list[ChannelNotice]:
-    """Order notices most urgent first; rattler's order (by channel, then as
-    published) breaks ties."""
+async def fetch_channel_notices(
+    *,
+    gateway: Gateway,
+    channel_names: Sequence[str],
+) -> list[ChannelNotice]:
+    """The CEP-6 notices the channels publish, most urgent first.
+
+    Rattler fetches each channel's ``notices.json``, drops expired notices and
+    treats a missing or malformed file as "no notices". The results share the
+    gateway's in-memory cache, which expires with the earliest notice, so
+    calling this whenever the notices are shown costs at most one small
+    request per channel and picks up new and expired notices. Rattler's order
+    (by channel, then as published) breaks ties between equal levels.
+    """
+    notices = await gateway.channel_notices(list(channel_names))
     return sorted(
         notices,
         key=lambda notice: CHANNEL_NOTICE_LEVEL_ORDER.get(
@@ -208,13 +212,7 @@ async def fetch_package_names(
     gateway: Gateway,
     channel_names: Sequence[str],
     selected_platforms: Iterable[Platform],
-) -> PackageNamesResult:
-    """List the packages of the channels along with their CEP-6 notices.
-
-    The notices come from the same gateway request: rattler fetches each
-    channel's ``notices.json`` next to the repodata, drops expired notices and
-    treats a missing or malformed file as "no notices".
-    """
+) -> tuple[list[Platform], list[str]]:
     platforms = sorted(
         set(selected_platforms),
         key=platform_sort_key,
@@ -222,13 +220,8 @@ async def fetch_package_names(
     names = await gateway.names(
         sources=list(channel_names),
         platforms=platforms,
-        channel_notices=True,
     )
-    return PackageNamesResult(
-        platforms=platforms,
-        package_names=sorted({name.normalized for name in names}),
-        notices=sort_channel_notices(names.notices),
-    )
+    return platforms, sorted({name.normalized for name in names})
 
 
 def record_identity_key(
