@@ -10,16 +10,20 @@ from tests.helpers import TERMINAL_SIZE, AppFactory, wait_for_idle
 
 
 def test_reset_preview_state_cancels_in_flight_preview(make_app: AppFactory) -> None:
-    """A channel or platform switch resets the selection while a preview may
-    still be loading. That worker must be cancelled: it must not render the
-    old selection, fill the freshly cleared record cache, or suppress the next
-    request for the same package."""
+    """A channel or platform switch drops the record caches and resets the
+    selection while a preview may still be loading. That worker must be
+    cancelled: it must not render the old selection, fill the fresh record
+    cache, or suppress the next request for the same package."""
 
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
             await wait_for_idle(pilot)
 
+            # Evict a completed prefetch if it won the race with this test.
+            # Under CI load it may still be queued, which is fine: the
+            # foreground request below joins or starts the same load.
+            app._package_records_cache.pop("pixi-browse", None)
             app._request_package_preview("pixi-browse")
             request = app._package_preview_request
             assert request is not None
@@ -30,6 +34,7 @@ def test_reset_preview_state_cancels_in_flight_preview(make_app: AppFactory) -> 
             await asyncio.sleep(0)
             assert worker.is_running
 
+            app._clear_record_caches()
             app._reset_preview_state()
 
             assert app._package_preview_request is None
