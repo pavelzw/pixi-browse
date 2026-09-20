@@ -1054,6 +1054,10 @@ class CondaMetadataTui(App[None]):
     def _prefetch_around_sidebar_highlight(self, option_index: int) -> None:
         """Queue the loads of the entries ``option_index`` is likely to be
         left for: its neighbours, a page away, and either end of the list."""
+        # A single download slot must stay available to the selected entry.
+        # In particular, version prefetch is scheduled before its preview.
+        if self._max_parallel_loads == 1:
+            return
         indices = likely_next_indices(
             option_index,
             self._sidebar_option_count(),

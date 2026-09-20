@@ -8,6 +8,7 @@ offline channel; see ``test_snapshots.py`` for how snapshots are reviewed.
 from __future__ import annotations
 
 import pytest
+from rattler.config import Config
 from textual.pilot import Pilot
 
 from tests.helpers import (
@@ -18,6 +19,35 @@ from tests.helpers import (
     open_versions,
     wait_for_idle,
 )
+
+
+def test_single_download_slot_skips_prefetch(
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    rattler_config: Config,
+) -> None:
+    """One download slot belongs to the selected entry, in both lists."""
+    rattler_config.set("concurrency.downloads", "1")
+    app = make_app(config=rattler_config)
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        assert set(app._package_records_cache) == {app._visible_package_names[0]}
+        assert not app._package_prefetcher.running
+        assert not app._package_prefetcher.queued
+
+        await open_versions(pilot, package_index=1)
+        entry = app._highlighted_version_entry()
+        assert entry is not None
+        key = app._version_preview_key("pixi-browse", entry)
+        assert set(app._version_artifact_data_cache) == {key}
+        assert app._previewed_version_key == key
+        assert not app._version_prefetcher.running
+        assert not app._version_prefetcher.queued
+
+    assert snap_compare_palettes(
+        app, run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize("key", ["l", "1"])
