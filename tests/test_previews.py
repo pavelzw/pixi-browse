@@ -20,9 +20,10 @@ def test_reset_preview_state_cancels_in_flight_preview(make_app: AppFactory) -> 
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
             await wait_for_idle(pilot)
 
-            # Every package of the fixture channel is prefetched by now, so
-            # evict this one to get a preview that has to load.
-            del app._package_records_cache["pixi-browse"]
+            # Evict a completed prefetch if it won the race with this test.
+            # Under CI load it may still be queued, which is fine: the
+            # foreground request below joins or starts the same load.
+            app._package_records_cache.pop("pixi-browse", None)
             app._request_package_preview("pixi-browse")
             request = app._package_preview_request
             assert request is not None
