@@ -1615,6 +1615,20 @@ class CondaMetadataTui(App[None]):
             self._previewed_version_key = None
             return
 
+        label = self._describe_version_entry(entry)
+        if self._version_loader.has_artifact_data(preview_key):
+            self.log.info(f"preview: {label} shown from cache, nothing to fetch")
+        elif self._version_loader.is_loading(preview_key):
+            started_by = (
+                "prefetch" if self._version_prefetcher.is_running(entry) else "load"
+            )
+            self.log.info(
+                f"preview: {label} not in cache, joins the {started_by} already "
+                "queued or running"
+            )
+        else:
+            self.log.info(f"preview: {label} not in cache, queueing its load")
+
         details = await self._version_loader.load_version_details(
             package_name,
             record,
@@ -1653,16 +1667,6 @@ class CondaMetadataTui(App[None]):
         if self._preview_request_in_flight(self._version_preview_request, preview_key):
             return
 
-        if self._version_loader.is_loading(preview_key):
-            started_by = (
-                "prefetch" if self._version_prefetcher.is_running(entry) else "load"
-            )
-            self.log.info(
-                f"preview: {label} not in cache, joins the {started_by} already "
-                "fetching it"
-            )
-        else:
-            self.log.info(f"preview: {label} not in cache, fetching it now")
         # The details come from the archive itself (paths, about, run exports)
         # as much as from the repodata record.
         self._previewed_version_key = None
@@ -2464,6 +2468,26 @@ class CondaMetadataTui(App[None]):
         await asyncio.sleep(_SIDEBAR_LOAD_DELAY)
         if self._mode != "packages" or self._pending_preview_package != package_name:
             return
+        if package_name in self._query_records_by_package:
+            self.log.info(
+                f"preview: {package_name} shown from the query results, "
+                "nothing to query"
+            )
+        elif package_name in self._package_records_cache:
+            self.log.info(f"preview: {package_name} shown from cache, nothing to query")
+        elif package_name in self._package_records_loads:
+            started_by = (
+                "prefetch"
+                if self._package_prefetcher.is_running(package_name)
+                else "query"
+            )
+            self.log.info(
+                f"preview: {package_name} not in cache, joins the {started_by} "
+                "already queued or running"
+            )
+        else:
+            self.log.info(f"preview: {package_name} not in cache, queueing its query")
+
         records = await self._get_current_package_records(package_name)
         if self._mode != "packages":
             return
@@ -2492,18 +2516,6 @@ class CondaMetadataTui(App[None]):
         if self._preview_request_in_flight(self._package_preview_request, package_name):
             return
 
-        if package_name in self._package_records_loads:
-            started_by = (
-                "prefetch"
-                if self._package_prefetcher.is_running(package_name)
-                else "query"
-            )
-            self.log.info(
-                f"preview: {package_name} not in cache, joins the {started_by} "
-                "already running"
-            )
-        else:
-            self.log.info(f"preview: {package_name} not in cache, querying it now")
         self._previewed_package = None
         self._show_main_placeholder(f"# {package_name}\n\nLoading repodata...")
         worker = self.run_worker(
