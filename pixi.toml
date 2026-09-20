@@ -7,7 +7,9 @@ preview = ["pixi-build"]
 
 [tasks]
 demo = "vhs .github/assets/demo-dark.tape && vhs .github/assets/demo-light.tape"
-dev = "textual run --dev pixi_browse/__main__.py"
+# Every log line also lands in textual.log (gitignored), including the debug
+# detail the console below filters out, so a run can be read back afterwards.
+dev = { cmd = "textual run --dev pixi_browse/__main__.py", env = { TEXTUAL_LOG = "textual.log" } }
 console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]

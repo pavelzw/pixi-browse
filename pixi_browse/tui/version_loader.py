@@ -30,9 +30,19 @@ def _discard_log(message: str) -> None:
     return None
 
 
+def _describe_preview_key(preview_key: VersionPreviewKey) -> str:
+    _, _, _, _, subdir, file_name = preview_key
+    return f"{subdir}/{file_name}"
+
+
 class VersionDataLoader:
     def __init__(
-        self, *, client: Client, log: Callable[[str], None] = _discard_log
+        self,
+        *,
+        client: Client,
+        log: Callable[[str], None] = _discard_log,
+        log_detail: Callable[[str], None] = _discard_log,
+        max_parallel_loads: int = 1,
     ) -> None:
         self._client = client
         self._log = log
@@ -42,10 +52,17 @@ class VersionDataLoader:
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
         # The artifact loads running right now, so that the highlighted
         # version and the prefetch of its neighbours never fetch one archive
-        # twice.
+        # twice, and so that scrolling the list cannot pile up more fetches
+        # than the connection has room for.
         self._artifact_data_loads: InFlightLoads[
             VersionPreviewKey, VersionArtifactData
-        ] = InFlightLoads()
+        ] = InFlightLoads(
+            max_parallel=max_parallel_loads,
+            name="package",
+            log=log,
+            log_detail=log_detail,
+            describe=_describe_preview_key,
+        )
 
     def is_loading(self, preview_key: VersionPreviewKey) -> bool:
         return preview_key in self._artifact_data_loads
@@ -255,11 +272,13 @@ class VersionDataLoader:
         record: RepoDataRecord,
         *,
         preview_key: VersionPreviewKey,
+        background: bool = False,
     ) -> VersionArtifactData:
         return await self.load_version_artifact_data(
             package_name,
             record,
             preview_key=preview_key,
+            background=background,
         )
 
     async def load_version_artifact_data(
@@ -268,7 +287,14 @@ class VersionDataLoader:
         record: RepoDataRecord,
         *,
         preview_key: VersionPreviewKey,
+        background: bool = False,
     ) -> VersionArtifactData:
+        """Fetch what the archive of ``record`` says about it, once.
+
+        ``background`` marks a fetch nobody is waiting on yet, started only in
+        case the version is highlighted next; it gives up its turn to the
+        fetches that are being waited on.
+        """
         cached = self.artifact_data_cache.get(preview_key)
         if cached is not None:
             return cached
@@ -278,6 +304,7 @@ class VersionDataLoader:
             lambda: self._fetch_version_artifact_data(
                 package_name, record, preview_key=preview_key
             ),
+            background=background,
         )
 
     async def _fetch_version_artifact_data(
@@ -287,8 +314,9 @@ class VersionDataLoader:
         *,
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
+        # The start is announced by the load taking its slot (see
+        # ``InFlightLoads``), so only what the fetch found is logged here.
         started = perf_counter()
-        self._log(f"package: fetching {record.subdir}/{record.file_name}")
         archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
         info_files = await self.get_info_files(archive)

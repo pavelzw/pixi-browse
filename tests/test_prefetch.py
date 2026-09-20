@@ -8,14 +8,22 @@ entries around the highlight really end up in its caches.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
+import random
+import re
+from collections.abc import Awaitable, Callable
+from functools import partial
 
 from rattler.networking import Client
 from rattler.platform import Platform
 
 from pixi_browse.repodata import query_package_records
 from pixi_browse.tui import CondaMetadataTui
-from pixi_browse.tui.prefetch import InFlightLoads, Prefetcher, likely_next_indices
+from pixi_browse.tui.prefetch import (
+    MAX_WAITING_LOADS,
+    InFlightLoads,
+    Prefetcher,
+    likely_next_indices,
+)
 from pixi_browse.tui.version_loader import VersionDataLoader
 from tests.helpers import (
     TERMINAL_SIZE,
@@ -60,8 +68,8 @@ class _ControlledLoads:
     def needs_load(self, key: str) -> bool:
         return key not in self.loaded
 
-    def spawn(self, load: Awaitable[None]) -> None:
-        self.tasks.append(asyncio.ensure_future(load))
+    def spawn(self, load: Callable[[], Awaitable[None]]) -> None:
+        self.tasks.append(asyncio.ensure_future(load()))
 
     async def finish(self, key: str) -> None:
         self._release.setdefault(key, asyncio.Event()).set()
@@ -74,7 +82,10 @@ class _ControlledLoads:
             load=self.load,
             needs_load=self.needs_load,
             spawn=self.spawn,
+            # Both levels go to one list, so a test can assert on every line
+            # without caring which of them the app would show.
             log=self.log.append,
+            log_detail=self.log.append,
             max_parallel=max_parallel,
         )
 
@@ -103,9 +114,9 @@ def test_prefetcher_loads_in_order_a_few_at_a_time() -> None:
         # The loads start once the event loop runs them, when both slots are
         # already taken.
         assert loads.log[:3] == [
-            "prefetch: queued 4 [a, b, c, d] dropped=0 running=0",
-            "prefetch: loading a running=2 queued=2",
-            "prefetch: loading b running=2 queued=2",
+            "prefetch: queued 4 [a, b, c, d] dropped=0 running=0/2 queued=4",
+            "prefetch: loading a running=2/2 queued=2",
+            "prefetch: loading b running=2/2 queued=2",
         ]
         assert any(line.startswith("prefetch: loaded a in ") for line in loads.log)
 
@@ -123,7 +134,7 @@ def test_prefetcher_replaces_the_queue_but_lets_running_loads_finish() -> None:
         prefetcher.schedule(["a", "c", "x"])
         assert prefetcher.running == {"a"}
         assert prefetcher.queued == ["c", "x"]
-        assert "prefetch: queued 2 [c, x] dropped=1 running=1" in loads.log
+        assert "prefetch: queued 2 [c, x] dropped=1 running=1/1 queued=2" in loads.log
 
         prefetcher.clear()
         assert prefetcher.queued == []
@@ -132,6 +143,33 @@ def test_prefetcher_replaces_the_queue_but_lets_running_loads_finish() -> None:
         await loads.finish("a")
         assert loads.loaded == {"a"}
         assert loads.started == ["a"]
+
+    asyncio.run(run())
+
+
+def test_prefetcher_cancel_frees_the_slots_of_loads_that_never_ran() -> None:
+    """Cancelling the workers is what the app does when the selection they
+    belong to is replaced, and a worker cancelled before its first step runs
+    nothing at all -- not the load, not the cleanup that frees its slot."""
+
+    async def run() -> None:
+        loads = _ControlledLoads()
+        prefetcher = loads.prefetcher(max_parallel=2)
+
+        prefetcher.schedule(["a", "b", "c"])
+        prefetcher.cancel()
+        for task in loads.tasks:
+            task.cancel()
+        await asyncio.sleep(0)
+        assert loads.started == []
+        assert prefetcher.running == set()
+        assert prefetcher.queued == []
+        assert "prefetch: dropping every prefetch, running=2/2 queued=1" in loads.log
+
+        # Both slots are free again, so the next selection is prefetched.
+        prefetcher.schedule(["d", "e"])
+        await asyncio.sleep(0)
+        assert loads.started == ["d", "e"]
 
     asyncio.run(run())
 
@@ -169,8 +207,9 @@ def test_prefetcher_logs_and_reraises_a_failed_load() -> None:
             name="prefetch",
             load=fail,
             needs_load=lambda key: True,
-            spawn=lambda load: tasks.append(asyncio.ensure_future(load)),
+            spawn=lambda load: tasks.append(asyncio.ensure_future(load())),
             log=log.append,
+            log_detail=log.append,
             max_parallel=1,
         )
         prefetcher.schedule(["a"])
@@ -190,7 +229,7 @@ def test_prefetcher_logs_and_reraises_a_failed_load() -> None:
 
 def test_in_flight_loads_share_one_load_between_waiters() -> None:
     async def run() -> None:
-        loads: InFlightLoads[str, int] = InFlightLoads()
+        loads: InFlightLoads[str, int] = InFlightLoads(max_parallel=1)
         release = asyncio.Event()
         calls = 0
 
@@ -220,9 +259,308 @@ def test_in_flight_loads_share_one_load_between_waiters() -> None:
     asyncio.run(run())
 
 
+class _GatedLoads:
+    """Keys loaded through an ``InFlightLoads``, on the test's command."""
+
+    def __init__(
+        self, *, max_parallel: int, max_waiting: int = MAX_WAITING_LOADS
+    ) -> None:
+        self.started: list[str] = []
+        self.log: list[str] = []
+        self.requests: dict[str, asyncio.Task[str]] = {}
+        self._release: dict[str, asyncio.Event] = {}
+        self.loads: InFlightLoads[str, str] = InFlightLoads(
+            max_parallel=max_parallel,
+            max_waiting=max_waiting,
+            name="loads",
+            log=self.log.append,
+            log_detail=self.log.append,
+        )
+
+    async def _load(self, key: str) -> str:
+        self.started.append(key)
+        await self._release.setdefault(key, asyncio.Event()).wait()
+        return key
+
+    def request(self, key: str, *, background: bool = False) -> asyncio.Task[str]:
+        """Ask for ``key`` the way a highlight or a prefetch does."""
+        request = asyncio.ensure_future(
+            self.loads.run(key, partial(self._load, key), background=background)
+        )
+        self.requests[key] = request
+        return request
+
+    async def settle(self, *keys: str, background: bool = False) -> None:
+        for key in keys:
+            self.request(key, background=background)
+        await self._idle()
+
+    def release(self, key: str) -> None:
+        """Let the load of ``key`` finish, without waiting for it to."""
+        self._release.setdefault(key, asyncio.Event()).set()
+
+    async def finish(self, key: str) -> None:
+        self.release(key)
+        await self._idle()
+
+    async def dropped(self, key: str) -> bool:
+        """Whether the request for ``key`` was given up on.
+
+        Awaiting the request itself, rather than looking at it after a fixed
+        number of ticks, because a load that is dropped travels back through
+        a chain of callbacks before the caller it leaves empty-handed sees it.
+        """
+        try:
+            await self.requests[key]
+        except asyncio.CancelledError:
+            return True
+        return False
+
+    @staticmethod
+    async def _idle() -> None:
+        # One tick starts the request, one lets its load take or wait for a
+        # slot.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+
+def test_in_flight_loads_run_at_most_max_parallel_loads() -> None:
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=2)
+
+        await gated.settle("a", "b", "c", "d")
+        assert gated.started == ["a", "b"]
+        assert gated.loads.running == 2
+        assert gated.loads.waiting == ["c", "d"]
+        assert gated.log[:4] == [
+            "loads: a starts (waited on), running=1/2 waiting=0/8 loads=4",
+            "loads: b starts (waited on), running=2/2 waiting=0/8 loads=4",
+            "loads: c queued (waited on), running=2/2 waiting=1/8 loads=4",
+            "loads: d queued (waited on), running=2/2 waiting=2/8 loads=4",
+        ]
+
+        # The freed slot goes to the newest request: the entry highlighted
+        # last is the one being waited for.
+        await gated.finish("a")
+        assert gated.started == ["a", "b", "d"]
+        assert gated.loads.waiting == ["c"]
+
+        for key in ("b", "c", "d"):
+            await gated.finish(key)
+        assert gated.loads.running == 0
+        assert gated.loads.waiting == []
+        assert await gated.requests["c"] == "c"
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_run_a_background_load_last() -> None:
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1)
+
+        await gated.settle("running")
+        await gated.settle("prefetched", background=True)
+        await gated.settle("highlighted")
+        assert gated.started == ["running"]
+
+        await gated.finish("running")
+        assert gated.started == ["running", "highlighted"]
+
+        await gated.finish("highlighted")
+        assert gated.started == ["running", "highlighted", "prefetched"]
+
+        await gated.finish("prefetched")
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_stop_holding_back_a_background_load_asked_for() -> None:
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1)
+
+        await gated.settle("running")
+        await gated.settle("prefetched", background=True)
+        await gated.settle("highlighted")
+        # The prefetched entry has become the highlighted one, so its waiting
+        # load is now being waited on and stops going last.
+        await gated.settle("prefetched")
+
+        await gated.finish("running")
+        assert gated.started == ["running", "prefetched"]
+
+        for key in ("prefetched", "highlighted"):
+            await gated.finish(key)
+        assert gated.loads.waiting == []
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_give_up_on_the_loads_waiting_longest() -> None:
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1, max_waiting=2)
+
+        await gated.settle("running", "stale", "b", "c")
+
+        # Only the two newest requests are still worth a slot.
+        assert gated.loads.waiting == ["b", "c"]
+        assert "stale" not in gated.loads
+        assert await gated.dropped("stale")
+        assert any("gave up on stale" in line for line in gated.log)
+
+        # Asking for the dropped key again starts a load for it once more.
+        await gated.settle("stale")
+        assert gated.loads.waiting == ["c", "stale"]
+        assert await gated.dropped("b")
+
+        for key in ("running", "stale", "c"):
+            await gated.finish(key)
+        assert gated.started == ["running", "stale", "c"]
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_give_up_on_a_background_load_first() -> None:
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1, max_waiting=2)
+
+        await gated.settle("running")
+        await gated.settle("highlighted")
+        await gated.settle("prefetched", background=True)
+        await gated.settle("newer")
+
+        assert gated.loads.waiting == ["highlighted", "newer"]
+        assert await gated.dropped("prefetched")
+
+        # Being asked for again keeps a waiting load from being dropped.
+        await gated.settle("highlighted")
+        await gated.settle("newest")
+        assert gated.loads.waiting == ["highlighted", "newest"]
+        assert await gated.dropped("newer")
+
+        for key in ("running", "newest", "highlighted"):
+            await gated.finish(key)
+        assert gated.started == ["running", "newest", "highlighted"]
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_give_up_on_a_prefetch_the_queue_has_no_room_for() -> None:
+    """A prefetch that arrives at a queue full of loads being waited on is the
+    one given up on, and it is given up on before it ever waits: its place in
+    the queue is gone, so waiting for that place to come up would be waiting
+    for good, holding on to the prefetch slot it was started in."""
+
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1, max_waiting=2)
+
+        await gated.settle("running")
+        await gated.settle("highlighted", "newer")
+        await gated.settle("prefetched", background=True)
+
+        assert gated.loads.waiting == ["highlighted", "newer"]
+        assert "prefetched" not in gated.loads
+        assert await gated.dropped("prefetched")
+        assert any("gave up on prefetched" in line for line in gated.log)
+        assert not any("prefetched queued" in line for line in gated.log)
+
+        for key in ("running", "newer", "highlighted"):
+            await gated.finish(key)
+        assert gated.started == ["running", "newer", "highlighted"]
+        assert gated.loads.running == 0
+        assert len(gated.loads) == 0
+
+    asyncio.run(run())
+
+
+def test_a_prefetch_the_queue_has_no_room_for_gives_its_slot_back() -> None:
+    """The prefetcher only has a few slots, and it is the loads themselves that
+    hand them back. One that hangs in the queue in front of the semaphore never
+    does, and a prefetcher missing a slot for the rest of the session runs
+    fewer and fewer loads until it runs none at all."""
+
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1, max_waiting=2)
+        workers: list[asyncio.Task[None]] = []
+        prefetcher: Prefetcher[str] = Prefetcher(
+            name="prefetch",
+            load=lambda key: gated.loads.run(
+                key, partial(gated._load, key), background=True
+            ),
+            needs_load=lambda key: key not in gated.started,
+            spawn=lambda load: workers.append(asyncio.ensure_future(load())),
+            log=gated.log.append,
+            log_detail=gated.log.append,
+            max_parallel=1,
+        )
+
+        # A full queue of loads being waited on, then a prefetch behind them.
+        await gated.settle("running")
+        await gated.settle("highlighted", "newer")
+        prefetcher.schedule(["prefetched"])
+        # Giving up on the load travels back to the prefetcher through the
+        # shielded load and the worker awaiting it; the slot is handed back on
+        # the worker's way out, so the worker finishing is what to wait for.
+        await asyncio.wait(workers, timeout=1)
+
+        assert prefetcher.running == set()
+        assert any("gave up on prefetched" in line for line in gated.log)
+
+        # The slot is free, so the next prefetch runs in it.
+        for key in ("running", "newer", "highlighted"):
+            await gated.finish(key)
+        prefetcher.schedule(["prefetched"])
+        await gated._idle()
+        assert gated.started[-1] == "prefetched"
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_settle_after_a_burst_of_requests() -> None:
+    """Whatever a held-down arrow key throws at the gate -- requests joining
+    loads, prefetches, callers giving up, keys dropped from a full queue, a
+    selection replaced mid-load -- every load that is asked for finishes and
+    nothing is left holding a slot or a place in the queue afterwards.
+    """
+
+    async def run() -> None:
+        rng = random.Random(20260918)
+        keys = [f"k{index}" for index in range(8)]
+        for round_index in range(200):
+            gated = _GatedLoads(max_parallel=4, max_waiting=3)
+            requests: list[asyncio.Task[str]] = []
+
+            for _ in range(60):
+                action = rng.random()
+                key = rng.choice(keys)
+                if action < 0.55:
+                    requests.append(gated.request(key, background=rng.random() < 0.4))
+                elif action < 0.7:
+                    gated.release(key)
+                elif action < 0.8 and requests:
+                    # A worker whose entry is no longer highlighted.
+                    rng.choice(requests).cancel()
+                elif action < 0.85:
+                    # The selection the loads belong to was replaced.
+                    gated.loads.cancel()
+                if rng.random() < 0.5:
+                    await asyncio.sleep(0)
+                assert gated.loads.running <= 4, (round_index, gated.loads.running)
+                assert len(gated.loads.waiting) <= 3, (round_index, gated.loads.waiting)
+
+            for key in keys:
+                gated.release(key)
+            await asyncio.wait(requests, timeout=5)
+            await gated.settle()
+            assert gated.loads.running == 0, (round_index, gated.loads.running)
+            assert gated.loads.waiting == [], (round_index, gated.loads.waiting)
+            assert len(gated.loads) == 0, (round_index, len(gated.loads))
+
+    asyncio.run(run())
+
+
 def test_in_flight_loads_cancel_stops_every_load() -> None:
     async def run() -> None:
-        loads: InFlightLoads[str, int] = InFlightLoads()
+        loads: InFlightLoads[str, int] = InFlightLoads(max_parallel=1)
 
         async def load() -> int:
             await asyncio.Event().wait()
@@ -235,6 +573,178 @@ def test_in_flight_loads_cancel_stops_every_load() -> None:
 
         assert "key" not in loads
         assert waiter.cancelled()
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_keep_the_per_keypress_lines_out_of_the_main_log() -> None:
+    """A keypress moves the highlight over an entry and logs the slot the load
+    takes and gives back. That is a line or three per press, so it belongs in
+    the detail log; what nobody would go looking for -- a load given up on --
+    belongs in the main one."""
+
+    async def run() -> None:
+        main: list[str] = []
+        detail: list[str] = []
+        loads: InFlightLoads[str, str] = InFlightLoads(
+            max_parallel=1,
+            max_waiting=1,
+            name="loads",
+            log=main.append,
+            log_detail=detail.append,
+        )
+        release = asyncio.Event()
+
+        async def load(key: str) -> str:
+            await release.wait()
+            return key
+
+        requests = [
+            asyncio.ensure_future(loads.run(key, partial(load, key)))
+            for key in ("a", "b", "c")
+        ]
+        # One tick for the requests, one for the loads they start.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait(requests, timeout=5)
+
+        assert main == [
+            "loads: gave up on b before it started, running=1/1 waiting=1/1 loads=2"
+        ]
+        # Only what happened, without the state each line reports and without
+        # the seconds a load spent queueing.
+        happened = [
+            re.sub(r"[0-9]+\.[0-9]+s", "Xs", line.partition(",")[0]) for line in detail
+        ]
+        assert happened == [
+            "loads: a starts (waited on)",
+            "loads: b queued (waited on)",
+            "loads: c queued (waited on)",
+            "loads: a released its slot",
+            "loads: c starts (waited on) after queueing for Xs",
+            "loads: c released its slot",
+        ]
+
+    asyncio.run(run())
+
+
+class _Scrolling:
+    """A package list of a thousand entries, wired the way the app wires one.
+
+    The fixture channel is five packages long, so paging through a list is
+    played out here instead: one waited-on load for the entry highlighted --
+    cancelled when the highlight moves on, like the exclusive preview worker --
+    a prefetcher with a slot fewer for the entries around it, and the one
+    ``InFlightLoads`` both of them load through.
+    """
+
+    # As in the app: `_PREFETCH_WINDOW`, `_MAX_PARALLEL_LOADS` and the slot the
+    # prefetch leaves to the highlighted entry.
+    WINDOW = 5
+    PAGE = 20
+    MAX_PARALLEL = 4
+
+    def __init__(self) -> None:
+        self.keys = [f"p{index:04d}" for index in range(1000)]
+        self.cache: dict[str, str] = {}
+        self.log: list[str] = []
+        self.workers: list[asyncio.Task[None]] = []
+        self.preview: asyncio.Task[str] | None = None
+        self.loads: InFlightLoads[str, str] = InFlightLoads(
+            max_parallel=self.MAX_PARALLEL,
+            name="repodata",
+            log=self.log.append,
+            log_detail=self.log.append,
+        )
+        self.prefetcher: Prefetcher[str] = Prefetcher(
+            name="prefetch",
+            load=self._prefetch,
+            needs_load=self._needs_load,
+            spawn=self._spawn,
+            log=self.log.append,
+            log_detail=self.log.append,
+            max_parallel=self.MAX_PARALLEL - 1,
+        )
+
+    async def _fetch(self, key: str) -> str:
+        # A query takes a few turns of the event loop, like a few round trips.
+        for _ in range(5):
+            await asyncio.sleep(0)
+        self.cache[key] = key
+        return key
+
+    def _needs_load(self, key: str) -> bool:
+        return key not in self.cache and key not in self.loads
+
+    async def _load(self, key: str, *, background: bool) -> str:
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+        return await self.loads.run(
+            key, partial(self._fetch, key), background=background
+        )
+
+    async def _prefetch(self, key: str) -> None:
+        await self._load(key, background=True)
+
+    def _spawn(self, load: Callable[[], Awaitable[None]]) -> None:
+        self.workers.append(asyncio.ensure_future(load()))
+
+    def highlight(self, index: int) -> None:
+        """Show the entry at ``index``, loading it unless it is cached, and
+        queue the entries the highlight is likely to move to next."""
+        if self.preview is not None:
+            self.preview.cancel()
+            self.preview = None
+        key = self.keys[index]
+        if key not in self.cache:
+            self.preview = asyncio.ensure_future(self._load(key, background=False))
+        self.prefetcher.schedule(
+            self.keys[candidate]
+            for candidate in likely_next_indices(
+                index,
+                len(self.keys),
+                window=self.WINDOW,
+                page=self.PAGE,
+                head=2,
+                tail=2,
+            )
+        )
+
+    async def settle(self, ticks: int = 400) -> None:
+        for _ in range(ticks):
+            await asyncio.sleep(0)
+
+
+def test_paging_down_the_list_settles_with_the_neighbours_prefetched() -> None:
+    """Ctrl+d a few times, then wait: by the time the loads are done every entry
+    a `j` lands on is in the cache, and nothing holds a slot or a queue place
+    that would keep the entries after it from being prefetched."""
+
+    async def run() -> None:
+        scrolling = _Scrolling()
+        scrolling.highlight(0)
+        # Held down: each page jump replaces the queue of the one before.
+        index = 0
+        for _ in range(4):
+            index += scrolling.PAGE
+            scrolling.highlight(index)
+            await scrolling.settle(3)
+        await scrolling.settle()
+
+        assert scrolling.prefetcher.running == set()
+        assert scrolling.prefetcher.queued == []
+        assert scrolling.loads.running == 0
+        assert scrolling.loads.waiting == []
+        assert len(scrolling.loads) == 0
+
+        # Down one at a time from there, every entry ready before it is asked for.
+        for step in range(1, scrolling.WINDOW + 1):
+            key = scrolling.keys[index + step]
+            assert key in scrolling.cache, f"{key} was not prefetched"
+            scrolling.highlight(index + step)
+            await scrolling.settle(30)
 
     asyncio.run(run())
 
@@ -334,6 +844,38 @@ def test_opening_versions_prefetches_the_neighbouring_builds(
                     "pixi-browse", entry
                 )
                 assert app._main_panel_shows_version_details()
+
+    asyncio.run(run())
+
+
+def test_replacing_the_selection_frees_the_prefetch_slots(
+    make_app: AppFactory,
+) -> None:
+    """Replacing the selection -- a query, a platform or channel change --
+    cancels the prefetch workers. One cancelled in the tick it was spawned in
+    never runs a line, not even the cleanup that gives its slot back, so the
+    prefetcher has to be told or it holds that slot for the rest of the
+    session and prefetches nothing ever again."""
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await wait_for_idle(pilot)
+            neighbours = set(app._visible_package_names[1:])
+            app._package_records_cache.clear()
+
+            app._prefetch_around_sidebar_highlight(0)
+            assert app._package_prefetcher.running
+            app._reset_preview_state()
+            await wait_for_idle(pilot)
+
+            assert app._package_prefetcher.running == set()
+            assert app._package_prefetcher.queued == []
+
+            # Every slot is free again, so the next highlight is prefetched.
+            app._prefetch_around_sidebar_highlight(0)
+            await wait_for_idle(pilot)
+            assert neighbours <= set(app._package_records_cache)
 
     asyncio.run(run())
 
