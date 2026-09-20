@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import webbrowser
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
@@ -82,6 +82,7 @@ from .messages import (
     PaneSelected,
     SidebarFocusRequested,
 )
+from .prefetch import InFlightLoads, likely_next_indices
 from .state import ChannelStateSnapshot
 from .version_loader import VersionDataLoader
 from .widgets import (
@@ -114,6 +115,20 @@ from .widgets import (
 )
 
 _PREVIEW_MAX_BYTES = 256 * 1024
+# How many list entries next to the highlighted one, in each direction, are
+# loaded before they are highlighted, and how many at either end of the list.
+_PREFETCH_WINDOW = 5
+_PREFETCH_HEAD = 2
+_PREFETCH_TAIL = 2
+# Loads of one kind running at the same time, the highlighted entry's own load
+# and the prefetch of the entries around it together. Rattler's
+# ``concurrency.downloads`` setting is the ceiling, but its default of 50 is
+# meant for downloading a whole environment at once: browsing fetches a
+# handful of ranges out of one archive at a time, which saturates the
+# connection long before that, and every fetch past this one only takes
+# bandwidth away from the entry the user is looking at.
+_MAX_PARALLEL_LOADS = 4
+_SIDEBAR_LOAD_DELAY = 0.1
 
 
 class CondaMetadataTui(App[None]):
@@ -154,11 +169,17 @@ class CondaMetadataTui(App[None]):
         self._gateway: Gateway = create_gateway(
             client=self._client, config=config, cache_dir=cache_dir
         )
+        self._max_parallel_loads = min(
+            config.concurrency_downloads, _MAX_PARALLEL_LOADS
+        )
         self._platforms: list[Platform] = []
         self._available_platform_names: list[Platform] = []
         self._selected_platform_names: set[Platform] = set(selected_platforms)
         self._draft_selected_platform_names: set[Platform] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
+        # The repodata queries running right now, shared between the
+        # highlighted package and the prefetch of its neighbours.
+        self._package_records_loads = self._new_package_records_loads()
         # The channels being browsed, in the order they were added; never empty.
         self._channel_names: list[str] = normalize_channel_names(default_channels)
         if not self._channel_names:
@@ -179,7 +200,12 @@ class CondaMetadataTui(App[None]):
         self._versions_by_subdir: dict[str, list[VersionEntry]] = {}
         self._collapsed_version_subdirs: set[str] = set()
         self._version_rows: list[VersionRow] = []
-        self._version_loader = VersionDataLoader(client=self._client)
+        self._version_loader = VersionDataLoader(
+            client=self._client,
+            log=self.log.info,
+            log_detail=self.log.debug,
+            max_parallel_loads=self._max_parallel_loads,
+        )
         self._version_archive_cache = self._version_loader.archive_cache
         self._version_about_urls_cache = self._version_loader.about_urls_cache
         self._version_paths_cache = self._version_loader.paths_cache
@@ -550,7 +576,13 @@ class CondaMetadataTui(App[None]):
         self._update_platform_indicator()
 
     def _clear_record_caches(self) -> None:
-        self._package_records_cache.clear()
+        # A repodata query still running writes into the cache it was started
+        # with (see ``_fetch_package_records``), so the old cache is dropped
+        # rather than emptied and the query is left to finish on its own:
+        # cancelling it would fail every request rattler coalesced onto it.
+        self._package_records_loads.clear()
+        self._package_records_cache = {}
+        self._package_records_loads = self._new_package_records_loads()
         self._version_loader.clear_caches()
 
     def _release_whoneeds_repodata(self) -> None:
@@ -589,18 +621,22 @@ class CondaMetadataTui(App[None]):
         # platform switch, query change). A worker still loading the old
         # selection must neither render nor fill the freshly cleared caches, and
         # it must not block the next request for the same key.
-        self.workers.cancel_group(self, "package-preview")
-        self.workers.cancel_group(self, "version-preview")
+        self.workers.cancel_group(self, "sidebar-preview")
         self._package_preview_request = None
         self._version_preview_request = None
+        self._package_records_loads.clear()
+        self._version_loader.clear_prefetch()
+        self.workers.cancel_group(self, "prefetch")
 
     def _clear_version_state(self) -> None:
+        self.workers.cancel_group(self, "sidebar-preview")
         self._current_versions.clear()
         self._version_subdirs.clear()
         self._versions_by_subdir.clear()
         self._collapsed_version_subdirs.clear()
         self._version_rows.clear()
         self._selected_package = None
+        self._version_loader.clear_prefetch()
 
     def _clear_channel_loaded_state(self) -> None:
         self._mode = "packages"
@@ -746,6 +782,7 @@ class CondaMetadataTui(App[None]):
         self._whoneeds_target = snapshot.whoneeds_target
         self._query_records_by_package = snapshot.query_records_by_package
         self._package_records_cache = snapshot.package_records_cache
+        self._package_records_loads = self._new_package_records_loads()
         self._version_loader.restore_caches(
             archive_cache=snapshot.version_archive_cache,
             about_urls_cache=snapshot.version_about_urls_cache,
@@ -898,19 +935,161 @@ class CondaMetadataTui(App[None]):
             f"{len(self._visible_package_names):,} packages in selection."
         )
 
-    async def _get_package_records(self, package_name: str) -> list[RepoDataRecord]:
+    def _new_package_records_loads(self) -> InFlightLoads[str, list[RepoDataRecord]]:
+        return InFlightLoads(
+            max_parallel=self._max_parallel_loads,
+            name="repodata",
+            log=self.log.info,
+            log_detail=self.log.debug,
+        )
+
+    async def _get_package_records(
+        self, package_name: str, *, background: bool = False
+    ) -> list[RepoDataRecord]:
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
             return cached
 
+        # The query fills the cache of the selection it was started for, even
+        # if the selection changes while it runs (see ``_clear_record_caches``).
+        # The cache is picked here, not in the coroutine, whose body only runs
+        # a tick later, when the selection may already have changed.
+        cache = self._package_records_cache
+        channels, platforms = list(self._channel_names), list(self._platforms)
+        return await self._package_records_loads.run(
+            package_name,
+            lambda: self._fetch_package_records(
+                package_name, cache, channels, platforms
+            ),
+            background=background,
+        )
+
+    async def _fetch_package_records(
+        self,
+        package_name: str,
+        cache: dict[str, list[RepoDataRecord]],
+        channels: list[str],
+        platforms: list[Platform],
+    ) -> list[RepoDataRecord]:
+        started = perf_counter()
         records = await query_package_records(
             gateway=self._gateway,
-            channel_names=self._channel_names,
-            platforms=self._platforms,
+            channel_names=channels,
+            platforms=platforms,
             package_name=package_name,
         )
-        self._package_records_cache[package_name] = records
+        cache[package_name] = records
+        self.log.info(
+            f"repodata: queried {package_name} in {perf_counter() - started:.3f}s "
+            f"records={len(records)}"
+        )
         return records
+
+    @staticmethod
+    def _describe_version_entry(entry: VersionEntry) -> str:
+        return f"{entry.subdir}/{entry.file_name}"
+
+    def _schedule_sidebar_preview(
+        self, load: Callable[[], Awaitable[None]] | None = None
+    ) -> Worker[None]:
+        self._package_records_loads.clear()
+        self._version_loader.clear_prefetch()
+        sidebar = self.query_one("#sidebar-list", OptionList)
+        index = sidebar.highlighted
+        option = sidebar.get_option_at_index(index) if index is not None else None
+        mode, package = self._mode, self._selected_package
+
+        async def foreground() -> None:
+            if load is not None:
+                await load()
+
+        async def after_pause() -> None:
+            await asyncio.sleep(_SIDEBAR_LOAD_DELAY)
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(foreground())
+                # Register the foreground request before starting neighbors.
+                await asyncio.sleep(0)
+                if (
+                    index is not None
+                    and sidebar.highlighted == index
+                    and self._mode == mode
+                    and self._selected_package == package
+                    and sidebar.get_option_at_index(index) is option
+                ):
+                    self._prefetch_around_sidebar_highlight(index)
+
+        worker: Worker[None] = self.run_worker(
+            after_pause, group="sidebar-preview", exclusive=True, exit_on_error=False
+        )
+        return worker
+
+    def _prefetch_around_sidebar_highlight(self, option_index: int) -> None:
+        """Queue the loads of the entries ``option_index`` is likely to be
+        left for: its neighbours, a page away, and either end of the list."""
+        # A single download slot belongs to the selected entry.
+        if self._max_parallel_loads == 1:
+            return
+        indices = likely_next_indices(
+            option_index,
+            self._sidebar_option_count(),
+            window=_PREFETCH_WINDOW,
+            page=self._sidebar_page_size(),
+            head=_PREFETCH_HEAD,
+            tail=_PREFETCH_TAIL,
+        )
+        if self._mode == "packages":
+            cache = self._package_records_cache
+            channels, platforms = list(self._channel_names), list(self._platforms)
+            self._package_records_loads.schedule(
+                (
+                    self._visible_package_names[index]
+                    for index in indices
+                    if self._visible_package_names[index] not in cache
+                    and self._visible_package_names[index]
+                    not in self._query_records_by_package
+                ),
+                lambda name: self._fetch_package_records(
+                    name, cache, channels, platforms
+                ),
+            )
+            _package_worker: Worker[None] = self.run_worker(
+                self._package_records_loads.wait,
+                group="prefetch",
+                exit_on_error=False,
+            )
+        elif self._mode == "versions" and self._selected_package is not None:
+            package = self._selected_package
+            keys = [
+                self._version_preview_key(package, row.entry)
+                for index in indices
+                if (row := self._version_rows[index]).entry is not None
+            ]
+            records = self._query_records_by_package.get(
+                package, self._package_records_cache.get(package, [])
+            )
+            candidates = {
+                key: record
+                for record in reversed(records)
+                if (
+                    key := (
+                        package,
+                        str(record.version),
+                        record.build,
+                        record.build_number,
+                        record.subdir,
+                        record.file_name,
+                    )
+                )
+                in keys
+            }
+            self._version_loader.prefetch(
+                package, {key: candidates[key] for key in keys if key in candidates}
+            )
+            _version_worker: Worker[None] = self.run_worker(
+                self._version_loader.wait_for_prefetch,
+                group="prefetch",
+                exit_on_error=False,
+            )
 
     async def _get_current_package_records(
         self, package_name: str
@@ -1069,7 +1248,10 @@ class CondaMetadataTui(App[None]):
             return
         package_list = self.query_one("#sidebar-list", OptionList)
         highlighted = max(0, min(index, option_count - 1))
-        package_list.highlighted = highlighted
+        # This path updates the preview synchronously. Suppress the duplicate
+        # notification, which could arrive after a later keypress.
+        with package_list.prevent(OptionList.OptionHighlighted):
+            package_list.highlighted = highlighted
         self._update_main_panel_for_sidebar_highlight(highlighted)
 
     def _move_sidebar_highlight(self, delta: int) -> None:
@@ -1082,12 +1264,15 @@ class CondaMetadataTui(App[None]):
             current = 0
         self._set_sidebar_highlight(current + delta)
 
-    def _page_sidebar(self, direction: int) -> None:
-        page_size = max(
+    def _sidebar_page_size(self) -> int:
+        """How far ``Ctrl+d`` and ``Ctrl+u`` move the sidebar highlight."""
+        return max(
             1,
             (self.query_one("#sidebar-list", OptionList).size.height - 2) // 2,
         )
-        self._move_sidebar_highlight(direction * page_size)
+
+    def _page_sidebar(self, direction: int) -> None:
+        self._move_sidebar_highlight(direction * self._sidebar_page_size())
 
     def _jump_sidebar_first(self) -> None:
         self._set_sidebar_highlight(0)
@@ -1397,6 +1582,8 @@ class CondaMetadataTui(App[None]):
     async def _load_and_render_selected_version_preview(
         self, package_name: str, entry: VersionEntry, preview_key: VersionPreviewKey
     ) -> None:
+        if self._mode != "versions" or self._pending_preview_version_key != preview_key:
+            return
         record = await self._get_record_for_version_entry(package_name, entry)
         if self._mode != "versions":
             return
@@ -1431,30 +1618,34 @@ class CondaMetadataTui(App[None]):
         self._pending_preview_version_key = preview_key
 
         if self._previewed_version_key == preview_key:
+            self._schedule_sidebar_preview()
             return
 
+        label = self._describe_version_entry(entry)
         cached = self._version_artifact_data_cache.get(preview_key)
         if cached is not None:
+            self.log.info(f"preview: {label} shown from cache, nothing to fetch")
             self._show_version_details(cached)
             self._reset_main_panel_scroll()
             self._previewed_version_key = preview_key
+            self._schedule_sidebar_preview()
             return
 
         if self._preview_request_in_flight(self._version_preview_request, preview_key):
             return
 
+        # The details come from the archive itself (paths, about, run exports)
+        # as much as from the repodata record.
+        self._previewed_version_key = None
         self._show_main_placeholder(
             f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
-            "Loading repodata for selected version..."
+            "Loading package information..."
         )
         self._reset_main_panel_scroll()
-        worker = self.run_worker(
-            self._load_and_render_selected_version_preview(
+        worker = self._schedule_sidebar_preview(
+            lambda: self._load_and_render_selected_version_preview(
                 package_name, entry, preview_key
-            ),
-            group="version-preview",
-            exclusive=True,
-            exit_on_error=False,
+            )
         )
         self._version_preview_request = (preview_key, worker)
 
@@ -2238,6 +2429,8 @@ class CondaMetadataTui(App[None]):
         self._previewed_package = package_name
 
     async def _load_and_render_package_preview(self, package_name: str) -> None:
+        if self._mode != "packages" or self._pending_preview_package != package_name:
+            return
         records = await self._get_current_package_records(package_name)
         if self._mode != "packages":
             return
@@ -2248,25 +2441,31 @@ class CondaMetadataTui(App[None]):
     def _request_package_preview(self, package_name: str) -> None:
         self._pending_preview_package = package_name
         if self._previewed_package == package_name:
+            self._schedule_sidebar_preview()
             return
         query_records = self._query_records_by_package.get(package_name)
         if query_records is not None:
+            self.log.info(
+                f"preview: {package_name} shown from the query results, "
+                "nothing to query"
+            )
             self._update_main_panel_for_package(package_name, query_records)
+            self._schedule_sidebar_preview()
             return
         cached = self._package_records_cache.get(package_name)
         if cached is not None:
+            self.log.info(f"preview: {package_name} shown from cache, nothing to query")
             self._update_main_panel_for_package(package_name, cached)
+            self._schedule_sidebar_preview()
             return
 
         if self._preview_request_in_flight(self._package_preview_request, package_name):
             return
 
+        self._previewed_package = None
         self._show_main_placeholder(f"# {package_name}\n\nLoading repodata...")
-        worker = self.run_worker(
-            self._load_and_render_package_preview(package_name),
-            group="package-preview",
-            exclusive=True,
-            exit_on_error=False,
+        worker = self._schedule_sidebar_preview(
+            lambda: self._load_and_render_package_preview(package_name)
         )
         self._package_preview_request = (package_name, worker)
 
@@ -3331,6 +3530,7 @@ class CondaMetadataTui(App[None]):
         if row.kind == "entry" and row.entry is not None:
             self._request_selected_version_preview(package_name, row.entry)
             return
+        self._schedule_sidebar_preview()
         if row.kind == "section" and row.subdir is not None:
             self._previewed_version_key = None
             self._pending_preview_version_key = None
@@ -3356,6 +3556,14 @@ class CondaMetadataTui(App[None]):
         self, event: OptionList.OptionHighlighted
     ) -> None:
         if event.option_list.id != "sidebar-list":
+            return
+        # Mouse / built-in navigation and list rebuilds still send messages.
+        # Ignore those superseded by another highlight or a replacement list.
+        if (
+            event.option_list.highlighted != event.option_index
+            or event.option_list.get_option_at_index(event.option_index)
+            is not event.option
+        ):
             return
         if self._sidebar_is_focused() and self._selected_pane != "sidebar":
             self._set_selected_pane("sidebar")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import replace
+from time import perf_counter
 
 import yaml
 from rattler.networking import Client
@@ -20,18 +22,70 @@ from pixi_browse.rendering import (
     build_version_artifact_data,
 )
 
+from .prefetch import InFlightLoads
 from .state import AboutUrls
 
 
+def _discard_log(message: str) -> None:
+    return None
+
+
+def _describe_preview_key(preview_key: VersionPreviewKey) -> str:
+    _, _, _, _, subdir, file_name = preview_key
+    return f"{subdir}/{file_name}"
+
+
 class VersionDataLoader:
-    def __init__(self, *, client: Client) -> None:
+    def __init__(
+        self,
+        *,
+        client: Client,
+        log: Callable[[str], None] = _discard_log,
+        log_detail: Callable[[str], None] = _discard_log,
+        max_parallel_loads: int = 1,
+    ) -> None:
         self._client = client
+        self._log = log
         self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
+        self._artifact_data_loads: InFlightLoads[
+            VersionPreviewKey, VersionArtifactData
+        ] = InFlightLoads(
+            max_parallel=max_parallel_loads,
+            name="package",
+            log=log,
+            log_detail=log_detail,
+            describe=_describe_preview_key,
+        )
+
+    def is_loading(self, preview_key: VersionPreviewKey) -> bool:
+        return preview_key in self._artifact_data_loads
+
+    def has_artifact_data(self, preview_key: VersionPreviewKey) -> bool:
+        return preview_key in self.artifact_data_cache
+
+    def prefetch(
+        self, package_name: str, records: Mapping[VersionPreviewKey, RepoDataRecord]
+    ) -> None:
+        self._artifact_data_loads.schedule(
+            (key for key in records if key not in self.artifact_data_cache),
+            lambda key: self._fetch_version_artifact_data(
+                package_name, records[key], preview_key=key
+            ),
+        )
+
+    def clear_prefetch(self) -> None:
+        self._artifact_data_loads.clear()
+
+    async def wait_for_prefetch(self) -> None:
+        await self._artifact_data_loads.wait()
 
     def clear_caches(self) -> None:
+        # A load still running belongs to the selection being replaced and
+        # must not fill the cleared caches with its results.
+        self._artifact_data_loads.cancel()
         self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
@@ -45,6 +99,7 @@ class VersionDataLoader:
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
+        self._artifact_data_loads.cancel()
         self.archive_cache.clear()
         self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
@@ -243,10 +298,26 @@ class VersionDataLoader:
         *,
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
+        """Fetch what the archive of ``record`` says about it, once."""
         cached = self.artifact_data_cache.get(preview_key)
         if cached is not None:
             return cached
 
+        return await self._artifact_data_loads.run(
+            preview_key,
+            lambda: self._fetch_version_artifact_data(
+                package_name, record, preview_key=preview_key
+            ),
+        )
+
+    async def _fetch_version_artifact_data(
+        self,
+        package_name: str,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        started = perf_counter()
         archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
         info_files = await self.get_info_files(archive)
@@ -285,4 +356,9 @@ class VersionDataLoader:
             repodata_patches=repodata_patches,
         )
         self.artifact_data_cache[preview_key] = artifact_data
+        self._log(
+            f"package: fetched {record.subdir}/{record.file_name} in "
+            f"{perf_counter() - started:.3f}s "
+            f"paths={len(package_paths)} info_files={len(info_files)}"
+        )
         return artifact_data
