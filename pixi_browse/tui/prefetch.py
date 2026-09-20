@@ -57,9 +57,10 @@ def likely_next_indices(
     return indices
 
 
-# Loads queued for a slot, at most. Holding down an arrow key asks for one
-# load per keypress, far more than can ever run at once; by the time a slot
-# comes free only the last few of them are still worth having.
+# Loads nobody is waiting for that may queue for a slot, at most. Holding down
+# an arrow key asks for one load per keypress, far more than can ever run at
+# once; by the time a slot comes free only the last few of them are still worth
+# having.
 MAX_WAITING_LOADS = 8
 
 
@@ -67,19 +68,26 @@ def _discard_log(message: str) -> None:
     return None
 
 
-class _Slot:
+class _Slot[KeyT]:
     """A load's place in the queue in front of the semaphore.
 
     A slot is made by the load it belongs to, so the task waiting on it is
     whichever one is running right now: the ``owner``. Cancelling a queued load
     means cancelling that task, and a slot whose owner gave up is a slot that
     must not be handed over -- nobody is left to pass it on.
+
+    Places are kept as slots rather than as keys because there can be two loads
+    of one key for a moment: one being given up on, which is forgotten while it
+    is still unwinding, and the load a fresh request starts in its place. Keyed
+    by key, the second would take the place of the first, and the first would
+    then wait for a place that no longer exists -- for good, with everyone
+    waiting on it.
     """
 
-    __slots__ = ("background", "granted", "owner", "ready")
+    __slots__ = ("granted", "key", "owner", "ready")
 
-    def __init__(self, *, background: bool) -> None:
-        self.background = background
+    def __init__(self, key: KeyT) -> None:
+        self.key = key
         self.granted = False
         self.owner = asyncio.current_task()
         self.ready = asyncio.Event()
@@ -100,10 +108,17 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
     the semaphore is where requests are given up on. Slots go to the newest
     load queued, because the entry highlighted a moment ago is the one being
     waited for while the one highlighted ten presses ago is not, and once more
-    than ``max_waiting`` loads queue up, the ones queued longest are
-    cancelled. A ``background`` load -- one started only in case its entry is
-    highlighted next -- is the last of the queue to be given a slot and the
-    first to be given up on.
+    than ``max_waiting`` loads queue up, the ones queued longest are cancelled.
+
+    Which of them are cancelled is decided by who is waiting, counted as
+    callers come and go rather than fixed when the load starts: a ``background``
+    load -- one started only in case its entry is highlighted next -- has
+    nobody, and so has the load of an entry whose highlight has moved on, which
+    is a prefetch in all but name from then on. Those are the last of the queue
+    to be given a slot and the first to be given up on, and **a load somebody is
+    waiting for is never given up on at all**: it is the entry on screen, and a
+    loading placeholder that never goes away is worse than a queue a few places
+    too long.
 
     Every step is logged. What a load does with its slot goes to ``log_detail``,
     since there is a line of it for every keypress; what should be noticed
@@ -133,7 +148,9 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         self._describe = describe
         self._tasks: dict[KeyT, asyncio.Future[ValueT]] = {}
         # The loads queued for a slot, the one queued longest first.
-        self._waiting: dict[KeyT, _Slot] = {}
+        self._queue: list[_Slot[KeyT]] = []
+        # How many callers are waiting for each key right now.
+        self._waiters: dict[KeyT, int] = {}
         self._running = 0
 
     def __contains__(self, key: KeyT) -> bool:
@@ -150,7 +167,12 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
     @property
     def waiting(self) -> list[KeyT]:
         """The keys queued for a slot, the one queued longest first."""
-        return list(self._waiting)
+        return [slot.key for slot in self._queue]
+
+    @property
+    def waited_for(self) -> list[KeyT]:
+        """The keys a caller is waiting for right now, queued or running."""
+        return list(self._waiters)
 
     async def run(
         self,
@@ -159,14 +181,39 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         *,
         background: bool = False,
     ) -> ValueT:
-        """Await the load of ``key``, starting ``load()`` unless one is running."""
+        """Await the load of ``key``, starting ``load()`` unless one is running.
+
+        ``background`` marks a caller that is not waiting for the load to
+        finish, only asking for it to be started.
+        """
+        if background:
+            return await self._joined(key, load)
+        # Counted while the caller waits and only while it waits: a highlight
+        # that has moved on leaves its load running, and that load is worth no
+        # more than a prefetch from then on.
+        self._waiters[key] = self._waiters.get(key, 0) + 1
+        try:
+            return await self._joined(key, load)
+        finally:
+            remaining = self._waiters[key] - 1
+            if remaining:
+                self._waiters[key] = remaining
+            else:
+                del self._waiters[key]
+
+    async def _joined(self, key: KeyT, load: Callable[[], Awaitable[ValueT]]) -> ValueT:
+        """Await the load of ``key``, sharing one that is already going."""
         task = self._tasks.get(key)
-        if task is None:
-            task = asyncio.ensure_future(self._gated(key, load, background=background))
+        if task is None or task.cancelled():
+            # A cancelled load is a load given up on, and awaiting it would hand
+            # its cancellation to a caller that has just asked for the key. It
+            # is only in the table until its own callback runs; a fresh load
+            # takes its place here and now.
+            task = asyncio.ensure_future(self._gated(key, load))
             self._tasks[key] = task
             task.add_done_callback(partial(self._forget, key))
         else:
-            still_waiting = self._requeue(key, background=background)
+            still_waiting = self._requeue(key)
             place = "queued" if still_waiting else "running"
             self._log_detail(
                 f"{self._name}: {self._describe(key)} joins the load already "
@@ -179,14 +226,16 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         """How full the semaphore and the queue in front of it are."""
         return (
             f"running={self._running}/{self._max_parallel} "
-            f"waiting={len(self._waiting)}/{self._max_waiting} "
+            f"waiting={len(self._queue)}/{self._max_waiting} "
             f"loads={len(self._tasks)}"
         )
 
-    async def _gated(
-        self, key: KeyT, load: Callable[[], Awaitable[ValueT]], *, background: bool
-    ) -> ValueT:
-        await self._acquire(key, background=background)
+    def _waited_on(self, key: KeyT) -> bool:
+        """Whether a caller is waiting for ``key`` right now."""
+        return self._waiters.get(key, 0) > 0
+
+    async def _gated(self, key: KeyT, load: Callable[[], Awaitable[ValueT]]) -> ValueT:
+        await self._acquire(key)
         try:
             return await load()
         finally:
@@ -198,28 +247,28 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
                 f"{self._name}: {self._describe(key)} released its slot, {self.state}"
             )
 
-    async def _acquire(self, key: KeyT, *, background: bool) -> None:
+    async def _acquire(self, key: KeyT) -> None:
         """Wait for one of the ``max_parallel`` slots.
 
         Nothing is awaited before the slot count is read, so a burst of
         requests within one tick queues up rather than all slipping through.
         """
         label = self._describe(key)
-        kind = "prefetch" if background else "waited on"
+        kind = "waited on" if self._waited_on(key) else "prefetch"
         if self._running < self._max_parallel:
             self._running += 1
             self._log_detail(f"{self._name}: {label} starts ({kind}), {self.state}")
             return
 
-        slot = _Slot(background=background)
-        self._waiting[key] = slot
-        if self._drop_longest_waiting():
+        slot = _Slot(key)
+        self._queue.append(slot)
+        if self._drop_longest_waiting(slot):
             # The queue was one too long with this load in it, and this load is
             # the one it gave up on -- a prefetch, since a load being waited on
-            # is never the first to go. Its place is gone, so waiting for it to
-            # come up would be waiting for good; nothing was started, so there
-            # is nothing to unwind either. Giving up looks to the caller like
-            # any other load dropped from the queue.
+            # is never given up on. Its place is gone, so waiting for it to come
+            # up would be waiting for good; nothing was started, so there is
+            # nothing to unwind either. Giving up looks to the caller like any
+            # other load dropped from the queue.
             raise asyncio.CancelledError(
                 f"{self._name}: gave up on {label} before it started"
             )
@@ -228,11 +277,8 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         try:
             await slot.ready.wait()
         except asyncio.CancelledError:
-            # This load's own place in the queue, and no other: a key given up
-            # on is forgotten, so it can be asked for again, and the load that
-            # answers then keeps a place of its own.
-            if self._waiting.get(key) is slot:
-                del self._waiting[key]
+            if slot in self._queue:
+                self._queue.remove(slot)
             if slot.granted:
                 # A slot was handed over just before this load was dropped;
                 # pass it on rather than let it go to waste.
@@ -245,8 +291,8 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
 
     def _release(self) -> None:
         """Hand the slot on to the load most worth running, or give it up."""
-        while (key := self._next_waiting()) is not None:
-            slot = self._waiting.pop(key)
+        while (slot := self._next_waiting()) is not None:
+            self._queue.remove(slot)
             if slot.owner is None or slot.owner.done():
                 # The load gave up while its place was coming up. Handing the
                 # slot over would lose it: nothing of that load runs any more
@@ -257,63 +303,74 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
             return
         self._running -= 1
 
-    def _next_waiting(self) -> KeyT | None:
-        """The newest waiting load, the ones being waited on going first."""
-        newest_background: KeyT | None = None
-        for key, slot in reversed(self._waiting.items()):
-            if not slot.background:
-                return key
-            if newest_background is None:
-                newest_background = key
-        return newest_background
+    def _next_waiting(self) -> _Slot[KeyT] | None:
+        """The newest queued load, the ones being waited for going first."""
+        newest: _Slot[KeyT] | None = None
+        for slot in reversed(self._queue):
+            if self._waited_on(slot.key):
+                return slot
+            if newest is None:
+                newest = slot
+        return newest
 
-    def _most_droppable(self) -> KeyT:
-        """The load queued longest, the ones nobody waits on going first."""
-        for key, slot in self._waiting.items():
-            if slot.background:
-                return key
-        return next(iter(self._waiting))
+    def _most_droppable(self) -> _Slot[KeyT] | None:
+        """The load queued longest that nobody is waiting for, if there is one."""
+        for slot in self._queue:
+            if not self._waited_on(slot.key):
+                return slot
+        return None
 
-    def _requeue(self, key: KeyT, *, background: bool) -> bool:
-        """Move a waiting load to the end of the queue: it was asked for
-        again, so it is the freshest request there is.
+    def _requeue(self, key: KeyT) -> bool:
+        """Move a queued load to the end of the queue: it was asked for again,
+        so it is the freshest request there is.
 
         Returns whether the load was still queued rather than already running.
         """
-        slot = self._waiting.get(key)
-        if slot is None:
-            return False
-        if not background:
-            slot.background = False
-        self._waiting[key] = self._waiting.pop(key)
-        return True
+        for index, slot in enumerate(self._queue):
+            if slot.key == key:
+                self._queue.append(self._queue.pop(index))
+                return True
+        return False
 
-    def _drop_longest_waiting(self) -> bool:
-        """Cancel the loads queued longest, down to ``max_waiting``.
+    def _drop_longest_waiting(self, mine: _Slot[KeyT]) -> bool:
+        """Give up on the loads queued longest, down to ``max_waiting``.
 
-        Returns whether the load calling this was one of them: it is queueing
-        right now, so it cannot be stopped by cancelling it -- a task that
-        cancels itself carries on to its next ``await`` first, which is one
-        await too many when what it awaits is the place it just lost. It is
-        told to stop itself instead.
+        Only on loads nobody is waiting for: the highlighted entry queues here
+        too, and giving up on that one leaves a loading placeholder on screen
+        with nothing left to replace it. A queue of loads that are all being
+        waited for is left over long instead -- there are only ever as many of
+        those as there are callers.
+
+        Returns whether ``mine`` -- the load queueing right now -- was one of
+        them: it cannot be stopped by cancelling it, because a task that cancels
+        itself carries on to its next ``await`` first, which is one await too
+        many when what it awaits is the place it just lost. It is told to stop
+        itself instead.
         """
-        current = asyncio.current_task()
         dropped_itself = False
-        while len(self._waiting) > self._max_waiting:
-            key = self._most_droppable()
-            owner = self._waiting.pop(key).owner
+        while len(self._queue) > self._max_waiting:
+            slot = self._most_droppable()
+            if slot is None:
+                self._log(
+                    f"{self._name}: {len(self._queue)} loads queued and every one "
+                    f"of them is being waited for, keeping them all, {self.state}"
+                )
+                break
+            self._queue.remove(slot)
             # Forgetting the load here, rather than waiting for the cancelled
-            # task's callback, lets a request that comes back for this key
-            # start a load again instead of joining a doomed one.
-            self._tasks.pop(key, None)
+            # task's callback, lets a request that comes back for this key start
+            # a load again instead of joining a doomed one. Only this load
+            # though: the key may already have a newer one of its own.
+            if self._tasks.get(slot.key) is slot.owner:
+                del self._tasks[slot.key]
             self._log(
-                f"{self._name}: gave up on {self._describe(key)} before it "
+                f"{self._name}: gave up on {self._describe(slot.key)} before it "
                 f"started, {self.state}"
             )
-            if owner is current:
+            if slot is mine:
                 dropped_itself = True
-            elif owner is not None:
-                owner.cancel()
+            elif slot.owner is not None:
+                slot.owner.cancel()
         return dropped_itself
 
     def _forget(self, key: KeyT, task: asyncio.Future[ValueT]) -> None:
@@ -327,7 +384,7 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
 
     def cancel(self) -> None:
         """Cancel every running load; their results would be stale."""
-        if self._tasks or self._waiting:
+        if self._tasks or self._queue:
             self._log(f"{self._name}: dropping every load, {self.state}")
         # The queued loads by their slots rather than by the keys they are
         # registered under: a load dropped from the queue is forgotten while it
@@ -335,10 +392,10 @@ class InFlightLoads[KeyT: Hashable, ValueT]:
         # here has to be stopped whether it is still registered or not.
         doomed: list[asyncio.Future[ValueT] | asyncio.Task[object]] = [
             *self._tasks.values(),
-            *(slot.owner for slot in self._waiting.values() if slot.owner is not None),
+            *(slot.owner for slot in self._queue if slot.owner is not None),
         ]
         self._tasks.clear()
-        self._waiting.clear()
+        self._queue.clear()
         for task in doomed:
             task.cancel()
 

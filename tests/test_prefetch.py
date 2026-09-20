@@ -299,6 +299,13 @@ class _GatedLoads:
         """Let the load of ``key`` finish, without waiting for it to."""
         self._release.setdefault(key, asyncio.Event()).set()
 
+    def abandon(self, key: str) -> None:
+        """Stop waiting for ``key``, the way a highlight moving on does.
+
+        The load itself runs on: what it fetches is worth caching either way.
+        """
+        self.requests[key].cancel()
+
     async def finish(self, key: str) -> None:
         self.release(key)
         await self._idle()
@@ -400,21 +407,31 @@ def test_in_flight_loads_give_up_on_the_loads_waiting_longest() -> None:
         gated = _GatedLoads(max_parallel=1, max_waiting=2)
 
         await gated.settle("running", "stale", "b", "c")
+        # Nothing is given up on while every queued load is being waited for.
+        assert gated.loads.waiting == ["stale", "b", "c"]
 
-        # Only the two newest requests are still worth a slot.
-        assert gated.loads.waiting == ["b", "c"]
+        # The highlight moves on from all three: their loads run on for the
+        # cache, but from here they are prefetches in all but name.
+        for key in ("stale", "b", "c"):
+            gated.abandon(key)
+        await gated._idle()
+        await gated.settle("highlighted")
+
+        # Only the two newest of the loads nobody waits for keep their place.
+        assert gated.loads.waiting == ["c", "highlighted"]
         assert "stale" not in gated.loads
-        assert await gated.dropped("stale")
+        assert "b" not in gated.loads
         assert any("gave up on stale" in line for line in gated.log)
+        assert any("gave up on b" in line for line in gated.log)
 
-        # Asking for the dropped key again starts a load for it once more.
+        # Asking for a key that was given up on starts a load for it once more.
         await gated.settle("stale")
-        assert gated.loads.waiting == ["c", "stale"]
-        assert await gated.dropped("b")
+        assert gated.loads.waiting == ["highlighted", "stale"]
+        assert "c" not in gated.loads
 
-        for key in ("running", "stale", "c"):
+        for key in ("running", "stale", "highlighted"):
             await gated.finish(key)
-        assert gated.started == ["running", "stale", "c"]
+        assert gated.started == ["running", "stale", "highlighted"]
 
     asyncio.run(run())
 
@@ -431,15 +448,85 @@ def test_in_flight_loads_give_up_on_a_background_load_first() -> None:
         assert gated.loads.waiting == ["highlighted", "newer"]
         assert await gated.dropped("prefetched")
 
-        # Being asked for again keeps a waiting load from being dropped.
-        await gated.settle("highlighted")
+        # Waiting for a load keeps it from being dropped, however long it has
+        # been queued; a load whose caller has gone is the first to go, however
+        # recently it was asked for.
+        gated.abandon("newer")
+        await gated._idle()
         await gated.settle("newest")
         assert gated.loads.waiting == ["highlighted", "newest"]
-        assert await gated.dropped("newer")
+        assert "newer" not in gated.loads
+        assert any("gave up on newer" in line for line in gated.log)
 
         for key in ("running", "newest", "highlighted"):
             await gated.finish(key)
         assert gated.started == ["running", "newest", "highlighted"]
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_never_give_up_on_a_load_being_waited_for() -> None:
+    """The load of the highlighted entry queues with all the rest, so a queue
+    that is over long may be nothing but loads somebody is waiting for. Giving
+    one of those up leaves a loading placeholder on screen with nothing left to
+    replace it, so the queue is let over its limit instead -- it is bounded by
+    the callers waiting, and they come and go with the highlight."""
+
+    async def run() -> None:
+        gated = _GatedLoads(max_parallel=1, max_waiting=2)
+
+        await gated.settle("running")
+        await gated.settle("highlighted", "b", "c", "d")
+
+        assert gated.loads.waiting == ["highlighted", "b", "c", "d"]
+        assert not any("gave up on" in line for line in gated.log)
+        assert any(
+            "4 loads queued and every one of them is being waited for" in line
+            for line in gated.log
+        )
+
+        # Every one of them is waited for, so every one of them gets its turn.
+        for key in ("running", "d", "c", "b", "highlighted"):
+            await gated.finish(key)
+        assert gated.started == ["running", "d", "c", "b", "highlighted"]
+        assert await gated.requests["highlighted"] == "highlighted"
+        assert gated.loads.running == 0
+        assert len(gated.loads) == 0
+
+    asyncio.run(run())
+
+
+def test_in_flight_loads_start_a_fresh_load_rather_than_join_a_cancelled_one() -> None:
+    """A load stays in the table until its own done callback runs, one turn of
+    the loop after it ends. A request that arrives in between must not join a
+    load that was cancelled in that turn: it would be handed the cancellation
+    of a load it had nothing to do with, and the entry it belongs to would wait
+    for data that is never coming."""
+
+    async def run() -> None:
+        loads: InFlightLoads[str, str] = InFlightLoads(max_parallel=1)
+        woken = asyncio.Event()
+
+        async def cancelled_load() -> str:
+            # Wakes the request below while this load is still the one in the
+            # table, so that it runs before the callback that forgets it.
+            woken.set()
+            raise asyncio.CancelledError("gave up on it")
+
+        async def load() -> str:
+            return "loaded"
+
+        async def request_when_woken() -> str:
+            await woken.wait()
+            return await loads.run("key", load)
+
+        joining = asyncio.ensure_future(request_when_woken())
+        cancelled = asyncio.ensure_future(loads.run("key", cancelled_load))
+        await asyncio.wait([joining, cancelled], timeout=1)
+
+        assert cancelled.cancelled()
+        assert joining.result() == "loaded"
+        assert len(loads) == 0
 
     asyncio.run(run())
 
@@ -528,24 +615,44 @@ def test_in_flight_loads_settle_after_a_burst_of_requests() -> None:
         for round_index in range(200):
             gated = _GatedLoads(max_parallel=4, max_waiting=3)
             requests: list[asyncio.Task[str]] = []
+            # The requests that must still come back with a value: waited on,
+            # never given up on by the test, and made since the last time the
+            # selection they belong to was replaced.
+            awaited: list[asyncio.Task[str]] = []
 
             for _ in range(60):
                 action = rng.random()
                 key = rng.choice(keys)
                 if action < 0.55:
-                    requests.append(gated.request(key, background=rng.random() < 0.4))
+                    background = rng.random() < 0.4
+                    request = gated.request(key, background=background)
+                    requests.append(request)
+                    if not background:
+                        awaited.append(request)
                 elif action < 0.7:
                     gated.release(key)
                 elif action < 0.8 and requests:
                     # A worker whose entry is no longer highlighted.
-                    rng.choice(requests).cancel()
+                    victim = rng.choice(requests)
+                    victim.cancel()
+                    if victim in awaited:
+                        awaited.remove(victim)
                 elif action < 0.85:
                     # The selection the loads belong to was replaced.
                     gated.loads.cancel()
+                    awaited.clear()
                 if rng.random() < 0.5:
                     await asyncio.sleep(0)
                 assert gated.loads.running <= 4, (round_index, gated.loads.running)
-                assert len(gated.loads.waiting) <= 3, (round_index, gated.loads.waiting)
+                queued = gated.loads.waiting
+                # The queue only goes over its limit to hold on to loads that
+                # are being waited for.
+                if len(queued) > 3:
+                    waited_for = set(gated.loads.waited_for)
+                    assert all(key in waited_for for key in queued), (
+                        round_index,
+                        queued,
+                    )
 
             for key in keys:
                 gated.release(key)
@@ -554,6 +661,9 @@ def test_in_flight_loads_settle_after_a_burst_of_requests() -> None:
             assert gated.loads.running == 0, (round_index, gated.loads.running)
             assert gated.loads.waiting == [], (round_index, gated.loads.waiting)
             assert len(gated.loads) == 0, (round_index, len(gated.loads))
+            # Nobody who kept waiting was left empty-handed.
+            for request in awaited:
+                assert not request.cancelled(), (round_index, request)
 
     asyncio.run(run())
 
@@ -599,8 +709,12 @@ def test_in_flight_loads_keep_the_per_keypress_lines_out_of_the_main_log() -> No
             await release.wait()
             return key
 
+        # "b" is the prefetch of a neighbouring entry, so it is the one the
+        # queue has no room for once "c" is highlighted.
         requests = [
-            asyncio.ensure_future(loads.run(key, partial(load, key)))
+            asyncio.ensure_future(
+                loads.run(key, partial(load, key), background=key == "b")
+            )
             for key in ("a", "b", "c")
         ]
         # One tick for the requests, one for the loads they start.
@@ -619,7 +733,7 @@ def test_in_flight_loads_keep_the_per_keypress_lines_out_of_the_main_log() -> No
         ]
         assert happened == [
             "loads: a starts (waited on)",
-            "loads: b queued (waited on)",
+            "loads: b queued (prefetch)",
             "loads: c queued (waited on)",
             "loads: a released its slot",
             "loads: c starts (waited on) after queueing for Xs",
