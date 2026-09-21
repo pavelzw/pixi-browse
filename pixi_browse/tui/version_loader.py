@@ -10,6 +10,7 @@ from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
 
+from pixi_browse.archives import open_package_archive
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
@@ -184,7 +185,7 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        archive = await PackageArchive.from_url(self._client, url)
+        archive = await open_package_archive(self._client, url)
         self.archive_cache[preview_key] = archive
         return archive
 
