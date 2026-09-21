@@ -3237,7 +3237,7 @@ class CondaMetadataTui(App[None]):
             and self.screen.get_selected_text()
         ):
             self.screen.clear_selection()
-            self.ALLOW_SELECT = False
+            type(self).ALLOW_SELECT = False
             return
         if isinstance(event, MouseDown) and not event.is_forwarded:
             # Decide before Textual starts a selection gesture. Keep the decision
@@ -3245,9 +3245,12 @@ class CondaMetadataTui(App[None]):
             try:
                 widget, _ = self.get_widget_at(event.x, event.y)
             except NoWidget:
-                self.ALLOW_SELECT = False
+                type(self).ALLOW_SELECT = False
             else:
-                self.ALLOW_SELECT = widget.id == "detail-body-0"
+                type(self).ALLOW_SELECT = widget.id in {
+                    "detail-body-0",
+                    "file-preview-body",
+                }
         await super().on_event(event)
 
     def action_copy_selection_or_quit(self) -> None:

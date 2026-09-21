@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+
+from textual.events import MouseDown, MouseMove, MouseUp
 from textual.pilot import Pilot
 
-from pixi_browse.tui import FileActionScreen
+from pixi_browse.tui import FileActionScreen, FilePreviewScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
@@ -128,6 +131,39 @@ def test_preview_escape_returns_to_details(
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
+
+
+def test_preview_text_can_be_selected_and_copied(make_app: AppFactory) -> None:
+    """A drag in a package file preview selects text for ``Ctrl+C``."""
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            await open_versions(pilot, package_index=1)
+            await pilot.press("3", "enter")
+            await wait_for_screen(pilot, FileActionScreen)
+            await pilot.press("enter")
+            await wait_for_screen(pilot, FilePreviewScreen)
+            await wait_for_idle(pilot)
+
+            body = app.screen.query_one("#file-preview-body")
+            x, y = body.region.offset
+            for event_type, offset in [
+                (MouseDown, 0),
+                (MouseMove, 20),
+                (MouseUp, 20),
+            ]:
+                app.post_message(
+                    event_type(None, x + offset, y, 0, 0, 1, False, False, False)
+                )
+                await pilot.pause()
+
+            selected = app.screen.get_selected_text()
+            assert selected
+            await pilot.press("ctrl+c")
+            assert app.clipboard == selected
+
+    asyncio.run(run())
 
 
 def test_download_path_screen_rejects_empty_destination(
