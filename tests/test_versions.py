@@ -21,7 +21,6 @@ from rattler.platform import Platform
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
-from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -2366,8 +2365,8 @@ def test_file_preview_screen_uses_syntax_renderable() -> None:
             await pilot.pause()
 
             body = screen.query_one("#file-preview-body", Static)
-            assert isinstance(body.content, Syntax)
-            assert body.content.code == "print('demo')\n"
+            assert isinstance(body.content, Text)
+            assert body.content.plain == "print('demo')\n"
 
     asyncio.run(_run())
 

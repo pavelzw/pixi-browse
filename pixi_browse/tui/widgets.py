@@ -3617,10 +3617,10 @@ class FilePreviewScreen(ScrollableModalScreen):
         self._content = content
         self._syntax_lexer = syntax_lexer
 
-    def _content_renderable(self) -> str | Syntax:
+    def _content_renderable(self) -> str | Text:
         if self._syntax_lexer is None:
             return self._content
-        return Syntax(
+        syntax = Syntax(
             self._content,
             self._syntax_lexer,
             theme="ansi_dark",
@@ -3629,6 +3629,10 @@ class FilePreviewScreen(ScrollableModalScreen):
             tab_size=4,
             word_wrap=True,
         )
+        # Textual can select a Text visual, while a generic Rich renderable such
+        # as Syntax is display-only. Highlight eagerly so previews keep their
+        # syntax colors and participate in the screen's text selection.
+        return syntax.highlight(self._content)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-preview-dialog"):
