@@ -134,6 +134,8 @@ _SIDEBAR_LOAD_DELAY = 0.1
 class CondaMetadataTui(App[None]):
     CSS_PATH = Path(__file__).resolve().parent.parent / "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
+    # Keep pointer gestures focused on navigation rather than selecting display text.
+    ALLOW_SELECT = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
         Binding("tab", "tab_key", show=False, priority=True),
