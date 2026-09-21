@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import webbrowser
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from hashlib import sha256
@@ -3178,9 +3177,6 @@ class CondaMetadataTui(App[None]):
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
-
-    def action_open_external_url(self, url: str) -> None:
-        webbrowser.open(url)
 
     def action_tab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):

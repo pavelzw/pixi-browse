@@ -24,7 +24,7 @@ from rich.style import Style
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
-from textual.app import App
+from textual.app import App, ComposeResult
 from textual.widgets import OptionList, Static
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry
@@ -515,7 +515,7 @@ def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
     assert "Package               demo" in metadata_lines
     assert "Python Site-Packages  not available" in metadata_lines
     assert any(
-        line.startswith("Repository            [@click=app.open_external_url(")
+        line.startswith("Repository            [underline link=")
         for line in metadata_lines
     )
     assert (
@@ -904,8 +904,8 @@ def test_format_version_details_metadata_lines_include_about_urls() -> None:
     )
     assert any(
         line.startswith("Recipe maintainers")
-        and "@click=app.open_external_url('https://github.com/pavelzw')" in line
-        and "@click=app.open_external_url('https://github.com/xhochy')" in line
+        and "[underline link='https://github.com/pavelzw']@pavelzw[/]" in line
+        and "[underline link='https://github.com/xhochy']@xhochy[/]" in line
         for line in metadata_lines
     )
     assert any(
@@ -922,31 +922,61 @@ def test_format_version_details_metadata_lines_include_about_urls() -> None:
     )
 
 
-def test_format_clickable_url_uses_textual_click_action() -> None:
+def test_format_clickable_url_uses_a_terminal_hyperlink() -> None:
     rendered = format_clickable_url("https://example.com/demo")
 
     assert (
         rendered
-        == "[@click=app.open_external_url('https://example.com/demo')]https://example.com/demo[/]"
+        == "[underline link='https://example.com/demo']https://example.com/demo[/]"
+    )
+
+
+def test_format_clickable_url_percent_encodes_a_quote() -> None:
+    rendered = format_clickable_url("https://example.com/it's")
+
+    assert (
+        rendered
+        == "[underline link='https://example.com/it%27s']https://example.com/it's[/]"
     )
 
 
 def test_format_clickable_github_handle_uses_github_profile() -> None:
     rendered = format_clickable_github_handle("@pavelzw")
 
-    assert (
-        rendered
-        == "[@click=app.open_external_url('https://github.com/pavelzw')]@pavelzw[/]"
-    )
+    assert rendered == "[underline link='https://github.com/pavelzw']@pavelzw[/]"
 
 
 def test_format_clickable_github_handle_links_teams_to_their_org_page() -> None:
     rendered = format_clickable_github_handle("@conda-forge/go")
 
     assert rendered == (
-        "[@click=app.open_external_url('https://github.com/orgs/conda-forge/teams/go')]"
+        "[underline link='https://github.com/orgs/conda-forge/teams/go']"
         "@conda-forge/go[/]"
     )
+
+
+def test_clickable_link_reaches_the_terminal_as_an_osc8_hyperlink() -> None:
+    """A link leaves the app as the OSC-8 sequence the terminal itself opens,
+    so it needs neither a click the app handles nor a browser on this host."""
+
+    class _HostApp(App[None]):
+        def compose(self) -> ComposeResult:
+            yield Static(format_clickable_github_handle("@pavelzw"), id="link-body")
+
+    rendered: list[str] = []
+
+    async def _run() -> None:
+        app = _HostApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            body = app.query_one("#link-body", Static)
+            rendered.append(body.render_line(0).render(app.console))
+
+    asyncio.run(_run())
+
+    assert "\x1b]8;id=" in rendered[0]
+    assert "https://github.com/pavelzw\x1b\\" in rendered[0]
+    assert "@pavelzw" in rendered[0]
 
 
 def test_render_package_preview_shows_version_selector_preview() -> None:
