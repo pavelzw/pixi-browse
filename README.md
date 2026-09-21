@@ -22,7 +22,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
 - **Verify Sigstore attestations** — see who built a signed artifact, from which workflow and ref, and whether the signature binds to this exact file and channel
 - **Compare artifacts** — metadata, dependencies, and file lists of two builds side by side, with optional file diffs
-- **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
+- **Terminal hyperlinks** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
 - **Vim-style keybindings** for fast keyboard-driven navigation
 

@@ -121,7 +121,17 @@ def format_clickable_url(url: str) -> str:
 
 
 def format_clickable_link(label: str, url: str) -> str:
-    return f"[@click=app.open_external_url({url!r})]{label}[/]"
+    """Mark ``label`` up as an OSC-8 hyperlink to ``url``.
+
+    The terminal owns the link, not the app: it opens with the modifier-click
+    the user already knows from every other link in their terminal, and it
+    lands in the browser of whoever is looking at the screen rather than in one
+    on the host a remote session runs on.
+    """
+    # Textual reads a style value up to the next quote, so a literal one in the
+    # URL has to travel percent-encoded.
+    quoted_url = url.replace("'", "%27")
+    return f"[underline link='{quoted_url}']{label}[/]"
 
 
 def format_clickable_github_handle(handle: str) -> str:

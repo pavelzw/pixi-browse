@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import webbrowser
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from hashlib import sha256
@@ -14,13 +13,7 @@ from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.package import PackageName
-from rattler.package_streaming import (
-    PackageArchive,
-    fetch_raw_package_file_from_url,
-)
-from rattler.package_streaming import (
-    download_to_path as package_download_to_path,
-)
+from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
@@ -37,6 +30,7 @@ from textual.widgets import OptionList, Static
 from textual.worker import Worker
 
 from pixi_browse import __version__
+from pixi_browse.archives import download_package_archive, read_package_archive_file
 from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
@@ -1597,11 +1591,28 @@ class CondaMetadataTui(App[None]):
             self._previewed_version_key = None
             return
 
-        details = await self._version_loader.load_version_details(
-            package_name,
-            record,
-            preview_key=preview_key,
-        )
+        # Reading the archive can fail for reasons the user can act on -- an
+        # archive the channel lists but does not serve, a broken connection --
+        # and a swallowed failure would leave the loading placeholder up for
+        # good.
+        try:
+            details = await self._version_loader.load_version_details(
+                package_name,
+                record,
+                preview_key=preview_key,
+            )
+        except Exception as error:
+            if self._mode != "versions":
+                return
+            if self._pending_preview_version_key != preview_key:
+                return
+            self.log.error(f"preview: {entry.file_name} failed: {error!r}")
+            self._show_main_placeholder(
+                f"# {escape(package_name)} {escape(str(entry.version))}\n\n"
+                f"Failed to load package information: {escape(str(error))}"
+            )
+            self._previewed_version_key = None
+            return
         if self._mode != "versions":
             return
         if self._pending_preview_version_key != preview_key:
@@ -1670,7 +1681,7 @@ class CondaMetadataTui(App[None]):
             destination = (Path.cwd() / entry.file_name).resolve()
             temporary_destination = destination.with_name(f"{destination.name}.part")
 
-            await package_download_to_path(self._client, url, temporary_destination)
+            await download_package_archive(self._client, url, temporary_destination)
             temporary_destination.replace(destination)
         except Exception as exc:
             if temporary_destination is not None:
@@ -1884,7 +1895,7 @@ class CondaMetadataTui(App[None]):
     ) -> bytes:
         url = await self._package_url_for_version_entry(package_name, entry)
 
-        return await fetch_raw_package_file_from_url(self._client, url, file_path)
+        return await read_package_archive_file(self._client, url, file_path)
 
     @staticmethod
     def _decode_text_file(package_bytes: bytes) -> str | None:
@@ -3166,9 +3177,6 @@ class CondaMetadataTui(App[None]):
 
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen(self._help_text(), version=__version__))
-
-    def action_open_external_url(self, url: str) -> None:
-        webbrowser.open(url)
 
     def action_tab_key(self) -> None:
         if self._compare_screen_open and isinstance(self.screen, CompareScreen):

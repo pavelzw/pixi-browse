@@ -149,8 +149,8 @@ def test_loader_verifies_while_it_reads_the_archive(
         f"Target channel  {SKILL_FORGE_CHANNEL}",
         "Bundle          #1",
         "Sidecar         "
-        f"[@click=app.open_external_url('{SKILL_FORGE_CHANNEL}/noarch/"
-        f"{SIGNED_FILE_NAME}.sigs.{SIGNED_ATTESTATIONS_SHA256}')]"
+        f"[underline link='{SKILL_FORGE_CHANNEL}/noarch/"
+        f"{SIGNED_FILE_NAME}.sigs.{SIGNED_ATTESTATIONS_SHA256}']"
         f"{SKILL_FORGE_CHANNEL}/noarch/{SIGNED_FILE_NAME}"
         f".sigs.{SIGNED_ATTESTATIONS_SHA256}[/]",
     )
@@ -179,7 +179,7 @@ def test_rejected_attestation_reports_every_reason() -> None:
 
     assert format_version_details_attestation_lines(attestation) == (
         "Status   not verified - see the warnings below",
-        "Sidecar  [@click=app.open_external_url('https://example.com/pkg.conda.sigs.abc')]"
+        "Sidecar  [underline link='https://example.com/pkg.conda.sigs.abc']"
         "https://example.com/pkg.conda.sigs.abc[/]",
         "",
         "Warning  bundle 0: subject digest mismatch",
