@@ -1,6 +1,6 @@
 """Read package archives of a channel, remote or local.
 
-A channel given as a directory (``pixi-browse -c ./skill-forge``) resolves to
+A channel given as a directory (``pixi-browse -c ./my-channel``) resolves to
 records whose URL is a ``file://`` URL. Rattler's HTTP client cannot request
 those: the scheme is rejected while the request is being built, so every read
 fails with ``an error occurred during a range request: builder error for url
