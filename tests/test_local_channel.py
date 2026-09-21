@@ -1,6 +1,6 @@
 """Browsing a channel that is a directory on this machine.
 
-``pixi-browse -c ./skill-forge`` resolves the channel to ``file://`` record
+``pixi-browse -c ./my-channel`` resolves the channel to ``file://`` record
 URLs. The repodata of such a channel is read straight off the disk, but the
 archives were not: the HTTP client cannot request a ``file://`` URL, so every
 package read failed and the preview never left "Loading package
