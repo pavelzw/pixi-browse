@@ -30,7 +30,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
-from textual.events import Key, Resize
+from textual.errors import NoWidget
+from textual.events import Event, Key, MouseDown, Resize
 from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
 from textual.widgets import OptionList, Static
@@ -134,7 +135,7 @@ _SIDEBAR_LOAD_DELAY = 0.1
 class CondaMetadataTui(App[None]):
     CSS_PATH = Path(__file__).resolve().parent.parent / "selection_list.tcss"
     ENABLE_COMMAND_PALETTE = False
-    # Keep pointer gestures focused on navigation rather than selecting display text.
+    # Enabled per gesture only when a drag starts in metadata.
     ALLOW_SELECT = False
     BINDINGS = [
         Binding("question_mark", "show_help", "Help", show=False),
@@ -148,7 +149,7 @@ class CondaMetadataTui(App[None]):
         Binding("slash", "filter_key_slash", show=False),
         Binding("escape", "escape", "Back", show=False),
         Binding("q", "quit_or_type_q", "Quit"),
-        Binding("ctrl+c", "quit", show=False),
+        Binding("ctrl+c", "copy_selection_or_quit", show=False),
     ]
 
     def __init__(
@@ -1303,6 +1304,7 @@ class CondaMetadataTui(App[None]):
                 ("Tab / Shift+Tab", "Cycle focused section"),
                 ("x", "Swap compare left / right"),
                 ("[ / ]", "Cycle section tabs"),
+                ("Drag / Ctrl+C", "Select / copy metadata text"),
                 ("gg / G", "Jump to top / bottom"),
                 ("Ctrl+u / Ctrl+d", "Page up / down"),
                 ("Enter", "Open / select"),
@@ -3219,7 +3221,38 @@ class CondaMetadataTui(App[None]):
             return
         self.exit()
 
+    async def on_event(self, event: Event) -> None:
+        if (
+            isinstance(event, Key)
+            and event.key == "escape"
+            and not event.is_forwarded
+            and self.screen.get_selected_text()
+        ):
+            self.screen.clear_selection()
+            self.ALLOW_SELECT = False
+            return
+        if isinstance(event, MouseDown) and not event.is_forwarded:
+            # Decide before Textual starts a selection gesture. Keep the decision
+            # for the whole drag, even when the pointer leaves the metadata body.
+            try:
+                widget, _ = self.get_widget_at(event.x, event.y)
+            except NoWidget:
+                self.ALLOW_SELECT = False
+            else:
+                self.ALLOW_SELECT = widget.id == "detail-body-0"
+        await super().on_event(event)
+
+    def action_copy_selection_or_quit(self) -> None:
+        selection = self.screen.get_selected_text()
+        if selection:
+            self.copy_to_clipboard(selection)
+        else:
+            self.exit()
+
     def action_escape(self) -> None:
+        if self.screen.get_selected_text():
+            self.screen.clear_selection()
+            return
         if self._main_panel_is_focused():
             self._focus_sidebar()
             return
