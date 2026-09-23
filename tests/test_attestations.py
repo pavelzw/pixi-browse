@@ -14,6 +14,7 @@ import asyncio
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import RepoDataRecord
+from rattler.sigstore import TrustedRoot
 
 from pixi_browse.attestations import sidecar_url, verify_record
 from pixi_browse.models import AttestationData
@@ -80,14 +81,18 @@ def test_unsigned_record_costs_no_request(
 
 
 def test_signed_record_verifies_against_the_real_bundle(
-    make_gateway: GatewayFactory, rattler_client: Client
+    make_gateway: GatewayFactory,
+    rattler_client: Client,
+    sigstore_trusted_root: TrustedRoot,
 ) -> None:
     """The mirrored record keeps the upstream channel URL, so CEP 27's binding
     of the signature to ``targetChannel`` holds and verification passes cleanly.
     """
     record = _record(make_gateway, SKILL_FORGE_CHANNEL, SKILL_FORGE_PACKAGE)
 
-    attestation = asyncio.run(verify_record(record, client=rattler_client))
+    attestation = asyncio.run(
+        verify_record(record, client=rattler_client, trusted_root=sigstore_trusted_root)
+    )
 
     assert attestation == AttestationData(
         status="verified",
@@ -110,13 +115,17 @@ def test_signed_record_verifies_against_the_real_bundle(
 
 
 def test_loader_verifies_while_it_reads_the_archive(
-    make_gateway: GatewayFactory, rattler_client: Client
+    make_gateway: GatewayFactory,
+    rattler_client: Client,
+    sigstore_trusted_root: TrustedRoot,
 ) -> None:
     """The verified attestation reaches the artifact data the detail view
     renders, which is what puts it in the tab and in the prefetch cache.
     """
     record = _record(make_gateway, SKILL_FORGE_CHANNEL, SKILL_FORGE_PACKAGE)
-    loader = VersionDataLoader(client=rattler_client)
+    loader = VersionDataLoader(
+        client=rattler_client, trusted_root=sigstore_trusted_root
+    )
     artifact = asyncio.run(
         loader.load_version_artifact_data(
             SKILL_FORGE_PACKAGE,

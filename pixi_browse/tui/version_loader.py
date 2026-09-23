@@ -10,6 +10,7 @@ from rattler.networking import Client
 from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
+from rattler.sigstore import TrustedRoot
 
 from pixi_browse.archives import open_package_archive
 from pixi_browse.attestations import verify_record
@@ -54,11 +55,13 @@ class VersionDataLoader:
         self,
         *,
         client: Client,
+        trusted_root: TrustedRoot | None = None,
         log: Callable[[str], None] = _discard_log,
         log_detail: Callable[[str], None] = _discard_log,
         max_parallel_loads: int = 1,
     ) -> None:
         self._client = client
+        self._trusted_root = trusted_root
         self._log = log
         self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
@@ -327,7 +330,7 @@ class VersionDataLoader:
         # trusted root on top of the archive.
         archive_data, attestation = await gather(
             self._fetch_archive_data(record, preview_key=preview_key),
-            verify_record(record, client=self._client),
+            verify_record(record, client=self._client, trusted_root=self._trusted_root),
         )
 
         artifact_data = build_version_artifact_data(

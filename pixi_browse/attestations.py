@@ -17,9 +17,6 @@ and nothing is enforced.
 
 from __future__ import annotations
 
-import os
-from functools import cache
-
 from rattler.networking import Client
 from rattler.repo_data import RepoDataRecord
 from rattler.sigstore import (
@@ -44,28 +41,6 @@ SIDECAR_SUFFIX = ".sigs"
 # deciding whether it is benign is the user's call, not the browser's.
 BROWSE_POLICY = VerificationPolicy.warn(channel_check=ChannelCheck.WARN)
 
-# Point this at a Sigstore ``trusted_root.json`` to verify against those trust
-# anchors instead of the production ones, which rattler otherwise loads from
-# `tuf-repo-cdn.sigstore.dev` the first time a bundle is verified. A mirror
-# behind an air gap can serve the file, and the test-suite pins it so that
-# verification is reproducible and needs nothing but the sidecar.
-TRUSTED_ROOT_ENV_VAR = "PIXI_BROWSE_SIGSTORE_TRUSTED_ROOT"
-
-
-@cache
-def _trusted_root_at(path: str) -> TrustedRoot:
-    """Parse ``path`` once per process; a trusted root is immutable."""
-    return TrustedRoot.from_path(path)
-
-
-def configured_trusted_root() -> TrustedRoot | None:
-    """The trust anchors :data:`TRUSTED_ROOT_ENV_VAR` names, if it names any.
-
-    ``None`` means the production root, which rattler loads over TUF.
-    """
-    path = os.environ.get(TRUSTED_ROOT_ENV_VAR)
-    return _trusted_root_at(path) if path else None
-
 
 def sidecar_url(record: RepoDataRecord) -> str | None:
     """The content-addressed attestation sidecar URL of ``record``.
@@ -80,13 +55,18 @@ def sidecar_url(record: RepoDataRecord) -> str | None:
     return f"{record.url}{SIDECAR_SUFFIX}.{attestations_sha256.hex()}"
 
 
-async def verify_record(record: RepoDataRecord, *, client: Client) -> AttestationData:
+async def verify_record(
+    record: RepoDataRecord,
+    *,
+    client: Client,
+    trusted_root: TrustedRoot | None = None,
+) -> AttestationData:
     """Verify the attestations ``record`` advertises, reporting every outcome.
 
     A record without attestations is answered from the record alone, without a
     request. Everything else costs one sidecar download plus, unless
-    :data:`TRUSTED_ROOT_ENV_VAR` pins the trust anchors, loading the Sigstore
-    trusted root over TUF once per process.
+    ``trusted_root`` supplies the trust anchors, loading the production Sigstore
+    trusted root from `tuf-repo-cdn.sigstore.dev` once per process.
     """
     if record.attestations_sha256 is None:
         return AttestationData()
@@ -95,7 +75,7 @@ async def verify_record(record: RepoDataRecord, *, client: Client) -> Attestatio
     digest = record.attestations_sha256.hex()
     try:
         outcome = await verify_attestation(
-            record, BROWSE_POLICY, client, trusted_root=configured_trusted_root()
+            record, BROWSE_POLICY, client, trusted_root=trusted_root
         )
     except Exception as exc:
         # `BROWSE_POLICY` reports rather than raises, so this is the transport

@@ -19,9 +19,8 @@ it fails.
 ``skill-forge`` carries a package with real Sigstore attestations, whose sidecar
 is laid out beside the archive before indexing so that the repodata advertises
 it. Verifying one would load the Sigstore trusted root over the network, so the
-manifest pins that file too and :func:`pinned_sigstore_trusted_root` points the
-app at it -- which leaves the suite offline all the way through the attestation
-tab.
+manifest pins that file too and :func:`sigstore_trusted_root` hands it to the
+app -- which leaves the suite offline all the way through the attestation tab.
 
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
@@ -33,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import threading
 from collections.abc import Iterable, Iterator
@@ -49,10 +47,10 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from rattler.sigstore import TrustedRoot
 from syrupy.assertion import SnapshotAssertion
 from textual._doc import take_svg_screenshot
 
-from pixi_browse.attestations import TRUSTED_ROOT_ENV_VAR
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import (
@@ -88,25 +86,17 @@ def channel_manifest() -> ChannelManifest:
     return ensure_channel_artifacts()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def pinned_sigstore_trusted_root() -> Iterator[Path]:
-    """Make every attestation verify against the manifest's trust anchors.
+@pytest.fixture(scope="session")
+def sigstore_trusted_root(channel_manifest: ChannelManifest) -> TrustedRoot:
+    """The trust anchors every attestation in the suite is verified against.
 
-    Setting the variable the app itself reads means the code under test loads
-    the pinned file the way an air-gapped user would, and nothing in the suite
-    reaches the Sigstore TUF repository. The file is downloaded as part of
-    :func:`channel_manifest`, which every test that has a record to verify goes
-    through; the variable is only read once such a record turns up.
+    Verification would otherwise load the production trusted root from the
+    Sigstore TUF repository, so the manifest pins that file and it is handed to
+    whatever does the verifying -- the app through :func:`make_app`, a record
+    through ``verify_record``. That keeps the suite offline all the way through
+    the attestation tab, and is what an air-gapped user passes too.
     """
-    previous = os.environ.get(TRUSTED_ROOT_ENV_VAR)
-    os.environ[TRUSTED_ROOT_ENV_VAR] = str(TRUSTED_ROOT_PATH)
-    try:
-        yield TRUSTED_ROOT_PATH
-    finally:
-        if previous is None:
-            del os.environ[TRUSTED_ROOT_ENV_VAR]
-        else:
-            os.environ[TRUSTED_ROOT_ENV_VAR] = previous
+    return TrustedRoot.from_path(TRUSTED_ROOT_PATH)
 
 
 # A publication (CEP-0047) is assigned by the indexer, so it lands one day
@@ -295,7 +285,11 @@ def make_gateway(rattler_config: Config, rattler_cache_dir: Path) -> GatewayFact
 
 
 @pytest.fixture
-def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
+def make_app(
+    rattler_config: Config,
+    rattler_cache_dir: Path,
+    sigstore_trusted_root: TrustedRoot,
+) -> AppFactory:
     """Build the real app against the fixture channel."""
 
     def factory(
@@ -311,6 +305,7 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
             default_matchspec=default_matchspec,
             config=config if config is not None else rattler_config,
             cache_dir=rattler_cache_dir,
+            trusted_root=sigstore_trusted_root,
         )
 
     return factory

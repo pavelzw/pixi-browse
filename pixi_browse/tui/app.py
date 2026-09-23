@@ -16,6 +16,7 @@ from rattler.package import PackageName
 from rattler.package_streaming import PackageArchive
 from rattler.platform import Platform
 from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
+from rattler.sigstore import TrustedRoot
 from rattler.version import Version
 from rich.markup import escape
 from rich.text import Text
@@ -151,6 +152,7 @@ class CondaMetadataTui(App[None]):
         default_matchspec: MatchSpec | None = None,
         config: Config | None = None,
         cache_dir: Path | None = None,
+        trusted_root: TrustedRoot | None = None,
     ) -> None:
         super().__init__()
         selected_platforms = set(default_platforms or [])
@@ -196,6 +198,7 @@ class CondaMetadataTui(App[None]):
         self._version_rows: list[VersionRow] = []
         self._version_loader = VersionDataLoader(
             client=self._client,
+            trusted_root=trusted_root,
             log=self.log.info,
             log_detail=self.log.debug,
             max_parallel_loads=self._max_parallel_loads,

@@ -190,9 +190,7 @@ costs no request.
 
 Verifying loads the Sigstore trusted root over the network the first time, so
 the tab is the one part of pixi-browse that is not satisfied by the channel
-alone. Set `PIXI_BROWSE_SIGSTORE_TRUSTED_ROOT` to a `trusted_root.json` to verify
-against those trust anchors instead, which is what makes the tab work where the
-Sigstore TUF repository cannot be reached.
+alone.
 
 ## Development
 
