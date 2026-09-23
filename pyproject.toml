@@ -17,9 +17,10 @@ requires-python = ">=3.13"
 readme = "README.md"
 dependencies = [
   "textual >=8.2.8,<9",
-  # TODO: 0.26 has no `rattler.sigstore`, which the attestation tab imports, so
-  # this has to be bumped to the first release carrying the bindings of
-  # https://github.com/conda/rattler/pull/2814 before a wheel can be published.
+  # TODO: 0.26 has no `rattler.sigstore`, which the attestation tab imports. The
+  # bindings of https://github.com/conda/rattler/pull/2814 are on `main` but
+  # unreleased, so this has to be bumped to the first release carrying them
+  # before a wheel can be published.
   "py-rattler >=0.26.0,<0.27",
   "typer >=0.27.2,<0.28",
   "pyyaml >=6.0.3,<7",
