@@ -8,7 +8,6 @@ reviewed.
 
 from __future__ import annotations
 
-import pytest
 from textual.pilot import Pilot
 
 from tests.helpers import (
@@ -30,14 +29,11 @@ async def open_attestation_tab(pilot: Pilot[None], package_index: int) -> None:
     await wait_for_idle(pilot)
 
 
-@pytest.mark.network
 def test_attestation_tab_shows_the_verified_signature(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """The signing identity names the workflow and ref the artifact was built
     from, and the tab label carries the ``✓`` that says so without being opened.
-
-    Needs the network: the Sigstore trusted root is loaded over TUF.
     """
 
     async def run_before(pilot: Pilot[None]) -> None:

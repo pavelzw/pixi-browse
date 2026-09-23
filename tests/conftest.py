@@ -18,9 +18,10 @@ it fails.
 
 ``skill-forge`` carries a package with real Sigstore attestations, whose sidecar
 is laid out beside the archive before indexing so that the repodata advertises
-it. Verifying one loads the Sigstore trusted root over the network, so the tests
-that assert a *successful* verification are marked ``network``;
-``pixi run test -m "not network"`` is the fully offline subset.
+it. Verifying one would load the Sigstore trusted root over the network, so the
+manifest pins that file too and :func:`pinned_sigstore_trusted_root` points the
+app at it -- which leaves the suite offline all the way through the attestation
+tab.
 
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import threading
 from collections.abc import Iterable, Iterator
@@ -50,10 +52,12 @@ from rattler.repo_data import Gateway
 from syrupy.assertion import SnapshotAssertion
 from textual._doc import take_svg_screenshot
 
+from pixi_browse.attestations import TRUSTED_ROOT_ENV_VAR
 from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import (
     CHANNEL_NOTICES_DIR,
+    TRUSTED_ROOT_PATH,
     ChannelArtifact,
     ChannelManifest,
     ensure_channel_artifacts,
@@ -82,6 +86,27 @@ from tests.helpers import (
 def channel_manifest() -> ChannelManifest:
     """The manifest of test artifacts, downloaded and hash-verified."""
     return ensure_channel_artifacts()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def pinned_sigstore_trusted_root() -> Iterator[Path]:
+    """Make every attestation verify against the manifest's trust anchors.
+
+    Setting the variable the app itself reads means the code under test loads
+    the pinned file the way an air-gapped user would, and nothing in the suite
+    reaches the Sigstore TUF repository. The file is downloaded as part of
+    :func:`channel_manifest`, which every test that has a record to verify goes
+    through; the variable is only read once such a record turns up.
+    """
+    previous = os.environ.get(TRUSTED_ROOT_ENV_VAR)
+    os.environ[TRUSTED_ROOT_ENV_VAR] = str(TRUSTED_ROOT_PATH)
+    try:
+        yield TRUSTED_ROOT_PATH
+    finally:
+        if previous is None:
+            del os.environ[TRUSTED_ROOT_ENV_VAR]
+        else:
+            os.environ[TRUSTED_ROOT_ENV_VAR] = previous
 
 
 # A publication (CEP-0047) is assigned by the indexer, so it lands one day

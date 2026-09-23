@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import RepoDataRecord
@@ -80,14 +79,11 @@ def test_unsigned_record_costs_no_request(
     )
 
 
-@pytest.mark.network
 def test_signed_record_verifies_against_the_real_bundle(
     make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:
     """The mirrored record keeps the upstream channel URL, so CEP 27's binding
     of the signature to ``targetChannel`` holds and verification passes cleanly.
-
-    Needs the network: the Sigstore trusted root is loaded over TUF.
     """
     record = _record(make_gateway, SKILL_FORGE_CHANNEL, SKILL_FORGE_PACKAGE)
 
@@ -113,14 +109,11 @@ def test_signed_record_verifies_against_the_real_bundle(
     assert attestation.is_verified
 
 
-@pytest.mark.network
 def test_loader_verifies_while_it_reads_the_archive(
     make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:
     """The verified attestation reaches the artifact data the detail view
     renders, which is what puts it in the tab and in the prefetch cache.
-
-    Needs the network: the Sigstore trusted root is loaded over TUF.
     """
     record = _record(make_gateway, SKILL_FORGE_CHANNEL, SKILL_FORGE_PACKAGE)
     loader = VersionDataLoader(client=rattler_client)

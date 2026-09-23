@@ -34,9 +34,11 @@ hatchling = "*"
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
 # The Sigstore attestation bindings of conda/rattler#2814, which the attestation
-# tab needs. Merged but unreleased, so build from `main` until the first release
-# that carries them -- then this can become a version spec again.
-py-rattler = { git = "https://github.com/conda/rattler", branch = "main", subdirectory = "py-rattler" }
+# tab needs, and the pinned trusted root of conda/rattler#2834, which is what
+# lets the attestation tests verify offline. The latter is not merged yet, hence
+# the branch; move back to `main` once it is, and to a version spec once a
+# release carries both.
+py-rattler = { git = "https://github.com/conda/rattler", branch = "feat/py-sigstore-trusted-root", subdirectory = "py-rattler" }
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.

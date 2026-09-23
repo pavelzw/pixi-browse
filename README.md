@@ -190,7 +190,9 @@ costs no request.
 
 Verifying loads the Sigstore trusted root over the network the first time, so
 the tab is the one part of pixi-browse that is not satisfied by the channel
-alone.
+alone. Set `PIXI_BROWSE_SIGSTORE_TRUSTED_ROOT` to a `trusted_root.json` to verify
+against those trust anchors instead, which is what makes the tab work where the
+Sigstore TUF repository cannot be reached.
 
 ## Development
 
@@ -217,13 +219,10 @@ first use (or ahead of time with `pixi run fetch-test-channel`) and verified by
 SHA256, so later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
 
-The exception are the tests that verify a Sigstore attestation, which have to
-load the Sigstore trusted root over the network. They are marked `network`, so
-the fully offline subset of the suite is:
-
-```bash
-pixi run test -m "not network"
-```
+The Sigstore trusted root is fetched and pinned the same way, from its
+content-addressed TUF target, so attestations verify against a fixed set of trust
+anchors and the whole suite runs offline — no test reaches the Sigstore TUF
+repository.
 
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
 Every screen is therefore snapshotted twice from a single app run, with the two

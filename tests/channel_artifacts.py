@@ -9,6 +9,11 @@ present. Run ``pixi run fetch-test-channel`` to pre-download them.
 An artifact can name a Sigstore attestation sidecar as well, which is fetched
 and verified beside the archive; :mod:`tests.conftest` then gives it the file
 names CEP 27 expects before indexing.
+
+The manifest's ``[[files]]`` entries are fetched the same way but belong to no
+channel: they land under ``tests/fixtures/`` at the path they name. The pinned
+Sigstore ``trusted_root.json`` is one, which is what lets attestations verify
+without reaching the Sigstore TUF repository.
 """
 
 from __future__ import annotations
@@ -33,6 +38,9 @@ CHANNELS_DIR = FIXTURES_DIR / "channels"
 LOCK_PATH = CHANNELS_DIR / ".lock"
 # Committed CEP-6 ``notices.json`` files, one per channel name that has notices.
 CHANNEL_NOTICES_DIR = FIXTURES_DIR / "channel_notices"
+# The pinned Sigstore trust anchors, downloaded as a manifest ``[[files]]``
+# entry. `pixi_browse.attestations` reads it through its environment variable.
+TRUSTED_ROOT_PATH = FIXTURES_DIR / "sigstore" / "trusted_root.json"
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,8 @@ class ChannelManifest:
     #: Channel name (as typed into the app) to the URL the artifacts come from.
     channels: dict[str, str]
     artifacts: tuple[ChannelArtifact, ...]
+    #: Manifest ``[[files]]``: downloads that belong to no channel.
+    files: tuple[RemoteFile, ...] = ()
 
     def url(self, artifact: ChannelArtifact) -> str:
         return artifact.url(self.channels[artifact.channel])
@@ -85,8 +95,9 @@ class ChannelManifest:
         )
 
     def remote_files(self) -> tuple[RemoteFile, ...]:
-        """Every file to download, the attestation sidecars among them."""
-        files: list[RemoteFile] = []
+        """Every file to download: the archives, their attestation sidecars and
+        the channel-less extras."""
+        files: list[RemoteFile] = list(self.files)
         for artifact in self.artifacts:
             url = self.url(artifact)
             files.append(
@@ -125,6 +136,14 @@ def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
         )
         for entry in manifest["artifacts"]
     )
+    files = tuple(
+        RemoteFile(
+            url=str(entry["url"]),
+            path=FIXTURES_DIR / str(entry["path"]),
+            sha256=str(entry["sha256"]),
+        )
+        for entry in manifest.get("files", ())
+    )
     unknown = sorted({a.channel for a in artifacts} - channels.keys())
     if unknown:
         raise ValueError(f"artifacts reference undefined channels: {unknown}")
@@ -138,7 +157,7 @@ def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
         raise ValueError(
             f"attestations need both a file name and a sha256: {half_specified}"
         )
-    return ChannelManifest(channels=channels, artifacts=artifacts)
+    return ChannelManifest(channels=channels, artifacts=artifacts, files=files)
 
 
 def _sha256_of(path: Path) -> str:
@@ -214,7 +233,7 @@ def main() -> int:
     total = len(manifest.remote_files())
     print(
         f"{total} files of {len(manifest.channels)} channels "
-        f"in {CHANNELS_DIR} ({fetched} downloaded, {total - fetched} cached)"
+        f"in {FIXTURES_DIR} ({fetched} downloaded, {total - fetched} cached)"
     )
     return 0
 
