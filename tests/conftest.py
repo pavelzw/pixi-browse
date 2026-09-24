@@ -20,9 +20,8 @@ it fails.
 the way CEP 50 wants them: the sidecar is laid out beside the archive under both
 of its names before indexing, so the repodata advertises its digest the way the
 signing channel's own does. Verifying one would load the Sigstore trusted root
-over the network, so :func:`sigstore_trusted_root` hands rattler's embedded one
-to the app instead -- which leaves the suite offline all the way through the
-attestation tab.
+over the network, so the app is handed rattler's embedded one instead -- which
+leaves the suite offline all the way through the attestation tab.
 
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
@@ -85,23 +84,6 @@ from tests.helpers import (
 def channel_manifest() -> ChannelManifest:
     """The manifest of test artifacts, downloaded and hash-verified."""
     return ensure_channel_artifacts()
-
-
-@pytest.fixture(scope="session")
-def sigstore_trusted_root() -> TrustedRoot:
-    """The trust anchors every attestation in the suite is verified against.
-
-    Verification would otherwise load the production trusted root from the
-    Sigstore TUF repository, so rattler's embedded copy of it is handed to
-    whatever does the verifying instead -- the app through :func:`make_app`, a
-    record through ``verify_record``. That keeps the suite offline all the way
-    through the attestation tab, and is what an air-gapped user passes too.
-
-    Pinning the anchors this way does not weaken the test: a bundle's
-    certificate chain is validated against the moment it was signed at, so the
-    fixture bundle stays verifiable across upstream key rotations.
-    """
-    return TrustedRoot.embedded()
 
 
 # A publication (CEP-0047) is assigned by the indexer, so it lands one day
@@ -288,12 +270,14 @@ def make_gateway(rattler_config: Config, rattler_cache_dir: Path) -> GatewayFact
 
 
 @pytest.fixture
-def make_app(
-    rattler_config: Config,
-    rattler_cache_dir: Path,
-    sigstore_trusted_root: TrustedRoot,
-) -> AppFactory:
-    """Build the real app against the fixture channel."""
+def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
+    """Build the real app against the fixture channel.
+
+    Attestations are verified against the trusted root embedded in rattler, so
+    that the app does not load the production one from the Sigstore TUF
+    repository and the suite stays offline all the way through the attestation
+    tab. That is what an air-gapped user passes too.
+    """
 
     def factory(
         *,
@@ -308,7 +292,7 @@ def make_app(
             default_matchspec=default_matchspec,
             config=config if config is not None else rattler_config,
             cache_dir=rattler_cache_dir,
-            trusted_root=sigstore_trusted_root,
+            trusted_root=TrustedRoot.embedded(),
         )
 
     return factory
