@@ -125,13 +125,6 @@ def _provenance_link(remote_url: str | None, sha: str | None) -> tuple[str, str]
     return f"{remote_url}@{sha}", remote_url
 
 
-def format_detail_rows(rows: Sequence[tuple[str, str]]) -> list[str]:
-    if not rows:
-        return []
-    label_width = max(len(label) for label, _ in rows)
-    return [f"{label:<{label_width}}  {value}" for label, value in rows]
-
-
 def format_clickable_url(url: str) -> str:
     return format_clickable_link(escape(url), url)
 
@@ -932,9 +925,11 @@ def build_version_compare_data(
     )
 
 
-def format_version_details_metadata_lines(
+def build_version_details_metadata_rows(
     artifact: VersionArtifactData,
-) -> tuple[str, ...]:
+) -> tuple[MetadataRow, ...]:
+    """The metadata tab: the artifact's own rows, with every URL in them made
+    clickable."""
     clickable_rows: list[MetadataRow] = []
     for label, value in artifact.metadata_rows:
         if label == "Package URL":
@@ -971,7 +966,7 @@ def format_version_details_metadata_lines(
             clickable_rows.append((label, clickable_provenance or value))
             continue
         clickable_rows.append((label, value))
-    return tuple(format_detail_rows(clickable_rows))
+    return tuple(clickable_rows)
 
 
 ATTESTATION_VERDICTS: dict[AttestationStatus, str] = {
@@ -1231,30 +1226,27 @@ def build_attestation_row_groups(
     return tuple(tuple(group) for group in (build_rows, binding_rows) if group)
 
 
-def format_version_details_attestation_lines(
+def build_version_details_attestation_rows(
     attestation: AttestationData,
-) -> tuple[str, ...]:
-    """The attestation tab: a verdict, the aligned groups below it, the warnings.
+) -> tuple[MetadataRow, ...]:
+    """The attestation tab: a verdict, the groups below it, the warnings.
 
-    The groups share one label column across the blank line between them, so
-    they read as one block rather than as two tables that happen to be adjacent.
+    Every row shares one label column, across the blank lines between them, so
+    the groups read as one block rather than as tables that happen to be
+    adjacent. The verdict and those blank lines are rows without a label, which
+    :func:`~pixi_browse.tui.widgets.render_detail_rows` lays out as lines of
+    their own.
     """
-    lines = [format_attestation_verdict(attestation)]
-    groups = build_attestation_row_groups(attestation)
-    formatted = format_detail_rows([row for group in groups for row in group])
-    offset = 0
-    for group in groups:
-        lines.append("")
-        lines.extend(formatted[offset : offset + len(group)])
-        offset += len(group)
+    rows: list[MetadataRow] = [("", format_attestation_verdict(attestation))]
+    for group in build_attestation_row_groups(attestation):
+        rows.append(("", ""))
+        rows.extend(group)
     if attestation.warnings:
-        # Kept out of the aligned block: a warning is a sentence, not a value,
-        # and one long label would pad every row above it.
-        lines.append("")
-        lines.extend(
-            f"[yellow]Warning[/]  {escape(warning)}" for warning in attestation.warnings
+        rows.append(("", ""))
+        rows.extend(
+            ("[yellow]Warning[/]", escape(warning)) for warning in attestation.warnings
         )
-    return tuple(lines)
+    return tuple(rows)
 
 
 def format_version_details_run_exports(

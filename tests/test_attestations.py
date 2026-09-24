@@ -24,10 +24,10 @@ from rattler.sigstore import (
 )
 
 from pixi_browse.attestations import sidecar_url, verify_record
-from pixi_browse.models import AttestationData
+from pixi_browse.models import AttestationData, MetadataRow
 from pixi_browse.rendering import (
+    build_version_details_attestation_rows,
     describe_attestation_checks,
-    format_version_details_attestation_lines,
 )
 from pixi_browse.repodata import query_package_records
 from pixi_browse.tui.version_loader import VersionDataLoader
@@ -103,9 +103,7 @@ def test_unsigned_record_costs_no_request(
 
 
 def test_signed_record_verifies_against_the_real_bundle(
-    make_gateway: GatewayFactory,
-    rattler_client: Client,
-    sigstore_trusted_root: TrustedRoot,
+    make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:
     """The mirrored record keeps the upstream channel URL, so CEP 27's binding
     of the signature to ``targetChannel`` holds and verification passes cleanly.
@@ -117,7 +115,9 @@ def test_signed_record_verifies_against_the_real_bundle(
     record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
 
     attestation = asyncio.run(
-        verify_record(record, client=rattler_client, trusted_root=sigstore_trusted_root)
+        verify_record(
+            record, client=rattler_client, trusted_root=TrustedRoot.embedded()
+        )
     )
 
     assert attestation == AttestationData(
@@ -162,20 +162,19 @@ def test_signed_record_verifies_against_the_real_bundle(
 
 
 def test_loader_verifies_while_it_reads_the_archive(
-    make_gateway: GatewayFactory,
-    rattler_client: Client,
-    sigstore_trusted_root: TrustedRoot,
+    make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:
     """The verified attestation reaches the artifact data the detail view
     renders, which is what puts it in the tab and in the prefetch cache.
 
-    The rendered block is the page a user reads: a verdict that names what was
+    The rows below are the page a user reads: a verdict that names what was
     checked, the provenance the certificate claims, and the values an audit
     needs, with the repository, commit, run, log entry and sidecar as links.
+    ``test_snapshots_attestations`` shows how they are laid out.
     """
     record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
     loader = VersionDataLoader(
-        client=rattler_client, trusted_root=sigstore_trusted_root
+        client=rattler_client, trusted_root=TrustedRoot.embedded()
     )
     artifact = asyncio.run(
         loader.load_version_artifact_data(
@@ -193,45 +192,58 @@ def test_loader_verifies_while_it_reads_the_archive(
     )
 
     assert artifact.attestation.is_verified
-    assert format_version_details_attestation_lines(artifact.attestation) == (
-        "[bold green]✓ Verified[/] - certificate chain, SCT, log inclusion proof",
-        "",
-        "Repository  "
-        f"[underline link='{SIGNED_REPOSITORY}']tdejager/signing-tests[/]"
-        " (public, id 1156993586)",
-        "Commit      "
-        f"[underline link='{SIGNED_REPOSITORY}/commit/{SIGNED_COMMIT}']"
-        f"{SIGNED_COMMIT}[/] on {SIGNED_REF}",
-        "Workflow    "
-        f"[underline link='{SIGNED_REPOSITORY}/blob/{SIGNED_COMMIT}"
-        f"{SIGNED_WORKFLOW_PATH}'].github/workflows/publish.yml[/]"
-        " (trigger: workflow_dispatch)",
-        "Runner      github-hosted",
-        f"Build       [underline link='{SIGNED_RUN}']run 21989532199, attempt 1[/]",
-        "Signed at   2026-02-13T14:00:05Z",
-        "",
-        f"Identity    {SIGNED_IDENTITY}",
-        "Issuer      https://token.actions.githubusercontent.com",
-        f"Channel     {SIGNING_TESTS_CHANNEL}",
-        "Log entry   "
-        f"[underline link='https://search.sigstore.dev/?logIndex={SIGNED_LOG_INDEX}']"
-        f"index {SIGNED_LOG_INDEX} on rekor.sigstore.dev[/]",
-        "Sidecar     "
-        f"[underline link='{SIGNED_SIDECAR_URL}']"
-        f"{SIGNED_FILE_NAME}.sigs.43c5672db9…[/] (bundle 1)",
+    assert build_version_details_attestation_rows(artifact.attestation) == (
+        ("", "[bold green]✓ Verified[/] - certificate chain, SCT, log inclusion proof"),
+        ("", ""),
+        (
+            "Repository",
+            f"[underline link='{SIGNED_REPOSITORY}']tdejager/signing-tests[/]"
+            " (public, id 1156993586)",
+        ),
+        (
+            "Commit",
+            f"[underline link='{SIGNED_REPOSITORY}/commit/{SIGNED_COMMIT}']"
+            f"{SIGNED_COMMIT}[/] on {SIGNED_REF}",
+        ),
+        (
+            "Workflow",
+            f"[underline link='{SIGNED_REPOSITORY}/blob/{SIGNED_COMMIT}"
+            f"{SIGNED_WORKFLOW_PATH}'].github/workflows/publish.yml[/]"
+            " (trigger: workflow_dispatch)",
+        ),
+        ("Runner", "github-hosted"),
+        ("Build", f"[underline link='{SIGNED_RUN}']run 21989532199, attempt 1[/]"),
+        ("Signed at", "2026-02-13T14:00:05Z"),
+        ("", ""),
+        ("Identity", SIGNED_IDENTITY),
+        ("Issuer", "https://token.actions.githubusercontent.com"),
+        ("Channel", SIGNING_TESTS_CHANNEL),
+        (
+            "Log entry",
+            "[underline link='https://search.sigstore.dev/"
+            f"?logIndex={SIGNED_LOG_INDEX}']"
+            f"index {SIGNED_LOG_INDEX} on rekor.sigstore.dev[/]",
+        ),
+        (
+            "Sidecar",
+            f"[underline link='{SIGNED_SIDECAR_URL}']"
+            f"{SIGNED_FILE_NAME}.sigs.43c5672db9…[/] (bundle 1)",
+        ),
     )
 
 
 def test_a_bare_signature_does_not_claim_more_than_it_established() -> None:
     """A bundle whose chain and transparency log entry were not verified is a
     signature and nothing more, and the verdict says which of the two it is."""
-    assert format_version_details_attestation_lines(
+    assert build_version_details_attestation_rows(
         attestation_in_status("verified")
     ) == (
-        "[bold green]✓ Verified[/] - signature only",
-        "",
-        f"Sidecar  [underline link='{EXAMPLE_SIDECAR_URL}']pkg.conda.sigs.abc[/]"
-        " (bundle 1)",
+        ("", "[bold green]✓ Verified[/] - signature only"),
+        ("", ""),
+        (
+            "Sidecar",
+            f"[underline link='{EXAMPLE_SIDECAR_URL}']pkg.conda.sigs.abc[/] (bundle 1)",
+        ),
     )
     assert (
         describe_attestation_checks(
@@ -246,11 +258,11 @@ def test_a_bare_signature_does_not_claim_more_than_it_established() -> None:
     )
 
 
-def _lines_of_claims(claims: CertificateClaims) -> tuple[str, ...]:
-    """The rendered page of a verified attestation that claims ``claims``."""
+def _rows_of_claims(claims: CertificateClaims) -> tuple[MetadataRow, ...]:
+    """The page of a verified attestation that claims ``claims``."""
     verified = attestation_in_status("verified")
     assert verified.attestation is not None
-    return format_version_details_attestation_lines(
+    return build_version_details_attestation_rows(
         replace(verified, attestation=replace(verified.attestation, claims=claims))
     )
 
@@ -263,7 +275,7 @@ def test_a_build_outside_github_is_shown_as_it_is() -> None:
     The workflow is still linked as long as it is a file on GitHub, at the ref
     it was read from when the certificate does not say which commit that was.
     """
-    lines = _lines_of_claims(
+    rows = _rows_of_claims(
         replace(
             _NO_CLAIMS,
             source_repository_uri=SIGNED_REPOSITORY,
@@ -276,14 +288,16 @@ def test_a_build_outside_github_is_shown_as_it_is() -> None:
     )
 
     assert (
-        "Workflow    [underline link='https://github.com/other/repo/blob/main"
+        "Workflow",
+        "[underline link='https://github.com/other/repo/blob/main"
         f"{SIGNED_WORKFLOW_PATH}']https://github.com/other/repo"
-        f"{SIGNED_WORKFLOW_PATH}[/]" in lines
-    )
+        f"{SIGNED_WORKFLOW_PATH}[/]",
+    ) in rows
     assert (
-        "Build       [underline link='https://ci.example.com/builds/7']"
-        "https://ci.example.com/builds/7[/]" in lines
-    )
+        "Build",
+        "[underline link='https://ci.example.com/builds/7']"
+        "https://ci.example.com/builds/7[/]",
+    ) in rows
 
 
 def test_a_workflow_that_is_not_on_github_is_not_linked() -> None:
@@ -291,7 +305,7 @@ def test_a_workflow_that_is_not_on_github_is_not_linked() -> None:
     suffix alone makes it resolve to nothing -- so it is only linked where the
     app knows how to turn it into a page. Elsewhere it is shown verbatim, ref and
     all: no other row carries that ref here."""
-    lines = _lines_of_claims(
+    rows = _rows_of_claims(
         replace(
             _NO_CLAIMS,
             build_config_uri=(
@@ -301,16 +315,16 @@ def test_a_workflow_that_is_not_on_github_is_not_linked() -> None:
     )
 
     assert (
-        f"Workflow  https://gitlab.com/group/project//.gitlab-ci.yml@{SIGNED_REF}"
-        in lines
-    )
+        "Workflow",
+        f"https://gitlab.com/group/project//.gitlab-ci.yml@{SIGNED_REF}",
+    ) in rows
 
 
 def test_unsigned_attestation_says_only_that() -> None:
     """Nothing below the verdict is known for an unsigned artifact, so nothing
     below it is shown."""
-    assert format_version_details_attestation_lines(AttestationData()) == (
-        "Unsigned - this channel advertises no attestations for the artifact",
+    assert build_version_details_attestation_rows(AttestationData()) == (
+        ("", "Unsigned - this channel advertises no attestations for the artifact"),
     )
 
 
@@ -324,12 +338,15 @@ def test_rejected_attestation_reports_every_reason() -> None:
     )
 
     assert attestation.status == "unverified"
-    assert format_version_details_attestation_lines(attestation) == (
-        "[bold red]✗ Not verified[/] - see the warnings below",
-        "",
-        "Sidecar  [underline link='https://example.com/pkg.conda.sigs.abc']"
-        "pkg.conda.sigs.abc[/]",
-        "",
-        "[yellow]Warning[/]  bundle 0: subject digest mismatch",
-        "[yellow]Warning[/]  no attestation accepted",
+    assert build_version_details_attestation_rows(attestation) == (
+        ("", "[bold red]✗ Not verified[/] - see the warnings below"),
+        ("", ""),
+        (
+            "Sidecar",
+            "[underline link='https://example.com/pkg.conda.sigs.abc']"
+            "pkg.conda.sigs.abc[/]",
+        ),
+        ("", ""),
+        ("[yellow]Warning[/]", "bundle 0: subject digest mismatch"),
+        ("[yellow]Warning[/]", "no attestation accepted"),
     )

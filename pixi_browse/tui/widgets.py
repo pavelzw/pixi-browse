@@ -20,9 +20,11 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
 from textual.timer import Timer
+from textual.visual import VisualType
 from textual.widget import Widget
 from textual.widgets import (
     Button,
@@ -41,6 +43,7 @@ from pixi_browse.models import (
     CompareSelection,
     DependencyTab,
     FileTab,
+    MetadataRow,
     MetadataTab,
     PackageFile,
     RepodataPatchDiff,
@@ -48,9 +51,9 @@ from pixi_browse.models import (
     VersionCompareData,
 )
 from pixi_browse.rendering import (
+    build_version_details_attestation_rows,
+    build_version_details_metadata_rows,
     format_human_byte_size,
-    format_version_details_attestation_lines,
-    format_version_details_metadata_lines,
     format_version_details_run_exports,
     render_channel_notice_heading,
     render_channel_notice_message,
@@ -277,6 +280,74 @@ def render_repodata_patches_body(patches: RepodataPatchDiff) -> Table:
     )
 
 
+# The gap between a detail body's label column and its value column.
+DETAIL_LABEL_GAP = 2
+
+
+def render_detail_rows(rows: Sequence[MetadataRow], width: int | None) -> Content:
+    """Lay out label/value rows as the body of a detail section.
+
+    A value too wide for ``width`` is wrapped under itself rather than under its
+    label: the label column stays blank on the continuation lines, so a folded
+    URL or a long list of maintainers still reads as one field. Rows without a
+    label -- the attestation verdict, the blank lines between its groups -- are
+    lines of their own and wrap at the left edge instead.
+
+    ``width`` is what the body has to fit into, or ``None`` while it has not been
+    laid out and so has no width to wrap at yet.
+    """
+    labels = {label: Content.from_markup(label) for label, _ in rows if label}
+    indent = max((label.cell_length for label in labels.values()), default=0)
+    indent += DETAIL_LABEL_GAP
+    lines: list[Content] = []
+    for label, value in rows:
+        offset = indent if label else 0
+        content = Content.from_markup(value)
+        wrapped = (
+            content.wrap(width - offset)
+            if width is not None and width - offset > 0
+            else [content]
+        )
+        head, *rest = wrapped
+        if label:
+            padded_label = labels[label].pad_right(indent - labels[label].cell_length)
+            head = Content("").join([padded_label, head])
+        lines.append(head)
+        lines.extend(line.pad_left(offset) for line in rest)
+    return Content("\n").join(lines)
+
+
+class DetailBody(Static):
+    """A detail section's body, which lays out label/value rows itself.
+
+    Wrapping such a row is the body's job because only the body knows the width
+    to wrap at, and that width is what decides where a value continues; the rows
+    are therefore kept and laid out again whenever the body is resized. Anything
+    else -- a table, an empty message -- is handed to ``Static`` as it is.
+    """
+
+    def __init__(self, *, id: str, classes: str) -> None:
+        super().__init__(id=id, classes=classes)
+        self._rows: tuple[MetadataRow, ...] | None = None
+
+    def update(self, content: VisualType = "", *, layout: bool = True) -> None:
+        self._rows = None
+        super().update(content, layout=layout)
+
+    def update_rows(self, rows: Sequence[MetadataRow]) -> None:
+        self._rows = tuple(rows)
+        self._draw_rows()
+
+    def on_resize(self) -> None:
+        if self._rows is not None:
+            self._draw_rows()
+
+    def _draw_rows(self) -> None:
+        assert self._rows is not None
+        width = self.content_size.width
+        super().update(render_detail_rows(self._rows, width if width > 0 else None))
+
+
 class DetailOptionList(OptionList):
     can_focus = False
 
@@ -328,7 +399,7 @@ class DetailSection(Vertical):
         with VerticalScroll(
             id=f"{self._id_prefix}-scroll-{self._index}", classes="detail-scroll"
         ):
-            yield Static(
+            yield DetailBody(
                 id=f"{self._id_prefix}-body-{self._index}",
                 classes="detail-body",
             )
@@ -387,6 +458,13 @@ class DetailSection(Vertical):
         body_static.remove_class("detail-empty")
         body_static.update(body)
 
+    def update_rows(self, rows: Sequence[MetadataRow]) -> None:
+        """Show ``rows`` as a label column and a value column, wrapped to the
+        width the body has."""
+        body_static = self._body_static()
+        body_static.remove_class("detail-empty")
+        body_static.update_rows(rows)
+
     def update_options(
         self, labels: list[str | Text | Option], *, highlighted: int = 0
     ) -> None:
@@ -420,8 +498,8 @@ class DetailSection(Vertical):
             f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
         )
 
-    def _body_static(self) -> Static:
-        return self.query_one(f"#{self._id_prefix}-body-{self._index}", Static)
+    def _body_static(self) -> DetailBody:
+        return self.query_one(f"#{self._id_prefix}-body-{self._index}", DetailBody)
 
     def _empty_message_static(self) -> Static:
         return self.query_one(f"#{self._id_prefix}-empty-{self._index}", Static)
@@ -796,15 +874,11 @@ class VersionDetailsView(Vertical):
         if active_tab == "attestation":
             # An unsigned artifact needs no empty message: saying so is the
             # whole content of the tab.
-            metadata_section.update_body(
-                "\n".join(
-                    format_version_details_attestation_lines(self._details.attestation)
-                )
+            metadata_section.update_rows(
+                build_version_details_attestation_rows(self._details.attestation)
             )
             return
-        metadata_section.update_body(
-            "\n".join(format_version_details_metadata_lines(self._details))
-        )
+        metadata_section.update_rows(build_version_details_metadata_rows(self._details))
 
     def _refresh_dependency_section(self) -> None:
         if self._details is None:
