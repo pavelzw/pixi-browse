@@ -1,6 +1,6 @@
 """Snapshot tests of the attestation tab of the version detail view.
 
-The signed artifact comes from the ``skill-forge`` fixture channel and its
+The signed artifact comes from the ``signing-tests`` fixture channel and its
 signature is checked for real, so the screen shown here is the one a user gets
 for a genuinely attested package; see ``test_snapshots.py`` for how snapshots are
 reviewed.
@@ -12,7 +12,7 @@ from textual.pilot import Pilot
 
 from tests.helpers import (
     NARROW_TERMINAL_SIZE,
-    SKILL_FORGE_CHANNEL,
+    SIGNING_TESTS_CHANNEL,
     TERMINAL_SIZE,
     AppFactory,
     SnapComparePalettes,
@@ -40,7 +40,7 @@ def test_attestation_tab_shows_the_verified_signature(
         await open_attestation_tab(pilot, package_index=0)
 
     assert snap_compare_palettes(
-        make_app(default_channels=[SKILL_FORGE_CHANNEL]),
+        make_app(default_channels=[SIGNING_TESTS_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
     )

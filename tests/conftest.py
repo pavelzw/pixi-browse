@@ -16,11 +16,13 @@ The manifest lists artifacts of more than one channel (``bioconda`` next to
 for real. ``missing`` is mirrored too but has no repodata at all, so loading
 it fails.
 
-``skill-forge`` carries a package with real Sigstore attestations, whose sidecar
-is laid out beside the archive before indexing so that the repodata advertises
-it. Verifying one would load the Sigstore trusted root over the network, so the
-manifest pins that file too and :func:`sigstore_trusted_root` hands it to the
-app -- which leaves the suite offline all the way through the attestation tab.
+``signing-tests`` carries a package with real Sigstore attestations, published
+the way CEP 50 wants them: the sidecar is laid out beside the archive under both
+of its names before indexing, so the repodata advertises its digest the way the
+signing channel's own does. Verifying one would load the Sigstore trusted root
+over the network, so :func:`sigstore_trusted_root` hands rattler's embedded one
+to the app instead -- which leaves the suite offline all the way through the
+attestation tab.
 
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
@@ -55,7 +57,6 @@ from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import (
     CHANNEL_NOTICES_DIR,
-    TRUSTED_ROOT_PATH,
     ChannelArtifact,
     ChannelManifest,
     ensure_channel_artifacts,
@@ -87,16 +88,20 @@ def channel_manifest() -> ChannelManifest:
 
 
 @pytest.fixture(scope="session")
-def sigstore_trusted_root(channel_manifest: ChannelManifest) -> TrustedRoot:
+def sigstore_trusted_root() -> TrustedRoot:
     """The trust anchors every attestation in the suite is verified against.
 
     Verification would otherwise load the production trusted root from the
-    Sigstore TUF repository, so the manifest pins that file and it is handed to
-    whatever does the verifying -- the app through :func:`make_app`, a record
-    through ``verify_record``. That keeps the suite offline all the way through
-    the attestation tab, and is what an air-gapped user passes too.
+    Sigstore TUF repository, so rattler's embedded copy of it is handed to
+    whatever does the verifying instead -- the app through :func:`make_app`, a
+    record through ``verify_record``. That keeps the suite offline all the way
+    through the attestation tab, and is what an air-gapped user passes too.
+
+    Pinning the anchors this way does not weaken the test: a bundle's
+    certificate chain is validated against the moment it was signed at, so the
+    fixture bundle stays verifiable across upstream key rotations.
     """
-    return TrustedRoot.from_path(TRUSTED_ROOT_PATH)
+    return TrustedRoot.embedded()
 
 
 # A publication (CEP-0047) is assigned by the indexer, so it lands one day
@@ -131,25 +136,23 @@ def _freeze_indexed_timestamps(channel_dir: Path) -> None:
 
 
 def _copy_attestations(artifact: ChannelArtifact, destination: Path) -> None:
-    """Lay out the attestation sidecar of ``artifact`` the way CEP 27 wants it.
+    """Publish the attestation sidecar of ``artifact`` under both CEP 50 names.
 
-    A channel publishes the sidecar twice: ``<package>.sigs`` is the mutable
-    name a publisher appends to, and ``<package>.sigs.<sha256>`` is the
-    immutable copy clients fetch. ``index_fs`` reads the mutable one, insists
-    the content-addressed one exists and matches, and only then advertises the
-    digest as ``attestations_sha256`` in the repodata.
+    A channel serves the sidecar twice: ``<package>.sigs`` is the mutable name a
+    publisher appends to, and ``<package>.sigs.<sha256>`` is the immutable copy
+    clients fetch. The fixture downloads the immutable one and copies it to the
+    mutable name, which is what CEP 50 asks a mirror to do; ``index_fs`` then
+    reads the mutable one, insists the content-addressed one exists and matches,
+    and only then advertises the digest as ``attestations_sha256``.
     """
     sidecar_path = artifact.attestations_local_path
     if sidecar_path is None or artifact.attestations_sha256 is None:
         return
-    mutable = destination.with_name(f"{destination.name}.sigs")
-    shutil.copyfile(sidecar_path, mutable)
-    shutil.copyfile(
-        sidecar_path,
-        destination.with_name(
-            f"{destination.name}.sigs.{artifact.attestations_sha256}"
-        ),
-    )
+    for name in (
+        f"{destination.name}.sigs",
+        f"{destination.name}.sigs.{artifact.attestations_sha256}",
+    ):
+        shutil.copyfile(sidecar_path, destination.with_name(name))
 
 
 @pytest.fixture(scope="session")
@@ -193,8 +196,8 @@ def mirrored_config(channel_manifest: ChannelManifest, channel_server: str) -> C
     """Configure the test channels to be served from ``channel_server`` under
     the URLs the app resolves their names to."""
     mirrors = {
-        f"{channel_url}/": [f"{channel_server}{channel_name}/"]
-        for channel_name, channel_url in channel_manifest.channels.items()
+        f"{source.url}/": [f"{channel_server}{channel_name}/"]
+        for channel_name, source in channel_manifest.channels.items()
     }
     mirrors[f"{ANACONDA_CHANNELS_URL}{MISSING_CHANNEL}/"] = [
         f"{channel_server}{MISSING_CHANNEL}/"

@@ -93,6 +93,7 @@ from pixi_browse.tui.widgets import (
     render_repodata_patches_body,
     render_tab_header,
 )
+from tests.helpers import attestation_in_status
 
 
 @dataclass(frozen=True)
@@ -1525,7 +1526,7 @@ def test_metadata_header_marks_the_attestation_tab_by_status(
     view = VersionDetailsView()
     view._pane_selected = True
     view._active_section = 0
-    view._details = _make_artifact_data(attestation=AttestationData(status=status))
+    view._details = _make_artifact_data(attestation=attestation_in_status(status))
 
     assert view._render_metadata_header().plain.endswith(f" - {label}")
 

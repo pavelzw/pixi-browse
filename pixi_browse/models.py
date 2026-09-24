@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from rattler.package import RunExportsJson
+from rattler.sigstore import VerifiedAttestation
 from rattler.version import Version
 
 ViewMode = Literal["packages", "versions", "platforms"]
@@ -98,26 +99,37 @@ class AttestationData:
     sidecar next to the archive. Verifying one binds a signing identity to this
     exact file, and CEP 27 binds it to the channel it was published to.
 
-    ``unsigned`` means the record advertises no attestations, which is decided
-    from the record alone and costs no request. ``unverified`` means
-    attestations are advertised but none of them was accepted; ``warnings``
-    then says why, one entry per rejected bundle plus whatever went wrong
-    before the bundles were reached.
+    This is the sidecar the app names plus rattler's own verification result, so
+    what the attestation tab shows about a signature -- its identity, the claims
+    of its signing certificate, its transparency log entry, which checks were
+    performed -- is read off :class:`~rattler.sigstore.VerifiedAttestation`
+    rather than copied out of it.
+
+    ``warnings`` says what kept a bundle from being accepted, one entry per
+    rejected bundle plus whatever went wrong before the bundles were reached.
+    They are worth showing even for a verified artifact: a sidecar can hold
+    several bundles, and the rejection of one is not hidden by the acceptance of
+    another.
     """
 
-    status: AttestationStatus = "unsigned"
     sidecar_url: str | None = None
     sidecar_sha256: str | None = None
-    identity: str | None = None
-    issuer: str | None = None
-    integrated_time: str | None = None
-    target_channel: str | None = None
-    bundle_index: int | None = None
+    #: The bundle that verified, or ``None`` if none did.
+    attestation: VerifiedAttestation | None = None
     warnings: tuple[str, ...] = ()
 
     @property
+    def status(self) -> AttestationStatus:
+        """``unsigned`` when the record advertises no attestations -- which is
+        decided from the record alone and costs no request -- otherwise whether
+        one of the advertised bundles was accepted."""
+        if self.sidecar_url is None:
+            return "unsigned"
+        return "verified" if self.attestation is not None else "unverified"
+
+    @property
     def is_verified(self) -> bool:
-        return self.status == "verified"
+        return self.attestation is not None
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,8 @@ through the ``attestations_sha256`` field of its repodata record and serves them
 in a sidecar at ``<package_url>.sigs.<sha256>``: a JSON array of Sigstore
 bundles, each carrying an in-toto statement whose subject digest is the
 package's own SHA256 and whose CEP 27 predicate names the channel it was
-published to. Rattler does the work; this module turns the outcome into the
+published to. Rattler does the work; this module names the sidecar and pairs
+rattler's outcome with it as the
 :class:`~pixi_browse.models.AttestationData` the detail view renders.
 
 Pixi Browse only looks at packages, so its policy never rejects one: it browses
@@ -82,29 +83,15 @@ async def verify_record(
         # and the unforeseen: a sidecar the channel does not serve after all,
         # a trusted root that cannot be loaded.
         return AttestationData(
-            status="unverified",
-            sidecar_url=url,
-            sidecar_sha256=digest,
-            warnings=(str(exc),),
+            sidecar_url=url, sidecar_sha256=digest, warnings=(str(exc),)
         )
 
-    attestation = outcome.attestation
-    warnings = tuple(outcome.warnings)
-    if attestation is None:
-        return AttestationData(
-            status="unverified",
-            sidecar_url=url,
-            sidecar_sha256=digest,
-            warnings=warnings,
-        )
+    # The accepted bundle is passed through as rattler produced it. Its warnings
+    # are already part of the outcome's, which otherwise holds one rejection per
+    # bundle that was not accepted.
     return AttestationData(
-        status="verified",
         sidecar_url=url,
         sidecar_sha256=digest,
-        identity=attestation.identity,
-        issuer=attestation.issuer,
-        integrated_time=attestation.integrated_time,
-        target_channel=attestation.target_channel,
-        bundle_index=attestation.index,
-        warnings=warnings,
+        attestation=outcome.attestation,
+        warnings=tuple(outcome.warnings),
     )

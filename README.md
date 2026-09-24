@@ -210,17 +210,16 @@ pixi run test
 ```
 
 The tests run the app against small offline conda channels (`conda-forge`,
-`bioconda` and `skill-forge`) made of real artifacts listed in
+`bioconda` and `signing-tests`) made of real artifacts listed in
 `tests/fixtures/channel_artifacts.toml`.
 They are downloaded into the git-ignored `tests/fixtures/channels/` directory on
 first use (or ahead of time with `pixi run fetch-test-channel`) and verified by
 SHA256, so later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
 
-The Sigstore trusted root is fetched and pinned the same way, from its
-content-addressed TUF target, so attestations verify against a fixed set of trust
-anchors and the whole suite runs offline — no test reaches the Sigstore TUF
-repository.
+Attestations are verified against the trusted root embedded in rattler rather
+than the one its TUF repository serves, so the whole suite runs offline — no test
+reaches `tuf-repo-cdn.sigstore.dev`.
 
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
 Every screen is therefore snapshotted twice from a single app run, with the two

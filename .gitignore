@@ -385,4 +385,3 @@ $RECYCLE.BIN/
 snapshot_report.html
 # Downloaded test channel artifacts, see tests/fixtures/channel_artifacts.toml
 tests/fixtures/channels/
-tests/fixtures/sigstore/

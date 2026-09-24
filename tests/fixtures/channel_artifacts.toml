@@ -7,25 +7,34 @@
 # every channel directory with py-rattler and serves them over a local HTTP
 # server under the channel names below.
 #
-# An artifact can also name the Sigstore attestation sidecar that its channel
-# publishes for it, through `attestations_file_name` and `attestations_sha256`.
-# The sidecar is downloaded and hash-verified like the archive, and the session
-# fixture stores it under the file name CEP 27 gives it so that `index_fs`
-# advertises it in the repodata.
+# An artifact can also pin the Sigstore attestation sidecar that its channel
+# publishes for it, through `attestations_sha256`. CEP 50 names that sidecar
+# `<file_name>.sigs.<sha256>`, so the digest is all it takes to find it; it is
+# downloaded and hash-verified like the archive, and the session fixture
+# publishes it under both names CEP 50 gives it so that `index_fs` advertises
+# it in the repodata.
+#
+# A channel is normally just its URL. One whose artifacts have to be downloaded
+# from somewhere else -- a preview deployment, a mirror -- is written as a table
+# with `url` and `download_url` instead, since the URL a channel is known by is
+# part of what its records say and cannot be swapped for the one that serves
+# the bytes.
 #
 # Add an entry here and run `pixi run fetch-test-channel` to extend a channel.
-#
-# `[[files]]` entries at the bottom are fetched and hash-verified the same way
-# but belong to no channel: they land under `tests/fixtures/<path>` and are
-# whatever else the suite needs on disk to run offline.
 
 [channels]
 conda-forge = "https://conda.anaconda.org/conda-forge"
 bioconda = "https://conda.anaconda.org/bioconda"
-# Signed packages, for the attestation tab. The URL is the real one so that the
-# attestations' `targetChannel` matches where the mirrored records say they came
-# from, which is what CEP 27 binds a signature to.
-skill-forge = "https://prefix.dev/skill-forge"
+
+# Signed packages, for the attestation tab. The channel is the one the
+# attestations name in their `targetChannel`, which is what CEP 27 binds a
+# signature to and what the mirrored records keep saying they came from -- the
+# fixture therefore exercises that binding instead of warning about it. The
+# CEP 50 sidecars are so far only served by the preview deployment, so that is
+# where the bytes are fetched from.
+[channels.signing-tests]
+url = "https://beta.prefix.dev/signing-tests"
+download_url = "https://preview-pr-2523.prefix.dev/signing-tests"
 
 [[artifacts]]
 channel = "conda-forge"
@@ -129,29 +138,12 @@ subdir = "noarch"
 file_name = "snakemake-wrapper-utils-0.9.0-pyhdfd78af_0.conda"
 sha256 = "9b52145e77f66a93f0cf71083e322bb53558874738605c839e71db0f54ab2546"
 
-# Attested by GitHub Actions from pavelzw/skill-forge. The channel still serves
-# the sidecar under the pre-CEP `.conda.v0.sigs` name, hence the spelled-out
-# file name; the fixture stores it under the CEP 27 one.
+# Attested by GitHub Actions from tdejager/signing-tests, and published with the
+# channel layout of CEP 50: the sidecar is served both under `.sigs` and under
+# the content-addressed name below, and the repodata advertises its digest.
 [[artifacts]]
-channel = "skill-forge"
+channel = "signing-tests"
 subdir = "noarch"
-file_name = "agent-skill-conda-forge-0.0.16-h4616a5c_0.conda"
-sha256 = "24f074ae5d8ca0af861ea612d91d6316f32fc532a7adeb1f6f258fcba2e3d1c9"
-attestations_file_name = "agent-skill-conda-forge-0.0.16-h4616a5c_0.conda.v0.sigs"
-attestations_sha256 = "03305411a7bb6e707ffe19f4c203dba271e52d797afb75fd1c9024c9cc0665fe"
-
-# The Sigstore trust anchors the attestation tests verify against. Verification
-# otherwise loads them from the Sigstore TUF repository on first use, the one
-# part of the attestation tab that cannot be mirrored into a local channel. The
-# URL is TUF's content-addressed target name, so it is immutable, and the hash
-# is the one TUF's own `targets.json` publishes for that target.
-#
-# Pinning the anchors does not weaken the test: a bundle's certificate chain is
-# validated against the moment it was signed at, so upstream key rotations leave
-# the fixture bundle verifiable. Refresh the URL and the hash together from
-# https://tuf-repo-cdn.sigstore.dev/<n>.targets.json once a fixture needs a
-# certificate authority this file does not carry yet.
-[[files]]
-url = "https://tuf-repo-cdn.sigstore.dev/targets/6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66.trusted_root.json"
-path = "sigstore/trusted_root.json"
-sha256 = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
+file_name = "all-signed-2.0.0-h4616a5c_0.conda"
+sha256 = "7c1e2cd2d77fe67518a863bc0378e77ca101ee89b4dc7cf4caa5b6af831a3d35"
+attestations_sha256 = "43c5672db92af565e09e4fb2f4dc580a122d7ff9126c81ae235518ac981bda77"
