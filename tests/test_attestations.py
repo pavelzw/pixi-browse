@@ -203,7 +203,8 @@ def test_loader_verifies_while_it_reads_the_archive(
         f"[underline link='{SIGNED_REPOSITORY}/commit/{SIGNED_COMMIT}']"
         f"{SIGNED_COMMIT}[/] on {SIGNED_REF}",
         "Workflow    "
-        f"[underline link='{SIGNED_IDENTITY}'].github/workflows/publish.yml[/]"
+        f"[underline link='{SIGNED_REPOSITORY}/blob/{SIGNED_COMMIT}"
+        f"{SIGNED_WORKFLOW_PATH}'].github/workflows/publish.yml[/]"
         " (trigger: workflow_dispatch)",
         "Runner      github-hosted",
         f"Build       [underline link='{SIGNED_RUN}']run 21989532199, attempt 1[/]",
@@ -245,31 +246,63 @@ def test_a_bare_signature_does_not_claim_more_than_it_established() -> None:
     )
 
 
-def test_a_build_outside_github_is_shown_as_it_is() -> None:
-    """The shortenings are GitHub's idioms: a reusable workflow from another
-    repository keeps its full URI, which is the point of showing it, and a run
-    that is not a GitHub Actions one is named by its URI."""
-    claims = replace(
-        _NO_CLAIMS,
-        source_repository_uri=SIGNED_REPOSITORY,
-        source_repository_ref=SIGNED_REF,
-        build_config_uri=f"https://github.com/other/repo{SIGNED_WORKFLOW_PATH}@{SIGNED_REF}",
-        run_invocation_uri="https://ci.example.com/builds/7",
-    )
+def _lines_of_claims(claims: CertificateClaims) -> tuple[str, ...]:
+    """The rendered page of a verified attestation that claims ``claims``."""
     verified = attestation_in_status("verified")
     assert verified.attestation is not None
-    lines = format_version_details_attestation_lines(
+    return format_version_details_attestation_lines(
         replace(verified, attestation=replace(verified.attestation, claims=claims))
     )
 
+
+def test_a_build_outside_github_is_shown_as_it_is() -> None:
+    """The shortenings are GitHub's idioms: a reusable workflow from another
+    repository keeps its full URI, which is the point of showing it, and a run
+    that is not a GitHub Actions one is named by its URI.
+
+    The workflow is still linked as long as it is a file on GitHub, at the ref
+    it was read from when the certificate does not say which commit that was.
+    """
+    lines = _lines_of_claims(
+        replace(
+            _NO_CLAIMS,
+            source_repository_uri=SIGNED_REPOSITORY,
+            source_repository_ref=SIGNED_REF,
+            build_config_uri=(
+                f"https://github.com/other/repo{SIGNED_WORKFLOW_PATH}@{SIGNED_REF}"
+            ),
+            run_invocation_uri="https://ci.example.com/builds/7",
+        )
+    )
+
     assert (
-        f"Workflow    [underline link='https://github.com/other/repo"
-        f"{SIGNED_WORKFLOW_PATH}@{SIGNED_REF}']https://github.com/other/repo"
+        "Workflow    [underline link='https://github.com/other/repo/blob/main"
+        f"{SIGNED_WORKFLOW_PATH}']https://github.com/other/repo"
         f"{SIGNED_WORKFLOW_PATH}[/]" in lines
     )
     assert (
         "Build       [underline link='https://ci.example.com/builds/7']"
         "https://ci.example.com/builds/7[/]" in lines
+    )
+
+
+def test_a_workflow_that_is_not_on_github_is_not_linked() -> None:
+    """A build config URI is a certificate name rather than a URL -- the ``@ref``
+    suffix alone makes it resolve to nothing -- so it is only linked where the
+    app knows how to turn it into a page. Elsewhere it is shown verbatim, ref and
+    all: no other row carries that ref here."""
+    lines = _lines_of_claims(
+        replace(
+            _NO_CLAIMS,
+            build_config_uri=(
+                f"https://gitlab.com/group/project//.gitlab-ci.yml@{SIGNED_REF}"
+            ),
+        )
+    )
+
+    assert (
+        f"Workflow  https://gitlab.com/group/project//.gitlab-ci.yml@{SIGNED_REF}"
+        in lines
     )
 
 

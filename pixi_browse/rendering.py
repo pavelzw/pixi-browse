@@ -1054,9 +1054,9 @@ def _attestation_build_rows(claims: CertificateClaims) -> list[MetadataRow]:
         rows.append(("Commit", value))
     workflow = claims.build_config_uri
     if workflow is not None:
-        value = format_clickable_link(
-            escape(_shorten_workflow_uri(workflow, claims)), workflow
-        )
+        label = escape(_shorten_workflow_uri(workflow, claims))
+        link = _workflow_link(workflow, claims)
+        value = label if link is None else format_clickable_link(label, link)
         if claims.build_trigger is not None:
             value += f" (trigger: {escape(claims.build_trigger)})"
         rows.append(("Workflow", value))
@@ -1081,6 +1081,35 @@ def _shorten_workflow_uri(workflow_uri: str, claims: CertificateClaims) -> str:
     if claims.source_repository_ref is not None:
         workflow = workflow.removesuffix(f"@{claims.source_repository_ref}")
     return workflow
+
+
+def _url_ref(reference: str) -> str:
+    """A git ref as GitHub spells it in a URL: ``refs/heads/main`` is ``main``."""
+    for prefix in ("refs/heads/", "refs/tags/"):
+        if reference.startswith(prefix):
+            return reference.removeprefix(prefix)
+    return reference
+
+
+def _workflow_link(workflow_uri: str, claims: CertificateClaims) -> str | None:
+    """The page of the workflow file a build config URI names, if it has one.
+
+    The URI is not one: GitHub spells it
+    ``https://github.com/<owner>/<repo>/<path>@<ref>``, which resolves to
+    nothing when opened. The file behind it does have a page, and the
+    certificate says which commit of it was built, so that revision is what the
+    row links to. Anything whose layout the app does not know gets no link
+    rather than a guessed one.
+    """
+    base, _, reference = workflow_uri.partition("@")
+    slug = _github_slug(base)
+    if slug is None:
+        return None
+    path = urlparse(base).path.removeprefix(f"/{slug}").strip("/")
+    revision = claims.build_config_digest or _url_ref(reference)
+    if not path or not revision:
+        return None
+    return f"https://github.com/{slug}/blob/{revision}/{path}"
 
 
 def _describe_run(run_invocation_uri: str) -> str:
