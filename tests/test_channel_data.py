@@ -19,7 +19,7 @@ from syrupy.assertion import SnapshotAssertion
 
 from pixi_browse.models import VersionArtifactData
 from pixi_browse.rendering import (
-    format_version_details_metadata_lines,
+    build_version_details_metadata_rows,
     format_version_details_run_exports,
     render_channel_notice_heading,
     render_channel_notice_message,
@@ -353,7 +353,10 @@ def test_load_version_artifact_data_reads_real_archives(
             for file in details.file_paths
         ]
         return (
-            list(format_version_details_metadata_lines(details)),
+            [
+                f"{label}: {value}"
+                for label, value in build_version_details_metadata_rows(details)
+            ],
             list(details.dependencies),
             [
                 f"{group}: {dependency}"

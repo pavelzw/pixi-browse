@@ -16,6 +16,13 @@ The manifest lists artifacts of more than one channel (``bioconda`` next to
 for real. ``missing`` is mirrored too but has no repodata at all, so loading
 it fails.
 
+``signing-tests`` carries a package with real Sigstore attestations, published
+the way CEP 50 wants them: the sidecar is laid out beside the archive under both
+of its names before indexing, so the repodata advertises its digest the way the
+signing channel's own does. Verifying one would load the Sigstore trusted root
+over the network, so the app is handed rattler's embedded one instead -- which
+leaves the suite offline all the way through the attestation tab.
+
 Real channels rarely publish CEP-6 notices, so the test channels get their
 ``notices.json`` from ``tests/fixtures/channel_notices/<channel>.json`` where
 such a file exists (``bioconda`` has one, ``conda-forge`` has none). Rattler
@@ -41,6 +48,7 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.platform import Platform
 from rattler.repo_data import Gateway
+from rattler.sigstore import TrustedRoot
 from syrupy.assertion import SnapshotAssertion
 from textual._doc import take_svg_screenshot
 
@@ -48,6 +56,7 @@ from pixi_browse.repodata import create_gateway
 from pixi_browse.tui import CondaMetadataTui
 from tests.channel_artifacts import (
     CHANNEL_NOTICES_DIR,
+    ChannelArtifact,
     ChannelManifest,
     ensure_channel_artifacts,
 )
@@ -108,6 +117,26 @@ def _freeze_indexed_timestamps(channel_dir: Path) -> None:
         repodata_path.write_text(json.dumps(repodata))
 
 
+def _copy_attestations(artifact: ChannelArtifact, destination: Path) -> None:
+    """Publish the attestation sidecar of ``artifact`` under both CEP 50 names.
+
+    A channel serves the sidecar twice: ``<package>.sigs`` is the mutable name a
+    publisher appends to, and ``<package>.sigs.<sha256>`` is the immutable copy
+    clients fetch. The fixture downloads the immutable one and copies it to the
+    mutable name, which is what CEP 50 asks a mirror to do; ``index_fs`` then
+    reads the mutable one, insists the content-addressed one exists and matches,
+    and only then advertises the digest as ``attestations_sha256``.
+    """
+    sidecar_path = artifact.attestations_local_path
+    if sidecar_path is None or artifact.attestations_sha256 is None:
+        return
+    for name in (
+        f"{destination.name}.sigs",
+        f"{destination.name}.sigs.{artifact.attestations_sha256}",
+    ):
+        shutil.copyfile(sidecar_path, destination.with_name(name))
+
+
 @pytest.fixture(scope="session")
 def fixture_channels_dir(
     channel_manifest: ChannelManifest, tmp_path_factory: pytest.TempPathFactory
@@ -121,6 +150,7 @@ def fixture_channels_dir(
             destination = channel_dir / artifact.subdir / artifact.file_name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(artifact.local_path, destination)
+            _copy_attestations(artifact, destination)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
         _freeze_indexed_timestamps(channel_dir)
         asyncio.run(index_fs(channel_dir, write_zst=True, write_shards=True))
@@ -148,8 +178,8 @@ def mirrored_config(channel_manifest: ChannelManifest, channel_server: str) -> C
     """Configure the test channels to be served from ``channel_server`` under
     the URLs the app resolves their names to."""
     mirrors = {
-        f"{channel_url}/": [f"{channel_server}{channel_name}/"]
-        for channel_name, channel_url in channel_manifest.channels.items()
+        f"{source.url}/": [f"{channel_server}{channel_name}/"]
+        for channel_name, source in channel_manifest.channels.items()
     }
     mirrors[f"{ANACONDA_CHANNELS_URL}{MISSING_CHANNEL}/"] = [
         f"{channel_server}{MISSING_CHANNEL}/"
@@ -241,7 +271,13 @@ def make_gateway(rattler_config: Config, rattler_cache_dir: Path) -> GatewayFact
 
 @pytest.fixture
 def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
-    """Build the real app against the fixture channel."""
+    """Build the real app against the fixture channel.
+
+    Attestations are verified against the trusted root embedded in rattler, so
+    that the app does not load the production one from the Sigstore TUF
+    repository and the suite stays offline all the way through the attestation
+    tab. That is what an air-gapped user passes too.
+    """
 
     def factory(
         *,
@@ -256,6 +292,7 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
             default_matchspec=default_matchspec,
             config=config if config is not None else rattler_config,
             cache_dir=rattler_cache_dir,
+            trusted_root=TrustedRoot.embedded(),
         )
 
     return factory

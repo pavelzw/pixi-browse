@@ -7,11 +7,34 @@
 # every channel directory with py-rattler and serves them over a local HTTP
 # server under the channel names below.
 #
+# An artifact can also pin the Sigstore attestation sidecar that its channel
+# publishes for it, through `attestations_sha256`. CEP 50 names that sidecar
+# `<file_name>.sigs.<sha256>`, so the digest is all it takes to find it; it is
+# downloaded and hash-verified like the archive, and the session fixture
+# publishes it under both names CEP 50 gives it so that `index_fs` advertises
+# it in the repodata.
+#
+# A channel is normally just its URL. One whose artifacts have to be downloaded
+# from somewhere else -- a preview deployment, a mirror -- is written as a table
+# with `url` and `download_url` instead, since the URL a channel is known by is
+# part of what its records say and cannot be swapped for the one that serves
+# the bytes.
+#
 # Add an entry here and run `pixi run fetch-test-channel` to extend a channel.
 
 [channels]
 conda-forge = "https://conda.anaconda.org/conda-forge"
 bioconda = "https://conda.anaconda.org/bioconda"
+
+# Signed packages, for the attestation tab. The channel is the one the
+# attestations name in their `targetChannel`, which is what CEP 27 binds a
+# signature to and what the mirrored records keep saying they came from -- the
+# fixture therefore exercises that binding instead of warning about it. The
+# CEP 50 sidecars are so far only served by the preview deployment, so that is
+# where the bytes are fetched from.
+[channels.signing-tests]
+url = "https://beta.prefix.dev/signing-tests"
+download_url = "https://preview-pr-2523.prefix.dev/signing-tests"
 
 [[artifacts]]
 channel = "conda-forge"
@@ -114,3 +137,13 @@ channel = "bioconda"
 subdir = "noarch"
 file_name = "snakemake-wrapper-utils-0.9.0-pyhdfd78af_0.conda"
 sha256 = "9b52145e77f66a93f0cf71083e322bb53558874738605c839e71db0f54ab2546"
+
+# Attested by GitHub Actions from tdejager/signing-tests, and published with the
+# channel layout of CEP 50: the sidecar is served both under `.sigs` and under
+# the content-addressed name below, and the repodata advertises its digest.
+[[artifacts]]
+channel = "signing-tests"
+subdir = "noarch"
+file_name = "all-signed-2.0.0-h4616a5c_0.conda"
+sha256 = "7c1e2cd2d77fe67518a863bc0378e77ca101ee89b4dc7cf4caa5b6af831a3d35"
+attestations_sha256 = "43c5672db92af565e09e4fb2f4dc580a122d7ff9126c81ae235518ac981bda77"

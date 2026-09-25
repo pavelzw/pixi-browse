@@ -20,6 +20,7 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
 - **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
+- **Verify Sigstore attestations** — see who built a signed artifact, from which workflow and ref, and whether the signature binds to this exact file and channel
 - **Compare artifacts** — metadata, dependencies, and file lists of two builds side by side, with optional file diffs
 - **Terminal hyperlinks** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
@@ -169,6 +170,28 @@ MatchSpec and who-needs queries run against all of them.
 | `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
 | `Esc`                | Cancel                                               |
 
+## Attestations
+
+Channels can publish [Sigstore](https://www.sigstore.dev) attestations for the
+packages they serve, in a sidecar next to the archive whose digest the repodata
+advertises. The `Attestation` tab of the metadata section reports what verifying
+one says: the signing identity (for GitHub Actions, the workflow file and the ref
+it ran on), the certificate issuer, when the signature was logged, and the
+channel the attestation was issued for. The tab label carries `✓` when a
+signature verified and `✗` when none did, so signedness can be read without
+opening the tab.
+
+pixi-browse only reports; it never refuses to show a package. No publisher is
+required, and an attestation issued for a different channel than the one the
+artifact was fetched from — a mirror, say — is shown as a warning rather than
+treated as a rejection. Whether that is acceptable is yours to decide. An
+artifact whose channel advertises no attestations is reported as unsigned, which
+costs no request.
+
+Verifying loads the Sigstore trusted root over the network the first time, so
+the tab is the one part of pixi-browse that is not satisfied by the channel
+alone.
+
 ## Development
 
 This project is managed by [pixi](https://pixi.sh).
@@ -186,12 +209,17 @@ pixi run pre-commit-install
 pixi run test
 ```
 
-The tests run the app against small offline conda channels (`conda-forge` and
-`bioconda`) made of real artifacts listed in `tests/fixtures/channel_artifacts.toml`.
+The tests run the app against small offline conda channels (`conda-forge`,
+`bioconda` and `signing-tests`) made of real artifacts listed in
+`tests/fixtures/channel_artifacts.toml`.
 They are downloaded into the git-ignored `tests/fixtures/channels/` directory on
 first use (or ahead of time with `pixi run fetch-test-channel`) and verified by
 SHA256, so later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
+
+Attestations are verified against the trusted root embedded in rattler rather
+than the one its TUF repository serves, so the whole suite runs offline — no test
+reaches `tuf-repo-cdn.sigstore.dev`.
 
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
 Every screen is therefore snapshotted twice from a single app run, with the two

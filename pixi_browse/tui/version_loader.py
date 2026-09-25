@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from asyncio import gather
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 import yaml
@@ -9,11 +10,14 @@ from rattler.networking import Client
 from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
+from rattler.sigstore import TrustedRoot
 
 from pixi_browse.archives import open_package_archive
+from pixi_browse.attestations import verify_record
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionPreviewKey,
 )
@@ -30,6 +34,17 @@ def _discard_log(message: str) -> None:
     return None
 
 
+@dataclass(frozen=True)
+class _ArchiveData:
+    """Everything the package archive of a record contributes to its details."""
+
+    package_paths: list[PackageFile]
+    info_files: list[PackageFile]
+    about_urls: AboutUrls
+    run_exports: RunExportsJson | None
+    repodata_patches: RepodataPatchDiff
+
+
 def _describe_preview_key(preview_key: VersionPreviewKey) -> str:
     _, _, _, _, subdir, file_name = preview_key
     return f"{subdir}/{file_name}"
@@ -40,11 +55,13 @@ class VersionDataLoader:
         self,
         *,
         client: Client,
+        trusted_root: TrustedRoot | None = None,
         log: Callable[[str], None] = _discard_log,
         log_detail: Callable[[str], None] = _discard_log,
         max_parallel_loads: int = 1,
     ) -> None:
         self._client = client
+        self._trusted_root = trusted_root
         self._log = log
         self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
@@ -307,6 +324,47 @@ class VersionDataLoader:
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
         started = perf_counter()
+        # Attestations live in a sidecar beside the archive, so verifying them
+        # needs nothing the archive fetch produces. Running both together keeps
+        # the first signed artifact of a session from paying for the Sigstore
+        # trusted root on top of the archive.
+        archive_data, attestation = await gather(
+            self._fetch_archive_data(record, preview_key=preview_key),
+            verify_record(record, client=self._client, trusted_root=self._trusted_root),
+        )
+
+        artifact_data = build_version_artifact_data(
+            package_name,
+            record,
+            package_paths=archive_data.package_paths,
+            info_files=archive_data.info_files,
+            repository_urls=archive_data.about_urls.repository,
+            documentation_urls=archive_data.about_urls.documentation,
+            homepage_urls=archive_data.about_urls.homepage,
+            recipe_maintainers=archive_data.about_urls.recipe_maintainers,
+            provenance_remote_url=archive_data.about_urls.provenance_remote_url,
+            provenance_sha=archive_data.about_urls.provenance_sha,
+            rattler_build_version=archive_data.about_urls.rattler_build_version,
+            run_exports=archive_data.run_exports,
+            repodata_patches=archive_data.repodata_patches,
+            attestation=attestation,
+        )
+        self.artifact_data_cache[preview_key] = artifact_data
+        self._log(
+            f"package: fetched {record.subdir}/{record.file_name} in "
+            f"{perf_counter() - started:.3f}s "
+            f"paths={len(archive_data.package_paths)} "
+            f"info_files={len(archive_data.info_files)} "
+            f"attestation={attestation.status}"
+        )
+        return artifact_data
+
+    async def _fetch_archive_data(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> _ArchiveData:
         archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
         info_files = await self.get_info_files(archive)
@@ -329,25 +387,10 @@ class VersionDataLoader:
         # patch applies. Every conda package ships info/index.json.
         repodata_patches = build_repodata_patch_diff(record, await archive.index_json())
 
-        artifact_data = build_version_artifact_data(
-            package_name,
-            record,
+        return _ArchiveData(
             package_paths=package_paths,
             info_files=info_files,
-            repository_urls=about_urls.repository,
-            documentation_urls=about_urls.documentation,
-            homepage_urls=about_urls.homepage,
-            recipe_maintainers=about_urls.recipe_maintainers,
-            provenance_remote_url=about_urls.provenance_remote_url,
-            provenance_sha=about_urls.provenance_sha,
-            rattler_build_version=about_urls.rattler_build_version,
+            about_urls=about_urls,
             run_exports=run_exports,
             repodata_patches=repodata_patches,
         )
-        self.artifact_data_cache[preview_key] = artifact_data
-        self._log(
-            f"package: fetched {record.subdir}/{record.file_name} in "
-            f"{perf_counter() - started:.3f}s "
-            f"paths={len(package_paths)} info_files={len(info_files)}"
-        )
-        return artifact_data

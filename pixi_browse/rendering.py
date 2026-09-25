@@ -11,10 +11,13 @@ from rattler.exceptions import InvalidMatchSpecError
 from rattler.match_spec import MatchSpec
 from rattler.package import IndexJson, NoArchType, RunExportsJson
 from rattler.repo_data import ChannelNotice, RepoDataRecord
+from rattler.sigstore import CertificateClaims, VerifiedAttestation, VerifiedChecks
 from rich.markup import escape
 from rich.text import Text
 
 from pixi_browse.models import (
+    AttestationData,
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -95,23 +98,31 @@ def syntax_lexer_for_path(file_path: str) -> str | None:
     return _SYNTAX_LEXERS_BY_SUFFIX.get(path.suffix.lower())
 
 
+def _github_slug(remote_url: str | None) -> str | None:
+    """The ``owner/repo`` of a GitHub URL, or ``None`` for anything else.
+
+    Only GitHub gets one: it is the host whose URL layout the app knows well
+    enough to build a commit or repository link from a bare slug.
+    """
+    if not remote_url:
+        return None
+    parsed = urlparse(remote_url)
+    if parsed.netloc != "github.com":
+        return None
+    path_parts = [part for part in parsed.path.removesuffix(".git").split("/") if part]
+    if len(path_parts) < 2:
+        return None
+    return "/".join(path_parts[:2])
+
+
 def _provenance_link(remote_url: str | None, sha: str | None) -> tuple[str, str] | None:
     if not remote_url or not sha:
         return None
 
-    parsed = urlparse(remote_url)
-    path_parts = [part for part in parsed.path.removesuffix(".git").split("/") if part]
-    if parsed.netloc == "github.com" and len(path_parts) >= 2:
-        slug = "/".join(path_parts[:2])
+    slug = _github_slug(remote_url)
+    if slug is not None:
         return f"{slug}@{sha}", f"https://github.com/{slug}/commit/{sha}"
     return f"{remote_url}@{sha}", remote_url
-
-
-def format_detail_rows(rows: Sequence[tuple[str, str]]) -> list[str]:
-    if not rows:
-        return []
-    label_width = max(len(label) for label, _ in rows)
-    return [f"{label:<{label_width}}  {value}" for label, value in rows]
 
 
 def format_clickable_url(url: str) -> str:
@@ -427,6 +438,7 @@ def build_version_artifact_data(
     rattler_build_version: str | None = None,
     run_exports: RunExportsJson | None = None,
     repodata_patches: RepodataPatchDiff = RepodataPatchDiff(),
+    attestation: AttestationData = AttestationData(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=_metadata_rows_for_record(
@@ -458,6 +470,7 @@ def build_version_artifact_data(
         provenance_sha=provenance_sha,
         rattler_build_version=rattler_build_version,
         repodata_patches=repodata_patches,
+        attestation=attestation,
     )
 
 
@@ -912,9 +925,11 @@ def build_version_compare_data(
     )
 
 
-def format_version_details_metadata_lines(
+def build_version_details_metadata_rows(
     artifact: VersionArtifactData,
-) -> tuple[str, ...]:
+) -> tuple[MetadataRow, ...]:
+    """The metadata tab: the artifact's own rows, with every URL in them made
+    clickable."""
     clickable_rows: list[MetadataRow] = []
     for label, value in artifact.metadata_rows:
         if label == "Package URL":
@@ -951,7 +966,294 @@ def format_version_details_metadata_lines(
             clickable_rows.append((label, clickable_provenance or value))
             continue
         clickable_rows.append((label, value))
-    return tuple(format_detail_rows(clickable_rows))
+    return tuple(clickable_rows)
+
+
+ATTESTATION_VERDICTS: dict[AttestationStatus, str] = {
+    "unsigned": "Unsigned",
+    "verified": "[bold green]✓ Verified[/]",
+    "unverified": "[bold red]✗ Not verified[/]",
+}
+
+
+def describe_attestation_checks(checks: VerifiedChecks) -> str:
+    """Name the parts of the verification that were performed.
+
+    A signature can verify without everything around it having been checked, so
+    the verdict says what was established instead of leaving "verified" to be
+    read as all of it: a bundle carrying only an inclusion *promise* is signed
+    by the log but not proven to be in it, and one without a transparency log
+    entry at all is a bare signature.
+    """
+    performed = []
+    if checks.certificate_chain:
+        performed.append("certificate chain")
+    if checks.signed_certificate_timestamp:
+        performed.append("SCT")
+    if checks.transparency_log:
+        performed.append(
+            "log inclusion proof" if checks.inclusion_proof else "log inclusion promise"
+        )
+    return ", ".join(performed) or "signature only"
+
+
+def format_attestation_verdict(attestation: AttestationData) -> str:
+    """The headline of the attestation tab: the outcome and what it rests on."""
+    verified = attestation.attestation
+    if verified is not None:
+        detail = describe_attestation_checks(verified.checks)
+    elif attestation.status == "unverified":
+        detail = "see the warnings below"
+    else:
+        detail = "this channel advertises no attestations for the artifact"
+    return f"{ATTESTATION_VERDICTS[attestation.status]} - {detail}"
+
+
+def _attestation_build_rows(claims: CertificateClaims) -> list[MetadataRow]:
+    """The story of the build, as the signing certificate tells it: which commit
+    of which repository was built, by what, on what."""
+    rows: list[MetadataRow] = []
+    repository = claims.source_repository_uri
+    if repository is not None:
+        # The identifier does not change when a repository is renamed, so it is
+        # what a trust policy should be pinned to, and the visibility is the one
+        # as of signing rather than the one the repository has now.
+        annotations = [
+            annotation
+            for annotation in (
+                claims.source_repository_visibility_at_signing,
+                f"id {claims.source_repository_identifier}"
+                if claims.source_repository_identifier is not None
+                else None,
+            )
+            if annotation
+        ]
+        slug = _github_slug(repository)
+        value = format_clickable_link(escape(slug or repository), repository)
+        if annotations:
+            value += f" ({escape(', '.join(annotations))})"
+        rows.append(("Repository", value))
+    commit = claims.source_repository_digest
+    if commit is not None:
+        slug = _github_slug(repository)
+        value = (
+            format_clickable_link(
+                escape(commit), f"https://github.com/{slug}/commit/{commit}"
+            )
+            if slug is not None
+            else escape(commit)
+        )
+        reference = claims.source_repository_ref
+        if reference is not None:
+            value += f" on {escape(reference)}"
+        rows.append(("Commit", value))
+    workflow = claims.build_config_uri
+    if workflow is not None:
+        label = escape(_shorten_workflow_uri(workflow, claims))
+        link = _workflow_link(workflow, claims)
+        value = label if link is None else format_clickable_link(label, link)
+        if claims.build_trigger is not None:
+            value += f" (trigger: {escape(claims.build_trigger)})"
+        rows.append(("Workflow", value))
+    if claims.runner_environment is not None:
+        rows.append(("Runner", escape(claims.runner_environment)))
+    if claims.deployment_environment is not None:
+        rows.append(("Environment", escape(claims.deployment_environment)))
+    run = claims.run_invocation_uri
+    if run is not None:
+        rows.append(("Build", format_clickable_link(escape(_describe_run(run)), run)))
+    return rows
+
+
+def _shorten_workflow_uri(workflow_uri: str, claims: CertificateClaims) -> str:
+    """Reduce a build config URI to the path within its own repository.
+
+    The repository and the ref are shown on their own rows, so repeating them
+    here only pushes the file name off the screen. A reusable workflow from
+    another repository keeps its full URI, which is the point of showing it.
+    """
+    workflow = workflow_uri
+    if claims.source_repository_uri is not None:
+        workflow = workflow.removeprefix(f"{claims.source_repository_uri}/")
+    if claims.source_repository_ref is not None:
+        workflow = workflow.removesuffix(f"@{claims.source_repository_ref}")
+    return workflow
+
+
+def _url_ref(reference: str) -> str:
+    """A git ref as GitHub spells it in a URL: ``refs/heads/main`` is ``main``."""
+    for prefix in ("refs/heads/", "refs/tags/"):
+        if reference.startswith(prefix):
+            return reference.removeprefix(prefix)
+    return reference
+
+
+def _workflow_link(workflow_uri: str, claims: CertificateClaims) -> str | None:
+    """The page of the workflow file a build config URI names, if it has one.
+
+    The URI is not one: GitHub spells it
+    ``https://github.com/<owner>/<repo>/<path>@<ref>``, which resolves to
+    nothing when opened. The file behind it does have a page, and the
+    certificate says which commit of it was built, so that revision is what the
+    row links to. Anything whose layout the app does not know gets no link
+    rather than a guessed one.
+    """
+    base, _, reference = workflow_uri.partition("@")
+    slug = _github_slug(base)
+    if slug is None:
+        return None
+    path = urlparse(base).path.removeprefix(f"/{slug}").strip("/")
+    revision = claims.build_config_digest or _url_ref(reference)
+    if not path or not revision:
+        return None
+    return f"https://github.com/{slug}/blob/{revision}/{path}"
+
+
+def _describe_run(run_invocation_uri: str) -> str:
+    """``run <id>, attempt <n>`` for a GitHub Actions run, else the URI itself.
+
+    GitHub spells a run invocation as
+    ``https://github.com/<owner>/<repo>/actions/runs/<id>/attempts/<n>``, whose
+    repository part is already on the row above; what is left of it identifies
+    the run, and the URI stays reachable through the link.
+    """
+    segments = urlparse(run_invocation_uri).path.split("/")
+    described = [
+        f"{word} {segments[segments.index(keyword) + 1]}"
+        for keyword, word in (("runs", "run"), ("attempts", "attempt"))
+        if keyword in segments and segments.index(keyword) + 1 < len(segments)
+    ]
+    return ", ".join(described) or run_invocation_uri
+
+
+def _attestation_log_row(attestation: VerifiedAttestation) -> MetadataRow | None:
+    """The transparency log entry the signature was recorded in."""
+    if attestation.log_index is None:
+        return None
+    # Rekor states its tree id after the host, as in `rekor.sigstore.dev -
+    # 1193050959916656506`, which identifies the log but is not needed to find
+    # an entry in it.
+    origin = attestation.log_origin
+    host = origin.split()[0] if origin else None
+    label = f"index {attestation.log_index}"
+    if host is not None:
+        label += f" on {host}"
+    if host != "rekor.sigstore.dev":
+        # Only the public good instance has a UI to send a user to, so an entry
+        # in any other log gets no link rather than a guessed one.
+        return ("Log entry", escape(label))
+    return (
+        "Log entry",
+        format_clickable_link(
+            escape(label),
+            f"https://search.sigstore.dev/?logIndex={attestation.log_index}",
+        ),
+    )
+
+
+# How much of the sidecar digest is shown before it is elided. Enough to
+# recognize the one that was fetched, and short enough to keep the row readable.
+SIDECAR_DIGEST_PREVIEW_LENGTH = 10
+
+
+def _attestation_sidecar_value(url: str, bundle_index: int | None) -> str:
+    """The sidecar as a link: its file name with the digest elided.
+
+    The full URL is what the link points at, so it stays copyable; spelling it
+    out in the row would wrap the whole block for a value whose channel and
+    subdir are already on the metadata tab.
+    """
+    name = PurePosixPath(urlparse(url).path).name
+    head, separator, digest = name.rpartition(".")
+    if separator and len(digest) > SIDECAR_DIGEST_PREVIEW_LENGTH:
+        name = f"{head}.{digest[:SIDECAR_DIGEST_PREVIEW_LENGTH]}…"
+    value = format_clickable_link(escape(name), url)
+    if bundle_index is not None:
+        # Rattler counts the bundles of a sidecar from zero; the row reads as a
+        # position, and says which of several bundles is the verified one.
+        value += f" (bundle {bundle_index + 1})"
+    return value
+
+
+def build_attestation_row_groups(
+    attestation: AttestationData,
+) -> tuple[tuple[MetadataRow, ...], ...]:
+    """Describe an attestation outcome as groups of detail rows.
+
+    The first group is the provenance the signing certificate claims, which is
+    what a person reads to decide whether the artifact came from where they
+    expected. The second is what the signature itself is bound to, which is what
+    a policy is pinned to and what an audit is carried out with. Absent values
+    are left out, so a rejected or unsigned artifact collapses to the sidecar it
+    would have been verified from, or to nothing at all.
+    """
+    verified = attestation.attestation
+    build_rows: list[MetadataRow] = []
+    binding_rows: list[MetadataRow] = []
+    if verified is not None:
+        if verified.claims is not None:
+            build_rows.extend(_attestation_build_rows(verified.claims))
+        # The certificate's own validity start, which is the signing time to
+        # within the ten minutes a Fulcio certificate lives, and the log's
+        # authenticated timestamp as the fallback when there was no certificate
+        # to read it from.
+        signed_at = verified.signed_at or verified.integrated_time
+        if signed_at is not None:
+            build_rows.append(("Signed at", escape(signed_at)))
+        if verified.identity is not None:
+            # The identity is a certificate SAN, not a page: a GitHub Actions
+            # one spells out the workflow and ref
+            # (`…/publish.yml@refs/heads/main`) and resolves to nothing when
+            # opened. Shown verbatim rather than linked.
+            binding_rows.append(("Identity", escape(verified.identity)))
+        if verified.issuer is not None:
+            binding_rows.append(("Issuer", escape(verified.issuer)))
+        if verified.claims is not None and verified.claims.token_subject is not None:
+            binding_rows.append(
+                ("Token subject", escape(verified.claims.token_subject))
+            )
+        if verified.target_channel is not None:
+            # CEP 27's binding: the channel the publisher signed for, which is
+            # not necessarily the mirror the artifact was fetched from.
+            binding_rows.append(("Channel", escape(verified.target_channel)))
+        log_row = _attestation_log_row(verified)
+        if log_row is not None:
+            binding_rows.append(log_row)
+    if attestation.sidecar_url is not None:
+        binding_rows.append(
+            (
+                "Sidecar",
+                _attestation_sidecar_value(
+                    attestation.sidecar_url,
+                    verified.index if verified is not None else None,
+                ),
+            )
+        )
+    return tuple(tuple(group) for group in (build_rows, binding_rows) if group)
+
+
+def build_version_details_attestation_rows(
+    attestation: AttestationData,
+) -> tuple[MetadataRow, ...]:
+    """The attestation tab: a verdict, the groups below it, the warnings.
+
+    Every row shares one label column, across the blank lines between them, so
+    the groups read as one block rather than as tables that happen to be
+    adjacent. The verdict and those blank lines are rows without a label, which
+    :func:`~pixi_browse.tui.widgets.render_detail_rows` lays out as lines of
+    their own.
+    """
+    rows: list[MetadataRow] = [("", format_attestation_verdict(attestation))]
+    for group in build_attestation_row_groups(attestation):
+        rows.append(("", ""))
+        rows.extend(group)
+    if attestation.warnings:
+        rows.append(("", ""))
+        rows.extend(
+            ("[ansi_yellow]Warning[/]", escape(warning))
+            for warning in attestation.warnings
+        )
+    return tuple(rows)
 
 
 def format_version_details_run_exports(
