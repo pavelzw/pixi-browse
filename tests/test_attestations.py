@@ -144,6 +144,8 @@ def test_signed_record_verifies_against_the_real_bundle(
                 build_trigger="workflow_dispatch",
                 run_invocation_uri=SIGNED_RUN,
                 source_repository_visibility_at_signing="public",
+                deployment_environment=None,
+                token_subject=None,
             ),
             signed_at="2026-02-13T14:00:05Z",
             log_index=SIGNED_LOG_INDEX,
@@ -267,6 +269,58 @@ def _rows_of_claims(claims: CertificateClaims) -> tuple[MetadataRow, ...]:
     )
 
 
+def test_a_build_in_a_deployment_environment_says_so() -> None:
+    """A deployment environment is the one thing the rest of the page cannot
+    imply: the identity is the workflow ref, so without it an environment-gated
+    build -- required reviewers, a wait timer, a branch allowlist -- reads
+    exactly like an ungated one. It is therefore shown with the provenance,
+    under the runner it ran on.
+
+    The token subject is the ``sub`` of the OIDC token the certificate was
+    requested with, which is what a policy matching on the subject is pinned to,
+    so it sits with the identity and the issuer rather than with the provenance
+    -- the signed fixture claims neither, since its workflow ran in no
+    environment.
+    """
+    identity = (
+        "https://github.com/pavelzw/skill-forge"
+        "/.github/workflows/package.yml@refs/heads/main"
+    )
+    issuer = "https://token.actions.githubusercontent.com"
+    verified = attestation_in_status("verified")
+    assert verified.attestation is not None
+
+    assert build_version_details_attestation_rows(
+        replace(
+            verified,
+            attestation=replace(
+                verified.attestation,
+                identity=identity,
+                issuer=issuer,
+                claims=replace(
+                    _NO_CLAIMS,
+                    runner_environment="github-hosted",
+                    deployment_environment="upload",
+                    token_subject="repo:pavelzw/skill-forge:environment:upload",
+                ),
+            ),
+        )
+    ) == (
+        ("", "[bold green]✓ Verified[/] - signature only"),
+        ("", ""),
+        ("Runner", "github-hosted"),
+        ("Environment", "upload"),
+        ("", ""),
+        ("Identity", identity),
+        ("Issuer", issuer),
+        ("Token subject", "repo:pavelzw/skill-forge:environment:upload"),
+        (
+            "Sidecar",
+            f"[underline link='{EXAMPLE_SIDECAR_URL}']pkg.conda.sigs.abc[/] (bundle 1)",
+        ),
+    )
+
+
 def test_a_build_outside_github_is_shown_as_it_is() -> None:
     """The shortenings are GitHub's idioms: a reusable workflow from another
     repository keeps its full URI, which is the point of showing it, and a run
@@ -330,7 +384,12 @@ def test_unsigned_attestation_says_only_that() -> None:
 
 def test_rejected_attestation_reports_every_reason() -> None:
     """A rejected artifact still shows the sidecar it was rejected from, so it
-    can be inspected by hand, and one line per reason it was rejected."""
+    can be inspected by hand, and one line per reason it was rejected.
+
+    The warning label is in ``ansi_yellow`` and not in ``yellow``, which in the
+    Textual markup of a detail row would be the CSS color rather than the
+    terminal's -- a glaring ``#ffff00`` on a light background.
+    """
     attestation = AttestationData(
         sidecar_url="https://example.com/pkg.conda.sigs.abc",
         sidecar_sha256="abc",
@@ -347,6 +406,6 @@ def test_rejected_attestation_reports_every_reason() -> None:
             "pkg.conda.sigs.abc[/]",
         ),
         ("", ""),
-        ("[yellow]Warning[/]", "bundle 0: subject digest mismatch"),
-        ("[yellow]Warning[/]", "no attestation accepted"),
+        ("[ansi_yellow]Warning[/]", "bundle 0: subject digest mismatch"),
+        ("[ansi_yellow]Warning[/]", "no attestation accepted"),
     )

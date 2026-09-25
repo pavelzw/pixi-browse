@@ -1057,6 +1057,8 @@ def _attestation_build_rows(claims: CertificateClaims) -> list[MetadataRow]:
         rows.append(("Workflow", value))
     if claims.runner_environment is not None:
         rows.append(("Runner", escape(claims.runner_environment)))
+    if claims.deployment_environment is not None:
+        rows.append(("Environment", escape(claims.deployment_environment)))
     run = claims.run_invocation_uri
     if run is not None:
         rows.append(("Build", format_clickable_link(escape(_describe_run(run)), run)))
@@ -1206,6 +1208,10 @@ def build_attestation_row_groups(
             binding_rows.append(("Identity", escape(verified.identity)))
         if verified.issuer is not None:
             binding_rows.append(("Issuer", escape(verified.issuer)))
+        if verified.claims is not None and verified.claims.token_subject is not None:
+            binding_rows.append(
+                ("Token subject", escape(verified.claims.token_subject))
+            )
         if verified.target_channel is not None:
             # CEP 27's binding: the channel the publisher signed for, which is
             # not necessarily the mirror the artifact was fetched from.
@@ -1244,7 +1250,8 @@ def build_version_details_attestation_rows(
     if attestation.warnings:
         rows.append(("", ""))
         rows.extend(
-            ("[yellow]Warning[/]", escape(warning)) for warning in attestation.warnings
+            ("[ansi_yellow]Warning[/]", escape(warning))
+            for warning in attestation.warnings
         )
     return tuple(rows)
 
