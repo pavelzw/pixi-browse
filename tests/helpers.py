@@ -23,8 +23,9 @@ from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
     SVGImageExtension,
     node_to_report_path,
 )
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Gateway
+from rattler.sigstore import VerifiedAttestation, VerifiedChecks
 from rich.color import Color
 from rich.console import Console
 from rich.terminal_theme import TerminalTheme
@@ -36,6 +37,7 @@ from textual.screen import Screen
 from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker, WorkerState
 
+from pixi_browse.models import AttestationData, AttestationStatus
 from pixi_browse.tui import CondaMetadataTui, FileActionScreen
 
 ANACONDA_CHANNELS_URL = "https://conda.anaconda.org/"
@@ -44,15 +46,65 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
+# The manifest channel whose package advertises a committed Sigstore sidecar.
+# Spelled as a URL because the attestation binds to this exact channel.
+SIGNING_TESTS_CHANNEL = "https://prefix.dev/skill-forge"
+SIGNING_TESTS_PACKAGE = "agent-skill-conda-forge"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
 # A window too narrow for a detail section to show its whole tab strip.
 NARROW_TERMINAL_SIZE = (76, 30)
-CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
+CHANNEL_PLATFORMS = (Subdir("linux-64"), Subdir("osx-arm64"), Subdir("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
+
+# Stands in for a real sidecar wherever only the outcome matters.
+EXAMPLE_SIDECAR_URL = "https://example.com/pkg.conda.sigs.abc"
+
+
+def attestation_in_status(status: AttestationStatus) -> AttestationData:
+    """An attestation outcome in each of the three states a record can be in.
+
+    The verified one is as empty as a bundle can be -- signed, and nothing
+    established beyond that -- so a test that only cares about signedness does
+    not have to spell out a whole certificate. ``tests.test_attestations`` uses
+    the real thing.
+    """
+    if status == "unsigned":
+        return AttestationData()
+    if status == "verifying":
+        return AttestationData(
+            sidecar_url=EXAMPLE_SIDECAR_URL, verification_pending=True
+        )
+    if status == "unverified":
+        return AttestationData(
+            sidecar_url=EXAMPLE_SIDECAR_URL, warnings=("no attestation accepted",)
+        )
+    return AttestationData(
+        sidecar_url=EXAMPLE_SIDECAR_URL,
+        attestation=VerifiedAttestation(
+            index=0,
+            identity=None,
+            issuer=None,
+            integrated_time=None,
+            target_channel=None,
+            claims=None,
+            signed_at=None,
+            log_index=None,
+            log_origin=None,
+            checks=VerifiedChecks(
+                certificate_chain=False,
+                signed_certificate_timestamp=False,
+                transparency_log=False,
+                inclusion_proof=False,
+            ),
+            warnings=[],
+        ),
+    )
+
+
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
 SnapComparePalettes = Callable[..., bool]
 

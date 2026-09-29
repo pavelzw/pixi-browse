@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.version import Version
 
 
-def platform_sort_key(platform: Platform) -> tuple[bool, str]:
+def platform_sort_key(platform: Subdir) -> tuple[bool, str]:
     platform_name = str(platform)
     return (platform_name == "noarch", platform_name)
 

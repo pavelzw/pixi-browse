@@ -14,12 +14,12 @@ from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from syrupy.assertion import SnapshotAssertion
 
 from pixi_browse.models import VersionArtifactData
 from pixi_browse.rendering import (
-    format_version_details_metadata_lines,
+    build_version_details_metadata_rows,
     format_version_details_run_exports,
     render_channel_notice_heading,
     render_channel_notice_message,
@@ -55,9 +55,9 @@ def test_discover_available_platforms_finds_indexed_subdirs(
     )
 
     assert platforms == [
-        Platform("linux-64"),
-        Platform("osx-arm64"),
-        Platform("noarch"),
+        Subdir("linux-64"),
+        Subdir("osx-arm64"),
+        Subdir("noarch"),
     ]
 
 
@@ -70,15 +70,15 @@ def test_discover_available_platforms_merges_the_channels(
 
     assert asyncio.run(
         discover_available_platforms(gateway=gateway, channel_names=[BIOCONDA_CHANNEL])
-    ) == [Platform("noarch")]
+    ) == [Subdir("noarch")]
     assert asyncio.run(
         discover_available_platforms(
             gateway=gateway, channel_names=[BIOCONDA_CHANNEL, MAIN_CHANNEL]
         )
     ) == [
-        Platform("linux-64"),
-        Platform("osx-arm64"),
-        Platform("noarch"),
+        Subdir("linux-64"),
+        Subdir("osx-arm64"),
+        Subdir("noarch"),
     ]
 
 
@@ -331,7 +331,7 @@ def test_load_version_artifact_data_reads_real_archives(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform(subdir)],
+            platforms=[Subdir(subdir)],
             package_name=package_name,
         )
         record = next(record for record in records if str(record.version) == version)
@@ -353,7 +353,10 @@ def test_load_version_artifact_data_reads_real_archives(
             for file in details.file_paths
         ]
         return (
-            list(format_version_details_metadata_lines(details)),
+            [
+                f"{label}: {value}"
+                for label, value in build_version_details_metadata_rows(details)
+            ],
             list(details.dependencies),
             [
                 f"{group}: {dependency}"
@@ -394,7 +397,7 @@ def test_load_version_artifact_data_reads_prefix_replacement_from_paths_json(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform("linux-64")],
+            platforms=[Subdir("linux-64")],
             package_name="zlib",
         )
         record = records[0]
@@ -426,7 +429,7 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform("noarch")],
+            platforms=[Subdir("noarch")],
             package_name="six",
         )
         record = records[0]

@@ -7,7 +7,7 @@ from time import monotonic
 
 from rattler.config import Config
 from rattler.match_spec import MatchSpec
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from textual.pilot import Pilot
 
 from pixi_browse.tui import (
@@ -710,7 +710,7 @@ def test_default_platforms_restrict_the_startup_selection(
     """Unavailable platforms passed on the command line are dropped."""
 
     assert snap_compare_palettes(
-        make_app(default_platforms=[Platform("osx-arm64"), Platform("win-64")]),
+        make_app(default_platforms=[Subdir("osx-arm64"), Subdir("win-64")]),
         run_before=wait_for_idle,
         terminal_size=TERMINAL_SIZE,
     )
