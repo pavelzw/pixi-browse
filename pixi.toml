@@ -14,13 +14,7 @@ console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
 typer = "0d"
-pytest-textual-snapshot = "0d"
-# The macOS 27 SDK tags its .tbd stubs with the new arm64e.x1 target, which
-# libtapi only learned to skip in tapi 1600.0.11.8 build 4 (2026-09-17). Without
-# it the conda-forge linker ignores libSystem and every source build of
-# py-rattler fails to link. Can be dropped once that build ages past the
-# workspace cutoff.
-tapi = "0d"
+py-rattler = "0d"
 
 [package]
 name = "pixi-browse"
@@ -33,13 +27,7 @@ hatchling = "*"
 [package.run-dependencies]
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
-# The Sigstore attestation bindings of conda/rattler#2814, plus the certificate
-# claims, transparency log entry and performed checks of conda/rattler#2844,
-# which are what the attestation tab reports, and the embedded trusted root the
-# tests verify against so they need no network. None of that is released yet,
-# hence the branch; move back to `main` once #2844 is merged, and to a version
-# spec once a release carries it.
-py-rattler = { git = "https://github.com/pavelzw/rattler", branch = "sigstore-improvements", subdirectory = "py-rattler" }
+py-rattler = ">=0.27.0,<0.28"
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.
