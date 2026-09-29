@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rattler.package_streaming import PackageArchive
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import PackageRecord, RepoDataRecord
 
 from pixi_browse.models import (
@@ -32,7 +32,7 @@ class AboutUrls:
 class ChannelStateSnapshot:
     channel_names: list[str]
     mode: ViewMode
-    draft_selected_platform_names: set[Platform] | None
+    draft_selected_platform_names: set[Subdir] | None
     current_versions: list[VersionEntry]
     version_subdirs: list[str]
     versions_by_subdir: dict[str, list[VersionEntry]]
@@ -43,9 +43,9 @@ class ChannelStateSnapshot:
     pending_preview_version_key: VersionPreviewKey | None
     previewed_package: str | None
     pending_preview_package: str | None
-    platforms: list[Platform]
-    available_platform_names: list[Platform]
-    selected_platform_names: set[Platform]
+    platforms: list[Subdir]
+    available_platform_names: list[Subdir]
+    selected_platform_names: set[Subdir]
     channel_package_names: list[str]
     all_package_names: list[str]
     visible_package_names: list[str]

@@ -14,7 +14,7 @@ import asyncio
 from dataclasses import fields, replace
 
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import RepoDataRecord
 from rattler.sigstore import (
     CertificateClaims,
@@ -70,7 +70,7 @@ def _record(
         query_package_records(
             gateway=make_gateway(),
             channel_names=[channel],
-            platforms=[Platform("noarch")],
+            platforms=[Subdir("noarch")],
             package_name=package_name,
         )
     )

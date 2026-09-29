@@ -14,7 +14,7 @@ from rattler.match_spec import MatchSpec
 from rattler.networking import Client
 from rattler.package import PackageName
 from rattler.package_streaming import PackageArchive
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Gateway, PackageRecord, RepoDataRecord
 from rattler.sigstore import TrustedRoot
 from rattler.version import Version
@@ -148,7 +148,7 @@ class CondaMetadataTui(App[None]):
         self,
         *,
         default_channels: Iterable[str],
-        default_platforms: Iterable[Platform] | None = None,
+        default_platforms: Iterable[Subdir] | None = None,
         default_matchspec: MatchSpec | None = None,
         config: Config | None = None,
         cache_dir: Path | None = None,
@@ -168,10 +168,10 @@ class CondaMetadataTui(App[None]):
         self._max_parallel_loads = min(
             config.concurrency_downloads, _MAX_PARALLEL_LOADS
         )
-        self._platforms: list[Platform] = []
-        self._available_platform_names: list[Platform] = []
-        self._selected_platform_names: set[Platform] = set(selected_platforms)
-        self._draft_selected_platform_names: set[Platform] | None = None
+        self._platforms: list[Subdir] = []
+        self._available_platform_names: list[Subdir] = []
+        self._selected_platform_names: set[Subdir] = set(selected_platforms)
+        self._draft_selected_platform_names: set[Subdir] | None = None
         self._package_records_cache: dict[str, list[RepoDataRecord]] = {}
         # The repodata queries running right now, shared between the
         # highlighted package and the prefetch of its neighbours.
@@ -338,7 +338,7 @@ class CondaMetadataTui(App[None]):
 
     async def _discover_available_platforms(
         self, *, on_progress: DiscoveryProgressCallback | None = None
-    ) -> list[Platform]:
+    ) -> list[Subdir]:
         return await discover_available_platforms(
             gateway=self._gateway,
             channel_names=self._channel_names,
@@ -966,7 +966,7 @@ class CondaMetadataTui(App[None]):
         package_name: str,
         cache: dict[str, list[RepoDataRecord]],
         channels: list[str],
-        platforms: list[Platform],
+        platforms: list[Subdir],
     ) -> list[RepoDataRecord]:
         started = perf_counter()
         records = await query_package_records(

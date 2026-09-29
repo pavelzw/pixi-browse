@@ -17,7 +17,7 @@ from rattler.package import (
     RunExportsJson,
 )
 from rattler.package_streaming import PackageArchive
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
@@ -110,13 +110,13 @@ class _RecordingGateway:
 
     def __init__(self) -> None:
         self.cleared: list[str] = []
-        self.queries: list[tuple[list[str], list[Platform], str | PackageRecord]] = []
+        self.queries: list[tuple[list[str], list[Subdir], str | PackageRecord]] = []
 
     async def who_needs(
         self,
         *,
         sources: list[str],
-        platforms: list[Platform],
+        platforms: list[Subdir],
         target: str | PackageRecord,
     ) -> list[Dependent]:
         self.queries.append((sources, platforms, target))
@@ -236,11 +236,11 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
             self,
             *,
             sources: list[str],
-            platforms: list[Platform],
+            platforms: list[Subdir],
             target: str | PackageRecord,
         ) -> list[Dependent]:
             assert sources == ["conda-forge"]
-            assert platforms == [Platform("linux-64"), Platform("noarch")]
+            assert platforms == [Subdir("linux-64"), Subdir("noarch")]
             targets.append(target)
             return cast(
                 list[Dependent],
@@ -257,7 +257,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
         return await query_whoneeds_records(
             gateway=cast(Gateway, _FakeGateway()),
             channel_names=["conda-forge"],
-            platforms=[Platform("linux-64"), Platform("noarch")],
+            platforms=[Subdir("linux-64"), Subdir("noarch")],
             target=target,
             log=lambda _message: None,
         )
@@ -1253,24 +1253,24 @@ package:
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
     app = CondaMetadataTui(
         default_channels=["conda-forge"],
-        default_platforms={Platform("linux-64"), Platform("osx-64")},
+        default_platforms={Subdir("linux-64"), Subdir("osx-64")},
     )
-    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._available_platform_names = [Subdir("linux-64"), Subdir("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
 
-    assert app._selected_platform_names == {Platform("linux-64")}
+    assert app._selected_platform_names == {Subdir("linux-64")}
 
 
 def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
     app = CondaMetadataTui(
-        default_channels=["conda-forge"], default_platforms={Platform("osx-64")}
+        default_channels=["conda-forge"], default_platforms={Subdir("osx-64")}
     )
-    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._available_platform_names = [Subdir("linux-64"), Subdir("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
 
-    assert app._selected_platform_names == {Platform("linux-64"), Platform("noarch")}
+    assert app._selected_platform_names == {Subdir("linux-64"), Subdir("noarch")}
 
 
 def test_page_step_uses_visible_height() -> None:
@@ -2219,7 +2219,7 @@ def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
     app = CondaMetadataTui(default_channels=["conda-forge"])
     gateway = _RecordingGateway()
     app._gateway = cast(Gateway, gateway)
-    app._platforms = [Platform("noarch")]
+    app._platforms = [Subdir("noarch")]
 
     app._channel_names = ["conda-forge", "bioconda"]
     asyncio.run(app._query_whoneeds_records("python"))
@@ -2228,7 +2228,7 @@ def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
     app._release_whoneeds_repodata()
 
     assert gateway.queries == [
-        (["conda-forge", "bioconda"], [Platform("noarch")], "python"),
+        (["conda-forge", "bioconda"], [Subdir("noarch")], "python"),
     ]
     assert gateway.cleared == ["conda-forge", "bioconda"]
     assert app._whoneeds_scanned_channels is None

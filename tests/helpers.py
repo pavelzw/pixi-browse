@@ -23,7 +23,7 @@ from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
     SVGImageExtension,
     node_to_report_path,
 )
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Gateway
 from rattler.sigstore import VerifiedAttestation, VerifiedChecks
 from rich.color import Color
@@ -56,7 +56,7 @@ MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
 # A window too narrow for a detail section to show its whole tab strip.
 NARROW_TERMINAL_SIZE = (76, 30)
-CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
+CHANNEL_PLATFORMS = (Subdir("linux-64"), Subdir("osx-arm64"), Subdir("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]

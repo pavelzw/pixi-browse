@@ -46,7 +46,7 @@ from rattler.config import Config
 from rattler.index import index_fs
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Gateway
 from rattler.sigstore import TrustedRoot
 from syrupy.assertion import SnapshotAssertion
@@ -282,7 +282,7 @@ def make_app(rattler_config: Config, rattler_cache_dir: Path) -> AppFactory:
     def factory(
         *,
         default_channels: Iterable[str] = (MAIN_CHANNEL,),
-        default_platforms: Iterable[Platform] | None = None,
+        default_platforms: Iterable[Subdir] | None = None,
         default_matchspec: MatchSpec | None = None,
         config: Config | None = None,
     ) -> CondaMetadataTui:

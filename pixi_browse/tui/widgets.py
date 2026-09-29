@@ -8,7 +8,7 @@ from typing import Literal, Protocol
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import PackageName
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import ChannelNotice
 from rich import box
 from rich.console import RenderableType
@@ -3315,7 +3315,7 @@ class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
         self._progress = progress
         self._render_dialog()
 
-    def report_collecting_names(self, platforms: Sequence[Platform]) -> None:
+    def report_collecting_names(self, platforms: Sequence[Subdir]) -> None:
         """Show that the package names of ``platforms`` are being collected."""
         self._collecting_names_for = len(platforms)
         self._render_dialog()
