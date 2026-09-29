@@ -121,7 +121,9 @@ class ChannelManifest:
             url = self.url(artifact)
             if artifact.fixture_path is None:
                 files.append(
-                    RemoteFile(url=url, path=artifact.local_path, sha256=artifact.sha256)
+                    RemoteFile(
+                        url=url, path=artifact.local_path, sha256=artifact.sha256
+                    )
                 )
             sidecar_path = artifact.attestations_local_path
             if sidecar_path is None or artifact.attestations_sha256 is None:

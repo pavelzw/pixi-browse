@@ -84,9 +84,7 @@ def _record(
 
 def _matching_signed_record(make_gateway: GatewayFactory) -> RepoDataRecord:
     """A repodata record matching the committed 0.0.22 sidecar's subject."""
-    fixture_record = _record(
-        make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE
-    )
+    fixture_record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
     package_record = PackageRecord(
         name=SIGNING_TESTS_PACKAGE,
         version=SIGNED_VERSION,
