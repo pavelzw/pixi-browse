@@ -1780,7 +1780,19 @@ class CondaMetadataTui(App[None]):
         size_in_bytes: int | None,
         sha256: bytes | None,
     ) -> None:
-        fetch = self._start_file_bytes_fetch(package_name, entry, file_path)
+        # Describing a file means reading all of it, which is not worth it for
+        # one the preview refuses on its size alone. Such a file is left
+        # undescribed instead of downloaded in full behind the dialog.
+        fetch: Worker[bytes] | None = None
+        if size_in_bytes is not None and size_in_bytes > _PREVIEW_MAX_BYTES:
+            self._discard_file_bytes()
+            file_type = (
+                f"not detected ({format_human_byte_size(size_in_bytes)}, "
+                "too large to read)"
+            )
+        else:
+            fetch = self._start_file_bytes_fetch(package_name, entry, file_path)
+            file_type = DETECTING_FILE_TYPE
         screen = FileActionScreen(
             file_path,
             actions=(
@@ -1791,7 +1803,7 @@ class CondaMetadataTui(App[None]):
                 ),
             ),
             metadata_lines=self._file_action_metadata_lines(sha256=sha256),
-            file_type=DETECTING_FILE_TYPE,
+            file_type=file_type,
         )
         self.push_screen(
             screen,
@@ -1799,12 +1811,13 @@ class CondaMetadataTui(App[None]):
                 package_name, entry, file_path, size_in_bytes, sha256, result
             ),
         )
-        self.run_worker(
-            self._show_file_type(screen, fetch),
-            group="file-type",
-            exclusive=True,
-            exit_on_error=False,
-        )
+        if fetch is not None:
+            self.run_worker(
+                self._show_file_type(screen, fetch),
+                group="file-type",
+                exclusive=True,
+                exit_on_error=False,
+            )
 
     def _start_file_bytes_fetch(
         self, package_name: str, entry: VersionEntry, file_path: str
