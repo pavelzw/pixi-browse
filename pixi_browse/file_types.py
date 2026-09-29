@@ -20,10 +20,14 @@ else:
     MAGIC_AVAILABLE = hasattr(magic, "from_buffer")
 
 __all__ = [
+    "DETECTING_FILE_TYPE",
     "MAGIC_AVAILABLE",
     "decode_text_file",
     "describe_file_type",
 ]
+
+# Stands in for the description while the file is still being fetched and read.
+DETECTING_FILE_TYPE = "detecting…"
 
 # Appended to the text/binary verdict when libmagic is not available. It names
 # libmagic too: a PyPI install of the extra still needs the library itself.

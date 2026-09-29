@@ -32,7 +32,11 @@ from textual.worker import Worker, WorkerCancelled, WorkerFailed
 
 from pixi_browse import __version__
 from pixi_browse.archives import download_package_archive, read_package_archive_file
-from pixi_browse.file_types import decode_text_file, describe_file_type
+from pixi_browse.file_types import (
+    DETECTING_FILE_TYPE,
+    decode_text_file,
+    describe_file_type,
+)
 from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
@@ -1787,7 +1791,7 @@ class CondaMetadataTui(App[None]):
                 ),
             ),
             metadata_lines=self._file_action_metadata_lines(sha256=sha256),
-            file_type="detecting…",
+            file_type=DETECTING_FILE_TYPE,
         )
         self.push_screen(
             screen,

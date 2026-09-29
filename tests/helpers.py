@@ -32,11 +32,13 @@ from rich.terminal_theme import TerminalTheme
 from syrupy.assertion import SnapshotAssertion
 from syrupy.data import Snapshot, SnapshotCollection
 from syrupy.location import PyTestLocation
+from textual.css.query import NoMatches
 from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker, WorkerState
 
+from pixi_browse.file_types import DETECTING_FILE_TYPE
 from pixi_browse.models import AttestationData, AttestationStatus
 from pixi_browse.tui import CondaMetadataTui, FileActionScreen
 
@@ -513,11 +515,33 @@ async def wait_for_screen(
     await pilot.pause()
 
 
-async def wait_for_file_actions(pilot: Pilot[None]) -> None:
+async def wait_for_file_actions(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
     """Wait for the action dialog of a package file and for its ``Type:`` line,
-    which is only filled in once the file has been fetched and described."""
+    which is only filled in once the file has been fetched and described.
+
+    Waiting for the line and not only for the workers that fill it in keeps a
+    description that never arrives from being snapshotted: the test times out
+    on ``detecting…`` instead of recording it.
+    """
     await wait_for_screen(pilot, FileActionScreen)
     await wait_for_idle(pilot)
+    deadline = time.monotonic() + timeout
+    while True:
+        screen = pilot.app.screen
+        assert isinstance(screen, FileActionScreen)
+        try:
+            line = str(screen.query_one("#file-action-type", Static).content)
+        except NoMatches:  # The dialog is still composing.
+            line = DETECTING_FILE_TYPE
+        if DETECTING_FILE_TYPE not in line:
+            break
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"the file type was not detected within {timeout}s ({line!r})"
+            )
+        await asyncio.sleep(0.02)
+        await pilot.pause()
+    await pilot.pause()
 
 
 async def open_versions(pilot: Pilot[None], package_index: int) -> None:
