@@ -108,11 +108,11 @@ def test_build_app_ignores_blank_matchspec(matchspec: str | None) -> None:
 def test_cli_exits_for_invalid_platform() -> None:
     runner = CliRunner()
 
-    result = runner.invoke(entrypoint.cli, ["-p", "linux-64", "-p", "bad-platform"])
+    result = runner.invoke(entrypoint.cli, ["-p", "linux-64", "-p", "bad-subdir"])
 
     assert result.exit_code == 1
-    assert "bad-platform" in result.output
-    assert "not a known platform" in result.output
+    assert "bad-subdir" in result.output
+    assert "not a known subdir" in result.output
 
 
 def test_cli_exits_for_invalid_matchspec() -> None:
