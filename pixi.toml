@@ -98,7 +98,12 @@ python = "3.13.*"
 python = "3.14.*"
 
 [environments]
-default = { features = ["test", "extra", "build", "lint"], solve-group = "default" }
+default = { features = [
+  "test",
+  "extra",
+  "build",
+  "lint",
+], solve-group = "default" }
 py313 = ["py313", "test", "extra"]
 py314 = ["py314", "test", "extra"]
 minimal = { features = ["test"], solve-group = "default" }
