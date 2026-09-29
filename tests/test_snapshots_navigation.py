@@ -8,6 +8,7 @@ offline channel; see ``test_snapshots.py`` for how snapshots are reviewed.
 from __future__ import annotations
 
 import pytest
+from textual.events import MouseDown, MouseMove, MouseUp
 from textual.pilot import Pilot
 
 from tests.helpers import (
@@ -18,6 +19,48 @@ from tests.helpers import (
     open_versions,
     wait_for_idle,
 )
+
+
+@pytest.mark.parametrize("close", [False, True], ids=["select", "exit"])
+def test_metadata_text_selection(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory, close: bool
+) -> None:
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await pilot.press("1")
+        await pilot.pause()
+        body = pilot.app.query_one("#detail-body-0")
+        x, y = body.region.offset
+        # Pilot's mouse helpers bypass App.on_event; send real input events so
+        # the per-gesture metadata selection gate is exercised as well.
+        for event_type, offset in [(MouseDown, 0), (MouseMove, 20), (MouseUp, 20)]:
+            pilot.app.post_message(
+                event_type(None, x + offset, y, 0, 0, 1, False, False, False)
+            )
+            await pilot.pause()
+        await pilot.pause()
+        selected = pilot.app.screen.get_selected_text()
+        assert selected
+        await pilot.press("ctrl+c")
+        assert pilot.app.clipboard == selected
+        if close:
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not pilot.app.screen.get_selected_text()
+            status = pilot.app.query_one("#status")
+            x, y = status.region.offset
+            for event_type, offset in [(MouseDown, 0), (MouseMove, 10), (MouseUp, 10)]:
+                pilot.app.post_message(
+                    event_type(None, x + offset, y, 0, 0, 1, False, False, False)
+                )
+                await pilot.pause()
+            assert not pilot.app.ALLOW_SELECT
+            assert not pilot.app.screen.get_selected_text()
+            await pilot.click("#detail-body-0")
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
 
 
 @pytest.mark.parametrize("key", ["l", "1"])
