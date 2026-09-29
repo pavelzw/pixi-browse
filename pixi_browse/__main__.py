@@ -4,9 +4,9 @@ from pathlib import Path
 
 import typer
 from rattler.config import Config
-from rattler.exceptions import ConfigError, InvalidMatchSpecError, ParsePlatformError
+from rattler.exceptions import ConfigError, InvalidMatchSpecError, ParseSubdirError
 from rattler.match_spec import MatchSpec
-from rattler.platform import Platform
+from rattler.platform import Subdir
 
 from pixi_browse import __version__
 from pixi_browse.models import VersionEntry, VersionRow
@@ -104,14 +104,12 @@ def build_app(
     if not channel_names:
         typer.echo("At least one channel is required.", err=True)
         raise typer.Exit(code=1)
-    requested_platforms: list[Platform] | None = None
+    requested_platforms: list[Subdir] | None = None
     requested_matchspec: MatchSpec | None = None
     if platforms is not None:
         try:
-            requested_platforms = [
-                Platform(platform_name) for platform_name in platforms
-            ]
-        except ParsePlatformError as exc:
+            requested_platforms = [Subdir(platform_name) for platform_name in platforms]
+        except ParseSubdirError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
     if matchspec is not None and matchspec.strip():

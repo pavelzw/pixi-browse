@@ -18,7 +18,7 @@ from typing import override
 import pytest
 from rattler.config import Config
 from rattler.package_streaming import download_to_path, fetch_raw_package_file_from_url
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from syrupy.assertion import SnapshotAssertion
 
 from pixi_browse.__main__ import build_app
@@ -111,7 +111,7 @@ disable-bzip2 = true
         records = await query_package_records(
             gateway=app._gateway,
             channel_names=app._channel_names,
-            platforms=[Platform("noarch")],
+            platforms=[Subdir("noarch")],
             package_name="pixi-browse",
         )
         record = records[0]
@@ -158,7 +158,7 @@ disable-sharded = false
 
     async def run() -> list[str]:
         results = await gateway.who_needs(
-            sources=[upstream], platforms=[Platform("linux-64")], target="libzlib"
+            sources=[upstream], platforms=[Subdir("linux-64")], target="libzlib"
         )
         return sorted({result.record.file_name for result in results})
 

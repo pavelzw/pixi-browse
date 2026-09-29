@@ -17,7 +17,7 @@ from rattler.package import (
     RunExportsJson,
 )
 from rattler.package_streaming import PackageArchive
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Dependent, Gateway, PackageRecord, RepoDataRecord
 from rattler.version import Version
 from rich.style import Style
@@ -29,6 +29,8 @@ from textual.widgets import OptionList, Static
 
 from pixi_browse.__main__ import CondaMetadataTui, VersionEntry
 from pixi_browse.models import (
+    AttestationData,
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
@@ -42,9 +44,9 @@ from pixi_browse.rendering import (
     build_repodata_patch_diff,
     build_version_artifact_data,
     build_version_compare_data,
+    build_version_details_metadata_rows,
     format_clickable_github_handle,
     format_clickable_url,
-    format_version_details_metadata_lines,
     format_version_details_run_exports,
     render_package_preview,
     resolve_info_file_compare_rows,
@@ -88,9 +90,11 @@ from pixi_browse.tui.widgets import (
     PREFIX_REPLACEMENT_STYLE,
     DetailOptionList,
     FileActionOption,
+    render_detail_rows,
     render_repodata_patches_body,
     render_tab_header,
 )
+from tests.helpers import attestation_in_status
 
 
 @dataclass(frozen=True)
@@ -106,13 +110,13 @@ class _RecordingGateway:
 
     def __init__(self) -> None:
         self.cleared: list[str] = []
-        self.queries: list[tuple[list[str], list[Platform], str | PackageRecord]] = []
+        self.queries: list[tuple[list[str], list[Subdir], str | PackageRecord]] = []
 
     async def who_needs(
         self,
         *,
         sources: list[str],
-        platforms: list[Platform],
+        platforms: list[Subdir],
         target: str | PackageRecord,
     ) -> list[Dependent]:
         self.queries.append((sources, platforms, target))
@@ -130,6 +134,7 @@ def _make_artifact_data(
     run_exports: RunExportsJson | None = None,
     file_paths: tuple[PackageFile, ...] = (),
     info_files: tuple[PackageFile, ...] = (),
+    attestation: AttestationData = AttestationData(),
 ) -> VersionArtifactData:
     return VersionArtifactData(
         metadata_rows=metadata_rows,
@@ -138,6 +143,7 @@ def _make_artifact_data(
         file_paths=file_paths,
         info_files=info_files,
         run_exports=run_exports,
+        attestation=attestation,
     )
 
 
@@ -230,11 +236,11 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
             self,
             *,
             sources: list[str],
-            platforms: list[Platform],
+            platforms: list[Subdir],
             target: str | PackageRecord,
         ) -> list[Dependent]:
             assert sources == ["conda-forge"]
-            assert platforms == [Platform("linux-64"), Platform("noarch")]
+            assert platforms == [Subdir("linux-64"), Subdir("noarch")]
             targets.append(target)
             return cast(
                 list[Dependent],
@@ -251,7 +257,7 @@ def test_query_whoneeds_records_groups_records_and_forwards_targets() -> None:
         return await query_whoneeds_records(
             gateway=cast(Gateway, _FakeGateway()),
             channel_names=["conda-forge"],
-            platforms=[Platform("linux-64"), Platform("noarch")],
+            platforms=[Subdir("linux-64"), Subdir("noarch")],
             target=target,
             log=lambda _message: None,
         )
@@ -495,7 +501,7 @@ def test_build_version_artifact_data_includes_package_paths() -> None:
     )
 
 
-def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
+def test_build_version_details_metadata_rows_labels_every_field() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -510,27 +516,69 @@ def test_format_version_details_metadata_lines_aligns_metadata_rows() -> None:
         repository_urls=["https://github.com/example/demo"],
         documentation_urls=["https://docs.example.com/demo"],
     )
-    metadata_lines = format_version_details_metadata_lines(details)
+    metadata_rows = dict(build_version_details_metadata_rows(details))
 
-    assert "Package               demo" in metadata_lines
-    assert "Python Site-Packages  not available" in metadata_lines
-    assert any(
-        line.startswith("Repository            [underline link=")
-        for line in metadata_lines
-    )
+    assert metadata_rows["Package"] == "demo"
+    assert metadata_rows["Python Site-Packages"] == "not available"
+    assert metadata_rows["Repository"].startswith("[underline link=")
     assert (
-        "Built with            rattler-build 0.47.0"
-        in format_version_details_metadata_lines(
-            build_version_artifact_data(
-                "demo",
-                record,
-                rattler_build_version="0.47.0",
+        dict(
+            build_version_details_metadata_rows(
+                build_version_artifact_data(
+                    "demo",
+                    record,
+                    rattler_build_version="0.47.0",
+                )
             )
-        )
+        )["Built with"]
+        == "rattler-build 0.47.0"
     )
 
 
-def test_format_version_details_metadata_lines_include_indexed_timestamp() -> None:
+def test_render_detail_rows_wraps_a_value_under_itself() -> None:
+    """A value too wide for the body continues in the value column rather than
+    at the left edge, where it would read as a row of its own instead of as the
+    rest of the field above it. A row without a label is such a line of its own,
+    and uses the whole width.
+
+    The wrapping keeps the markup of a row, so a link that is wrapped is still
+    one link.
+    """
+    body = render_detail_rows(
+        [
+            ("", "[bold green]✓ Verified[/] - certificate chain"),
+            ("", ""),
+            ("Repository", "[underline link='https://example.com/x']example/x[/]"),
+            ("Identity", "https://example.com/a/very/long/identity@refs/heads/main"),
+        ],
+        34,
+    )
+
+    assert body.plain.splitlines() == [
+        "✓ Verified - certificate chain",
+        "",
+        "Repository  example/x",
+        "Identity    https://example.com/a/",
+        "            very/long/identity@ref",
+        "            s/heads/main",
+    ]
+    assert [(span.start, span.end, span.style) for span in body.spans] == [
+        (0, 10, "bold green"),
+        (44, 53, "underline link='https://example.com/x'"),
+    ]
+
+
+def test_render_detail_rows_leaves_the_wrapping_to_the_body_until_it_has_a_width() -> (
+    None
+):
+    """A section that has not been laid out yet has no width to wrap at, so the
+    rows are only aligned; the resize that follows draws them again."""
+    body = render_detail_rows([("Identity", "a " * 40)], None)
+
+    assert body.plain.splitlines() == [f"Identity  {'a ' * 40}"]
+
+
+def test_version_details_metadata_rows_include_indexed_timestamp() -> None:
     """``indexed_timestamp`` is when the channel index first saw the artifact.
 
     The channel server assigns it (CEP-0047), so it is missing from records of
@@ -547,15 +595,12 @@ def test_format_version_details_metadata_lines_include_indexed_timestamp() -> No
         "demo", _make_repo_data_record(indexed_timestamp=None)
     )
 
+    indexed_rows = dict(build_version_details_metadata_rows(indexed))
+    assert indexed_rows["Indexed Timestamp"] == "2026-01-02T03:04:05+00:00"
+    assert indexed_rows["Timestamp"] == "2026-01-01T00:00:00+00:00"
     assert (
-        "Indexed Timestamp     2026-01-02T03:04:05+00:00"
-        in format_version_details_metadata_lines(indexed)
-    )
-    assert "Timestamp             2026-01-01T00:00:00+00:00" in (
-        format_version_details_metadata_lines(indexed)
-    )
-    assert "Indexed Timestamp     not available" in (
-        format_version_details_metadata_lines(not_indexed)
+        dict(build_version_details_metadata_rows(not_indexed))["Indexed Timestamp"]
+        == "not available"
     )
 
 
@@ -863,7 +908,7 @@ def test_resolve_info_file_compare_rows_uses_lazy_sha256_values() -> None:
     assert rows[1].right_file.size_in_bytes == 200
 
 
-def test_format_version_details_metadata_lines_include_about_urls() -> None:
+def test_version_details_metadata_rows_include_about_urls() -> None:
     record = _make_repo_data_record(
         version="1.2.3",
         build="py313h123_0",
@@ -883,43 +928,32 @@ def test_format_version_details_metadata_lines_include_about_urls() -> None:
         provenance_sha="f48623bd7b6d92b6573f21a907a62c8e06b75c5c",
         rattler_build_version="0.38.0",
     )
-    metadata_lines = format_version_details_metadata_lines(details)
+    metadata_rows = dict(build_version_details_metadata_rows(details))
 
-    assert any(
-        line.startswith("Package URL")
-        and "https://example.invalid/demo-1.2.3-py313h123_0.conda" in line
-        for line in metadata_lines
+    assert (
+        "https://example.invalid/demo-1.2.3-py313h123_0.conda"
+        in metadata_rows["Package URL"]
     )
-    assert any(
-        line.startswith("Repository") and "https://github.com/example/demo" in line
-        for line in metadata_lines
+    assert "https://github.com/example/demo" in metadata_rows["Repository"]
+    assert "https://docs.example.com/demo" in metadata_rows["Documentation"]
+    assert "https://example.com/demo" in metadata_rows["Homepage"]
+    assert (
+        "[underline link='https://github.com/pavelzw']@pavelzw[/]"
+        in metadata_rows["Recipe maintainers"]
     )
-    assert any(
-        line.startswith("Documentation") and "https://docs.example.com/demo" in line
-        for line in metadata_lines
+    assert (
+        "[underline link='https://github.com/xhochy']@xhochy[/]"
+        in metadata_rows["Recipe maintainers"]
     )
-    assert any(
-        line.startswith("Homepage") and "https://example.com/demo" in line
-        for line in metadata_lines
+    assert (
+        "https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in metadata_rows["Provenance"]
     )
-    assert any(
-        line.startswith("Recipe maintainers")
-        and "[underline link='https://github.com/pavelzw']@pavelzw[/]" in line
-        and "[underline link='https://github.com/xhochy']@xhochy[/]" in line
-        for line in metadata_lines
+    assert (
+        "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
+        in metadata_rows["Provenance"]
     )
-    assert any(
-        line.startswith("Provenance")
-        and "https://github.com/conda-forge/polars-feedstock/commit/f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
-        in line
-        and "conda-forge/polars-feedstock@f48623bd7b6d92b6573f21a907a62c8e06b75c5c"
-        in line
-        for line in metadata_lines
-    )
-    assert any(
-        line.startswith("Built with") and "rattler-build 0.38.0" in line
-        for line in metadata_lines
-    )
+    assert metadata_rows["Built with"] == "rattler-build 0.38.0"
 
 
 def test_format_clickable_url_uses_a_terminal_hyperlink() -> None:
@@ -1219,24 +1253,24 @@ package:
 def test_ensure_available_platforms_removes_unavailable_selected_platforms() -> None:
     app = CondaMetadataTui(
         default_channels=["conda-forge"],
-        default_platforms={Platform("linux-64"), Platform("osx-64")},
+        default_platforms={Subdir("linux-64"), Subdir("osx-64")},
     )
-    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._available_platform_names = [Subdir("linux-64"), Subdir("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
 
-    assert app._selected_platform_names == {Platform("linux-64")}
+    assert app._selected_platform_names == {Subdir("linux-64")}
 
 
 def test_ensure_available_platforms_falls_back_to_default_when_needed() -> None:
     app = CondaMetadataTui(
-        default_channels=["conda-forge"], default_platforms={Platform("osx-64")}
+        default_channels=["conda-forge"], default_platforms={Subdir("osx-64")}
     )
-    app._available_platform_names = [Platform("linux-64"), Platform("noarch")]
+    app._available_platform_names = [Subdir("linux-64"), Subdir("noarch")]
 
     asyncio.run(app._ensure_available_platforms())
 
-    assert app._selected_platform_names == {Platform("linux-64"), Platform("noarch")}
+    assert app._selected_platform_names == {Subdir("linux-64"), Subdir("noarch")}
 
 
 def test_page_step_uses_visible_height() -> None:
@@ -1480,14 +1514,18 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
     view._pane_selected = True
     view._active_section = 0
 
-    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches"
+    assert view._render_metadata_header().plain == (
+        "[1] Metadata - Repodata patches - Attestation"
+    )
 
     view._details = _make_artifact_data()
-    assert view._render_metadata_header().plain == "[1] Metadata - Repodata patches (0)"
+    assert view._render_metadata_header().plain == (
+        "[1] Metadata - Repodata patches (0) - Attestation"
+    )
 
     view._details = _patched_artifact_data(2)
     header = view._render_metadata_header()
-    assert header.plain == "[1] Metadata - Repodata patches (2)"
+    assert header.plain == "[1] Metadata - Repodata patches (2) - Attestation"
     assert any(
         span.style == ACTIVE_TAB_STYLE
         and header.plain[span.start : span.end] == "Metadata"
@@ -1499,6 +1537,28 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
         and span.style.meta.get("@click") == ("select_metadata_tab", ("patches",))
         for span in header.spans
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [
+        ("unsigned", "Attestation"),
+        ("verifying", "Attestation …"),
+        ("verified", "Attestation ✓"),
+        ("unverified", "Attestation ✗"),
+    ],
+)
+def test_metadata_header_marks_the_attestation_tab_by_status(
+    status: AttestationStatus, label: str
+) -> None:
+    """The glyph makes signedness readable from the header alone; an unsigned
+    artifact, which nearly every package is, gets none."""
+    view = VersionDetailsView()
+    view._pane_selected = True
+    view._active_section = 0
+    view._details = _make_artifact_data(attestation=attestation_in_status(status))
+
+    assert view._render_metadata_header().plain.endswith(f" - {label}")
 
 
 def _tab_labels(*labels: str) -> tuple[Text, ...]:
@@ -2160,7 +2220,7 @@ def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
     app = CondaMetadataTui(default_channels=["conda-forge"])
     gateway = _RecordingGateway()
     app._gateway = cast(Gateway, gateway)
-    app._platforms = [Platform("noarch")]
+    app._platforms = [Subdir("noarch")]
 
     app._channel_names = ["conda-forge", "bioconda"]
     asyncio.run(app._query_whoneeds_records("python"))
@@ -2169,7 +2229,7 @@ def test_whoneeds_query_tracks_and_releases_the_scanned_channel() -> None:
     app._release_whoneeds_repodata()
 
     assert gateway.queries == [
-        (["conda-forge", "bioconda"], [Platform("noarch")], "python"),
+        (["conda-forge", "bioconda"], [Subdir("noarch")], "python"),
     ]
     assert gateway.cleared == ["conda-forge", "bioconda"]
     assert app._whoneeds_scanned_channels is None

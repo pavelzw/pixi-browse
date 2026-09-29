@@ -14,7 +14,7 @@ from functools import partial
 import pytest
 from rattler.config import Config
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from textual.widgets import OptionList
 
 from pixi_browse.repodata import query_package_records
@@ -457,7 +457,7 @@ def test_version_loader_shares_a_running_load_per_preview_key(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform("noarch")],
+            platforms=[Subdir("noarch")],
             package_name="six",
         )
         record = records[0]
