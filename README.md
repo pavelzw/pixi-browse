@@ -66,9 +66,10 @@ package.
 ### Optional: file types
 
 The file action dialog always says whether a file is text or binary. With
-[Magika](https://github.com/google/magika) installed it also names the file
-type, e.g. `ELF executable` or `Python source`. Magika runs a small
-onnxruntime model, so it is not installed by default:
+[python-magic](https://github.com/ahupp/python-magic) installed it also names
+the type the way `file` does, e.g. `Python script` or `ELF 64-bit LSB shared
+object, x86-64`. python-magic needs the native libmagic library, so it is not
+installed by default:
 
 ```bash
 pixi global install 'pixi-browse[extras=filetype]'
@@ -78,6 +79,12 @@ pixi exec -s 'pixi-browse[extras=filetype]' pixi-browse
 uv tool install 'pixi-browse[filetype]'
 uvx 'pixi-browse[filetype]'
 ```
+
+Pixi installs libmagic along with it. From PyPI the library has to be installed
+separately: `brew install libmagic`, `apt install libmagic1`, or, on Windows, a
+libmagic DLL and its magic database.
+
+Without either, the dialog only says `text` or `binary`.
 
 ## Usage
 
