@@ -27,10 +27,11 @@ from textual.events import Key, Resize
 from textual.screen import ModalScreen, Screen
 from textual.widget import Widget
 from textual.widgets import OptionList, Static
-from textual.worker import Worker
+from textual.worker import Worker, WorkerCancelled, WorkerFailed
 
 from pixi_browse import __version__
 from pixi_browse.archives import download_package_archive, read_package_archive_file
+from pixi_browse.file_types import decode_text_file, describe_file_type
 from pixi_browse.models import (
     CompareFileRow,
     CompareSelection,
@@ -214,6 +215,13 @@ class CondaMetadataTui(App[None]):
         self._version_preview_request: tuple[VersionPreviewKey, Worker[None]] | None = (
             None
         )
+        # The bytes of the file whose action dialog is open, fetched as soon as
+        # it opens so that it can name the file type and ``Preview`` and
+        # ``Download as file`` need not fetch again. Kept until the action the
+        # dialog led to (or its dismissal) is done with them.
+        self._file_bytes_fetch: (
+            tuple[tuple[VersionPreviewKey, str], Worker[bytes]] | None
+        ) = None
         self._selected_package: str | None = None
         self._previewed_package: str | None = None
         self._pending_preview_package: str | None = None
@@ -1741,21 +1749,69 @@ class CondaMetadataTui(App[None]):
         size_in_bytes: int | None,
         sha256: bytes | None,
     ) -> None:
-        self.push_screen(
-            FileActionScreen(
-                file_path,
-                actions=(
-                    FileActionOption(action="preview", label="Preview"),
-                    FileActionOption(
-                        action="download",
-                        label="Download as file",
-                    ),
+        fetch = self._start_file_bytes_fetch(package_name, entry, file_path)
+        screen = FileActionScreen(
+            file_path,
+            actions=(
+                FileActionOption(action="preview", label="Preview"),
+                FileActionOption(
+                    action="download",
+                    label="Download as file",
                 ),
-                metadata_lines=self._file_action_metadata_lines(sha256=sha256),
             ),
+            metadata_lines=self._file_action_metadata_lines(sha256=sha256),
+            file_type="detecting…",
+        )
+        self.push_screen(
+            screen,
             lambda result: self._handle_file_action_result(
                 package_name, entry, file_path, size_in_bytes, sha256, result
             ),
+        )
+        self.run_worker(
+            self._show_file_type(screen, fetch),
+            group="file-type",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    def _start_file_bytes_fetch(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> Worker[bytes]:
+        """Start fetching a file for its action dialog, replacing the bytes of
+        the file whose dialog was open before."""
+        self._discard_file_bytes()
+        worker = self.run_worker(
+            self._read_package_file_bytes(package_name, entry, file_path),
+            group="file-bytes",
+            exit_on_error=False,
+        )
+        key = (self._version_preview_key(package_name, entry), file_path)
+        self._file_bytes_fetch = (key, worker)
+        return worker
+
+    def _discard_file_bytes(self) -> None:
+        """Drop the bytes fetched for a file action dialog, cancelling the
+        fetch if it is still running."""
+        if self._file_bytes_fetch is None:
+            return
+        _, worker = self._file_bytes_fetch
+        self._file_bytes_fetch = None
+        worker.cancel()
+
+    async def _show_file_type(
+        self, screen: FileActionScreen, fetch: Worker[bytes]
+    ) -> None:
+        try:
+            package_bytes = await fetch.wait()
+        except WorkerCancelled:
+            # The dialog was dismissed before the file arrived.
+            return
+        except WorkerFailed as exc:
+            screen.show_file_type(f"unavailable ({exc.error!s})")
+            return
+        screen.show_file_type(
+            await asyncio.to_thread(describe_file_type, package_bytes)
         )
 
     def _defer_file_action_screen(
@@ -1893,19 +1949,25 @@ class CondaMetadataTui(App[None]):
     async def _fetch_package_file_bytes(
         self, package_name: str, entry: VersionEntry, file_path: str
     ) -> bytes:
+        """The bytes of a package file, from the fetch its action dialog
+        started when there is one."""
+        if self._file_bytes_fetch is not None:
+            key, worker = self._file_bytes_fetch
+            if key == (self._version_preview_key(package_name, entry), file_path):
+                try:
+                    return await worker.wait()
+                except WorkerFailed as exc:
+                    raise exc.error from None
+                except WorkerCancelled:
+                    pass
+        return await self._read_package_file_bytes(package_name, entry, file_path)
+
+    async def _read_package_file_bytes(
+        self, package_name: str, entry: VersionEntry, file_path: str
+    ) -> bytes:
         url = await self._package_url_for_version_entry(package_name, entry)
 
         return await read_package_archive_file(self._client, url, file_path)
-
-    @staticmethod
-    def _decode_text_file(package_bytes: bytes) -> str | None:
-        """The file as text, or ``None`` when it is binary."""
-        if b"\0" in package_bytes:
-            return None
-        try:
-            return package_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
 
     @classmethod
     def _preview_content(
@@ -1928,7 +1990,7 @@ class CondaMetadataTui(App[None]):
             )
 
         assert package_bytes is not None
-        content = cls._decode_text_file(package_bytes)
+        content = decode_text_file(package_bytes)
         if content is None:
             return FilePreviewContent(
                 text=(
@@ -2098,6 +2160,7 @@ class CondaMetadataTui(App[None]):
                 return
         finally:
             self._file_action_in_progress = False
+            self._discard_file_bytes()
 
     def _handle_file_action_result(
         self,
@@ -2109,6 +2172,7 @@ class CondaMetadataTui(App[None]):
         action: FileActionOption | None,
     ) -> None:
         if action is None or self._file_action_in_progress:
+            self._discard_file_bytes()
             return
 
         if action.action == "download":
@@ -2168,7 +2232,7 @@ class CondaMetadataTui(App[None]):
         if len(package_bytes) > _PREVIEW_MAX_BYTES:
             notify_too_large(len(package_bytes))
             return None
-        text = self._decode_text_file(package_bytes)
+        text = decode_text_file(package_bytes)
         if text is None:
             self.notify(
                 f"{side} file {file_path} is binary and cannot be diffed.",
@@ -2376,6 +2440,7 @@ class CondaMetadataTui(App[None]):
         destination: str | None,
     ) -> None:
         if destination is None or self._file_action_in_progress:
+            self._discard_file_bytes()
             return
 
         self._file_action_in_progress = True

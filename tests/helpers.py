@@ -36,7 +36,7 @@ from textual.screen import Screen
 from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker, WorkerState
 
-from pixi_browse.tui import CondaMetadataTui
+from pixi_browse.tui import CondaMetadataTui, FileActionScreen
 
 ANACONDA_CHANNELS_URL = "https://conda.anaconda.org/"
 # The channel the app loads by default.
@@ -459,6 +459,13 @@ async def wait_for_screen(
             )
         await pilot.pause()
     await pilot.pause()
+
+
+async def wait_for_file_actions(pilot: Pilot[None]) -> None:
+    """Wait for the action dialog of a package file and for its ``Type:`` line,
+    which is only filled in once the file has been fetched and described."""
+    await wait_for_screen(pilot, FileActionScreen)
+    await wait_for_idle(pilot)
 
 
 async def open_versions(pilot: Pilot[None], package_index: int) -> None:

@@ -39,10 +39,15 @@ typer = ">=0.27.2,<0.28"
 # it is only an extra and not a run dependency of pixi-browse itself.
 [package.extra-dependencies.diff]
 textual-diff-view = ">=0.1.5,<0.2"
+# Optional: names the type of a file in the file action dialog. Magika runs an
+# onnxruntime model, which is too heavy for a run dependency.
+[package.extra-dependencies.filetype]
+magika = ">=1.0.3,<2"
 [package.run-constraints]
 textual-diff-view = ">=0.1.5,<0.2"
+magika = ">=1.0.3,<2"
 [dependencies]
-pixi-browse = { path = ".", extras = ["diff"] }
+pixi-browse = { path = ".", extras = ["diff", "filetype"] }
 textual-dev = "*"
 
 [feature.test.dependencies]

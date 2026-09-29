@@ -62,6 +62,22 @@ uvx 'pixi-browse[diff]'
 Without it, the `Diff left / right` action in the compare view asks for this
 package.
 
+### Optional: file types
+
+The file action dialog always says whether a file is text or binary. With
+[Magika](https://github.com/google/magika) installed it also names the file
+type, e.g. `ELF executable` or `Python source`. Magika runs a small
+onnxruntime model, so it is not installed by default:
+
+```bash
+pixi global install 'pixi-browse[extras=filetype]'
+pixi exec -s 'pixi-browse[extras=filetype]' pixi-browse
+
+# or from PyPI
+uv tool install 'pixi-browse[filetype]'
+uvx 'pixi-browse[filetype]'
+```
+
 ## Usage
 
 ```bash

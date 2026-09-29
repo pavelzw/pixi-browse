@@ -11,15 +11,15 @@ import asyncio
 
 from textual.pilot import Pilot
 
-from pixi_browse.tui import FileActionScreen, VersionDetailsView
+from pixi_browse.tui import VersionDetailsView
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapComparePalettes,
     open_versions,
     type_text,
+    wait_for_file_actions,
     wait_for_idle,
-    wait_for_screen,
 )
 from tests.test_snapshots_compare import open_polars_compare_screen
 
@@ -172,7 +172,7 @@ def test_enter_on_a_searched_file_opens_its_file_actions(
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
         await pilot.press("enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
