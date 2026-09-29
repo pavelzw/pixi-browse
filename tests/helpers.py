@@ -46,11 +46,10 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
-# The manifest channel whose package carries Sigstore attestations. Spelled as a
-# URL, both because a bare name resolves to anaconda.org and because the
-# attestations bind to this exact channel.
-SIGNING_TESTS_CHANNEL = "https://beta.prefix.dev/signing-tests"
-SIGNING_TESTS_PACKAGE = "all-signed"
+# The manifest channel whose package advertises a committed Sigstore sidecar.
+# Spelled as a URL because the attestation binds to this exact channel.
+SIGNING_TESTS_CHANNEL = "https://prefix.dev/skill-forge"
+SIGNING_TESTS_PACKAGE = "agent-skill-conda-forge"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
@@ -75,6 +74,10 @@ def attestation_in_status(status: AttestationStatus) -> AttestationData:
     """
     if status == "unsigned":
         return AttestationData()
+    if status == "verifying":
+        return AttestationData(
+            sidecar_url=EXAMPLE_SIDECAR_URL, verification_pending=True
+        )
     if status == "unverified":
         return AttestationData(
             sidecar_url=EXAMPLE_SIDECAR_URL, warnings=("no attestation accepted",)

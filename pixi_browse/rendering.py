@@ -971,6 +971,7 @@ def build_version_details_metadata_rows(
 
 ATTESTATION_VERDICTS: dict[AttestationStatus, str] = {
     "unsigned": "Unsigned",
+    "verifying": "Verifying…",
     "verified": "[bold green]✓ Verified[/]",
     "unverified": "[bold red]✗ Not verified[/]",
 }
@@ -1002,6 +1003,8 @@ def format_attestation_verdict(attestation: AttestationData) -> str:
     verified = attestation.attestation
     if verified is not None:
         detail = describe_attestation_checks(verified.checks)
+    elif attestation.status == "verifying":
+        detail = "package details are available while checks run"
     elif attestation.status == "unverified":
         detail = "see the warnings below"
     else:

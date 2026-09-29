@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Literal, Protocol
 
@@ -37,6 +37,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
+    AttestationData,
     AttestationStatus,
     CompareFileRow,
     CompareRow,
@@ -98,6 +99,7 @@ METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches", "attestation")
 # about the few that are signed.
 ATTESTATION_TAB_GLYPHS: dict[AttestationStatus, str] = {
     "unsigned": "",
+    "verifying": " …",
     "verified": " ✓",
     "unverified": " ✗",
 }
@@ -588,6 +590,13 @@ class VersionDetailsView(Vertical):
         self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self.display = True
         self._refresh_sections()
+
+    def update_attestation(self, attestation: AttestationData) -> None:
+        """Refresh verification without disturbing navigation in other sections."""
+        if self._details is None:
+            return
+        self._details = replace(self._details, attestation=attestation)
+        self._refresh_metadata_section()
 
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, VERSION_DETAIL_SECTION_COUNT - 1))
@@ -1339,6 +1348,11 @@ class MainPanel(Vertical):
         version_details.set_details(details)
         version_details.set_pane_selected(self._pane_selected)
         version_details.display = True
+
+    def update_version_attestation(self, attestation: AttestationData) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).update_attestation(
+            attestation
+        )
 
     def set_pane_selected(self, selected: bool) -> None:
         self._pane_selected = selected

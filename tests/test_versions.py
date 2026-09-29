@@ -1543,6 +1543,7 @@ def test_metadata_header_always_shows_patches_tab_with_count() -> None:
     ("status", "label"),
     [
         ("unsigned", "Attestation"),
+        ("verifying", "Attestation …"),
         ("verified", "Attestation ✓"),
         ("unverified", "Attestation ✗"),
     ],

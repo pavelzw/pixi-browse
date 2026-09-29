@@ -56,6 +56,19 @@ def sidecar_url(record: RepoDataRecord) -> str | None:
     return f"{record.url}{SIDECAR_SUFFIX}.{attestations_sha256.hex()}"
 
 
+def pending_attestation(record: RepoDataRecord) -> AttestationData:
+    """Describe what ``record`` advertises without doing any network work."""
+    url = sidecar_url(record)
+    if url is None:
+        return AttestationData()
+    assert record.attestations_sha256 is not None
+    return AttestationData(
+        sidecar_url=url,
+        sidecar_sha256=record.attestations_sha256.hex(),
+        verification_pending=True,
+    )
+
+
 async def verify_record(
     record: RepoDataRecord,
     *,
@@ -72,8 +85,7 @@ async def verify_record(
     if record.attestations_sha256 is None:
         return AttestationData()
 
-    url = sidecar_url(record)
-    digest = record.attestations_sha256.hex()
+    pending = pending_attestation(record)
     try:
         outcome = await verify_attestation(
             record, BROWSE_POLICY, client, trusted_root=trusted_root
@@ -83,15 +95,17 @@ async def verify_record(
         # and the unforeseen: a sidecar the channel does not serve after all,
         # a trusted root that cannot be loaded.
         return AttestationData(
-            sidecar_url=url, sidecar_sha256=digest, warnings=(str(exc),)
+            sidecar_url=pending.sidecar_url,
+            sidecar_sha256=pending.sidecar_sha256,
+            warnings=(str(exc),),
         )
 
     # The accepted bundle is passed through as rattler produced it. Its warnings
     # are already part of the outcome's, which otherwise holds one rejection per
     # bundle that was not accepted.
     return AttestationData(
-        sidecar_url=url,
-        sidecar_sha256=digest,
+        sidecar_url=pending.sidecar_url,
+        sidecar_sha256=pending.sidecar_sha256,
         attestation=outcome.attestation,
         warnings=tuple(outcome.warnings),
     )

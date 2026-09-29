@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from asyncio import gather
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from time import perf_counter
@@ -13,7 +12,7 @@ from rattler.repo_data import RepoDataRecord
 from rattler.sigstore import TrustedRoot
 
 from pixi_browse.archives import open_package_archive
-from pixi_browse.attestations import verify_record
+from pixi_browse.attestations import pending_attestation, verify_record
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
@@ -76,6 +75,15 @@ class VersionDataLoader:
             log_detail=log_detail,
             describe=_describe_preview_key,
         )
+        self._attestation_loads: InFlightLoads[
+            VersionPreviewKey, VersionArtifactData
+        ] = InFlightLoads(
+            max_parallel=max_parallel_loads,
+            name="attestation",
+            log=log,
+            log_detail=log_detail,
+            describe=_describe_preview_key,
+        )
 
     def is_loading(self, preview_key: VersionPreviewKey) -> bool:
         return preview_key in self._artifact_data_loads
@@ -103,6 +111,7 @@ class VersionDataLoader:
         # A load still running belongs to the selection being replaced and
         # must not fill the cleared caches with its results.
         self._artifact_data_loads.cancel()
+        self._attestation_loads.cancel()
         self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
@@ -117,6 +126,7 @@ class VersionDataLoader:
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
         self._artifact_data_loads.cancel()
+        self._attestation_loads.cancel()
         self.archive_cache.clear()
         self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
@@ -324,14 +334,8 @@ class VersionDataLoader:
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
         started = perf_counter()
-        # Attestations live in a sidecar beside the archive, so verifying them
-        # needs nothing the archive fetch produces. Running both together keeps
-        # the first signed artifact of a session from paying for the Sigstore
-        # trusted root on top of the archive.
-        archive_data, attestation = await gather(
-            self._fetch_archive_data(record, preview_key=preview_key),
-            verify_record(record, client=self._client, trusted_root=self._trusted_root),
-        )
+        archive_data = await self._fetch_archive_data(record, preview_key=preview_key)
+        attestation = pending_attestation(record)
 
         artifact_data = build_version_artifact_data(
             package_name,
@@ -356,6 +360,46 @@ class VersionDataLoader:
             f"paths={len(archive_data.package_paths)} "
             f"info_files={len(archive_data.info_files)} "
             f"attestation={attestation.status}"
+        )
+        return artifact_data
+
+    async def load_version_attestation(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        """Verify ``record`` after its archive details are already available."""
+        cached = self.artifact_data_cache.get(preview_key)
+        if cached is None:
+            raise RuntimeError(
+                "Package information must be loaded before verification."
+            )
+        if cached.attestation.status != "verifying":
+            return cached
+        return await self._attestation_loads.run(
+            preview_key,
+            lambda: self._fetch_version_attestation(record, preview_key=preview_key),
+        )
+
+    async def _fetch_version_attestation(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        started = perf_counter()
+        attestation = await verify_record(
+            record, client=self._client, trusted_root=self._trusted_root
+        )
+        cached = self.artifact_data_cache.get(preview_key)
+        if cached is None:
+            raise RuntimeError("Package information was cleared during verification.")
+        artifact_data = replace(cached, attestation=attestation)
+        self.artifact_data_cache[preview_key] = artifact_data
+        self._log(
+            f"attestation: verified {record.subdir}/{record.file_name} in "
+            f"{perf_counter() - started:.3f}s status={attestation.status}"
         )
         return artifact_data
 

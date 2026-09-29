@@ -15,7 +15,7 @@ from dataclasses import fields, replace
 
 from rattler.networking import Client
 from rattler.platform import Subdir
-from rattler.repo_data import RepoDataRecord
+from rattler.repo_data import PackageRecord, RepoDataRecord
 from rattler.sigstore import (
     CertificateClaims,
     TrustedRoot,
@@ -40,23 +40,28 @@ from tests.helpers import (
     attestation_in_status,
 )
 
-SIGNED_VERSION = "2.0.0"
-SIGNED_FILE_NAME = "all-signed-2.0.0-h4616a5c_0.conda"
+FIXTURE_VERSION = "0.0.21"
+FIXTURE_FILE_NAME = "agent-skill-conda-forge-0.0.21-h4616a5c_0.conda"
+SIGNED_VERSION = "0.0.22"
+SIGNED_FILE_NAME = "agent-skill-conda-forge-0.0.22-h4616a5c_0.conda"
+SIGNED_PACKAGE_SHA256 = (
+    "42479754072901d52769a13c5bad0c2bb820dd387ca0eebbfd9d17edb3454723"
+)
 SIGNED_ATTESTATIONS_SHA256 = (
-    "43c5672db92af565e09e4fb2f4dc580a122d7ff9126c81ae235518ac981bda77"
+    "218698f9dccb8df5880f40d2b56138ca73875879b1acfc0d8052f907787c2800"
 )
 SIGNED_SIDECAR_URL = (
     f"{SIGNING_TESTS_CHANNEL}/noarch/{SIGNED_FILE_NAME}"
     f".sigs.{SIGNED_ATTESTATIONS_SHA256}"
 )
-SIGNED_REPOSITORY = "https://github.com/tdejager/signing-tests"
-SIGNED_WORKFLOW_PATH = "/.github/workflows/publish.yml"
+SIGNED_REPOSITORY = "https://github.com/pavelzw/skill-forge"
+SIGNED_WORKFLOW_PATH = "/.github/workflows/package.yml"
 SIGNED_WORKFLOW = f"{SIGNED_REPOSITORY}{SIGNED_WORKFLOW_PATH}"
 SIGNED_REF = "refs/heads/main"
 SIGNED_IDENTITY = f"{SIGNED_WORKFLOW}@{SIGNED_REF}"
-SIGNED_COMMIT = "58dfa6cf041bc9c1a3eae2cca669a224fd7cbf65"
-SIGNED_RUN = f"{SIGNED_REPOSITORY}/actions/runs/21989532199/attempts/1"
-SIGNED_LOG_INDEX = 947449296
+SIGNED_COMMIT = "82e4f15bc89b31c53ef82aa08def87f9b6ec4d6d"
+SIGNED_RUN = f"{SIGNED_REPOSITORY}/actions/runs/36204732641/attempts/1"
+SIGNED_LOG_INDEX = 2963571265
 # A certificate that was not issued to a CI workload claims none of these.
 _NO_CLAIMS = CertificateClaims(
     **{field.name: None for field in fields(CertificateClaims)}
@@ -77,15 +82,41 @@ def _record(
     return records[0]
 
 
+def _matching_signed_record(make_gateway: GatewayFactory) -> RepoDataRecord:
+    """A repodata record matching the committed 0.0.22 sidecar's subject."""
+    fixture_record = _record(
+        make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE
+    )
+    package_record = PackageRecord(
+        name=SIGNING_TESTS_PACKAGE,
+        version=SIGNED_VERSION,
+        build=fixture_record.build,
+        build_number=fixture_record.build_number,
+        subdir=fixture_record.subdir,
+        sha256=bytes.fromhex(SIGNED_PACKAGE_SHA256),
+        attestations_sha256=bytes.fromhex(SIGNED_ATTESTATIONS_SHA256),
+    )
+    package_url = f"{SIGNING_TESTS_CHANNEL}/noarch/{SIGNED_FILE_NAME}"
+    return RepoDataRecord(
+        package_record,
+        SIGNED_FILE_NAME,
+        package_url,
+        SIGNING_TESTS_CHANNEL,
+    )
+
+
 def test_signed_record_advertises_its_sidecar(make_gateway: GatewayFactory) -> None:
     """``index_fs`` copies the sidecar digest into the repodata, which is the
     only way a client learns that an artifact is signed at all."""
     record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
 
-    assert record.file_name == SIGNED_FILE_NAME
+    assert record.file_name == FIXTURE_FILE_NAME
     assert record.attestations_sha256 is not None
     assert record.attestations_sha256.hex() == SIGNED_ATTESTATIONS_SHA256
-    assert sidecar_url(record) == SIGNED_SIDECAR_URL
+    assert sidecar_url(record) == (
+        f"{SIGNING_TESTS_CHANNEL}/noarch/{FIXTURE_FILE_NAME}"
+        f".sigs.{SIGNED_ATTESTATIONS_SHA256}"
+    )
 
 
 def test_unsigned_record_costs_no_request(
@@ -112,7 +143,7 @@ def test_signed_record_verifies_against_the_real_bundle(
     attestation tab is built from: which workflow of which repository signed,
     which commit it built, and where the signature was logged.
     """
-    record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
+    record = _matching_signed_record(make_gateway)
 
     attestation = asyncio.run(
         verify_record(
@@ -127,7 +158,7 @@ def test_signed_record_verifies_against_the_real_bundle(
             index=0,
             identity=SIGNED_IDENTITY,
             issuer="https://token.actions.githubusercontent.com",
-            integrated_time="2026-02-13T14:00:05Z",
+            integrated_time="2026-09-26T00:24:56Z",
             target_channel=SIGNING_TESTS_CHANNEL,
             claims=CertificateClaims(
                 build_signer_uri=SIGNED_IDENTITY,
@@ -136,18 +167,18 @@ def test_signed_record_verifies_against_the_real_bundle(
                 source_repository_uri=SIGNED_REPOSITORY,
                 source_repository_digest=SIGNED_COMMIT,
                 source_repository_ref=SIGNED_REF,
-                source_repository_identifier="1156993586",
-                source_repository_owner_uri="https://github.com/tdejager",
-                source_repository_owner_identifier="417374",
+                source_repository_identifier="1151760276",
+                source_repository_owner_uri="https://github.com/pavelzw",
+                source_repository_owner_identifier="29506042",
                 build_config_uri=SIGNED_IDENTITY,
                 build_config_digest=SIGNED_COMMIT,
-                build_trigger="workflow_dispatch",
+                build_trigger="push",
                 run_invocation_uri=SIGNED_RUN,
                 source_repository_visibility_at_signing="public",
-                deployment_environment=None,
-                token_subject=None,
+                deployment_environment="upload",
+                token_subject="repo:pavelzw/skill-forge:environment:upload",
             ),
-            signed_at="2026-02-13T14:00:05Z",
+            signed_at="2026-09-26T00:24:56Z",
             log_index=SIGNED_LOG_INDEX,
             log_origin="rekor.sigstore.dev - 1193050959916656506",
             checks=VerifiedChecks(
@@ -161,46 +192,13 @@ def test_signed_record_verifies_against_the_real_bundle(
     )
     assert attestation.is_verified
     assert attestation.status == "verified"
-
-
-def test_loader_verifies_while_it_reads_the_archive(
-    make_gateway: GatewayFactory, rattler_client: Client
-) -> None:
-    """The verified attestation reaches the artifact data the detail view
-    renders, which is what puts it in the tab and in the prefetch cache.
-
-    The rows below are the page a user reads: a verdict that names what was
-    checked, the provenance the certificate claims, and the values an audit
-    needs, with the repository, commit, run, log entry and sidecar as links.
-    ``test_snapshots_attestations`` shows how they are laid out.
-    """
-    record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
-    loader = VersionDataLoader(
-        client=rattler_client, trusted_root=TrustedRoot.embedded()
-    )
-    artifact = asyncio.run(
-        loader.load_version_artifact_data(
-            SIGNING_TESTS_PACKAGE,
-            record,
-            preview_key=(
-                SIGNING_TESTS_PACKAGE,
-                SIGNED_VERSION,
-                record.build,
-                record.build_number,
-                record.subdir,
-                record.file_name,
-            ),
-        )
-    )
-
-    assert artifact.attestation.is_verified
-    assert build_version_details_attestation_rows(artifact.attestation) == (
+    assert build_version_details_attestation_rows(attestation) == (
         ("", "[bold green]✓ Verified[/] - certificate chain, SCT, log inclusion proof"),
         ("", ""),
         (
             "Repository",
-            f"[underline link='{SIGNED_REPOSITORY}']tdejager/signing-tests[/]"
-            " (public, id 1156993586)",
+            f"[underline link='{SIGNED_REPOSITORY}']pavelzw/skill-forge[/]"
+            " (public, id 1151760276)",
         ),
         (
             "Commit",
@@ -210,15 +208,17 @@ def test_loader_verifies_while_it_reads_the_archive(
         (
             "Workflow",
             f"[underline link='{SIGNED_REPOSITORY}/blob/{SIGNED_COMMIT}"
-            f"{SIGNED_WORKFLOW_PATH}'].github/workflows/publish.yml[/]"
-            " (trigger: workflow_dispatch)",
+            f"{SIGNED_WORKFLOW_PATH}'].github/workflows/package.yml[/]"
+            " (trigger: push)",
         ),
         ("Runner", "github-hosted"),
-        ("Build", f"[underline link='{SIGNED_RUN}']run 21989532199, attempt 1[/]"),
-        ("Signed at", "2026-02-13T14:00:05Z"),
+        ("Environment", "upload"),
+        ("Build", f"[underline link='{SIGNED_RUN}']run 36204732641, attempt 1[/]"),
+        ("Signed at", "2026-09-26T00:24:56Z"),
         ("", ""),
         ("Identity", SIGNED_IDENTITY),
         ("Issuer", "https://token.actions.githubusercontent.com"),
+        ("Token subject", "repo:pavelzw/skill-forge:environment:upload"),
         ("Channel", SIGNING_TESTS_CHANNEL),
         (
             "Log entry",
@@ -229,9 +229,61 @@ def test_loader_verifies_while_it_reads_the_archive(
         (
             "Sidecar",
             f"[underline link='{SIGNED_SIDECAR_URL}']"
-            f"{SIGNED_FILE_NAME}.sigs.43c5672db9…[/] (bundle 1)",
+            f"{SIGNED_FILE_NAME}.sigs.218698f9dc…[/] (bundle 1)",
         ),
     )
+
+
+def test_loader_returns_archive_details_before_it_verifies(
+    make_gateway: GatewayFactory, rattler_client: Client
+) -> None:
+    """The archive is available before external Sigstore networking finishes,
+    then the rejected sidecar replaces the pending state in the same cache.
+    """
+    record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
+    loader = VersionDataLoader(
+        client=rattler_client, trusted_root=TrustedRoot.embedded()
+    )
+    preview_key = (
+        SIGNING_TESTS_PACKAGE,
+        FIXTURE_VERSION,
+        record.build,
+        record.build_number,
+        record.subdir,
+        record.file_name,
+    )
+
+    async def load() -> tuple[AttestationData, AttestationData]:
+        artifact = await loader.load_version_artifact_data(
+            SIGNING_TESTS_PACKAGE, record, preview_key=preview_key
+        )
+        pending = artifact.attestation
+        verified = await loader.load_version_attestation(
+            record, preview_key=preview_key
+        )
+        assert loader.artifact_data_cache[preview_key] is verified
+        return pending, verified.attestation
+
+    pending, attestation = asyncio.run(load())
+
+    assert pending.status == "verifying"
+    fixture_sidecar_url = (
+        f"{SIGNING_TESTS_CHANNEL}/noarch/{FIXTURE_FILE_NAME}"
+        f".sigs.{SIGNED_ATTESTATIONS_SHA256}"
+    )
+    assert build_version_details_attestation_rows(pending) == (
+        ("", "Verifying… - package details are available while checks run"),
+        ("", ""),
+        (
+            "Sidecar",
+            f"[underline link='{fixture_sidecar_url}']"
+            f"{FIXTURE_FILE_NAME}.sigs.218698f9dc…[/]",
+        ),
+    )
+    assert not attestation.is_verified
+    assert attestation.status == "unverified"
+    assert len(attestation.warnings) == 1
+    assert "artifact hash does not match any subject" in attestation.warnings[0]
 
 
 def test_a_bare_signature_does_not_claim_more_than_it_established() -> None:

@@ -1,9 +1,8 @@
 """Snapshot tests of the attestation tab of the version detail view.
 
-The signed artifact comes from the ``signing-tests`` fixture channel and its
-signature is checked for real, so the screen shown here is the one a user gets
-for a genuinely attested package; see ``test_snapshots.py`` for how snapshots are
-reviewed.
+The ``skill-forge`` fixture deliberately pairs adjacent package and sidecar
+versions, so the screen shows the real verification rejection a mismatched
+subject produces; see ``test_snapshots.py`` for how snapshots are reviewed.
 """
 
 from __future__ import annotations
@@ -29,11 +28,11 @@ async def open_attestation_tab(pilot: Pilot[None], package_index: int) -> None:
     await wait_for_idle(pilot)
 
 
-def test_attestation_tab_shows_the_verified_signature(
+def test_attestation_tab_shows_the_rejected_sidecar(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """The signing identity names the workflow and ref the artifact was built
-    from, and the tab label carries the ``✓`` that says so without being opened.
+    """The committed sidecar belongs to the next package version, so its subject
+    mismatch is visible and the tab label carries ``✗`` without being opened.
     """
 
     async def run_before(pilot: Pilot[None]) -> None:

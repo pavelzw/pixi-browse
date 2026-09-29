@@ -190,7 +190,8 @@ costs no request.
 
 Verifying loads the Sigstore trusted root over the network the first time, so
 the tab is the one part of pixi-browse that is not satisfied by the channel
-alone.
+alone. Package metadata and files render as soon as the archive is available;
+the attestation tab updates when those independent checks finish.
 
 ## Development
 
@@ -210,7 +211,7 @@ pixi run test
 ```
 
 The tests run the app against small offline conda channels (`conda-forge`,
-`bioconda` and `signing-tests`) made of real artifacts listed in
+`bioconda` and `skill-forge`) made of real artifacts listed in
 `tests/fixtures/channel_artifacts.toml`.
 They are downloaded into the git-ignored `tests/fixtures/channels/` directory on
 first use (or ahead of time with `pixi run fetch-test-channel`) and verified by

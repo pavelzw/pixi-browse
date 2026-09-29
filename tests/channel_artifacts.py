@@ -1,10 +1,10 @@
 """Download and verify the real artifacts of the offline test channels.
 
-The artifacts listed in ``tests/fixtures/channel_artifacts.toml`` are not
-committed. They are fetched into the git-ignored ``tests/fixtures/channels``
-directory (one subdirectory per channel) on first use and verified by SHA256,
-so the test-suite is deterministic and works offline once the files are
-present. Run ``pixi run fetch-test-channel`` to pre-download them.
+Most artifacts listed in ``tests/fixtures/channel_artifacts.toml`` are fetched
+into the git-ignored ``tests/fixtures/channels`` directory (one subdirectory per
+channel) on first use and verified by SHA256. Artifacts not available from a
+stable upstream mirror can instead name files committed below ``tests/fixtures``.
+Run ``pixi run fetch-test-channel`` to pre-download the remote ones.
 
 An artifact can pin the digest of a Sigstore attestation sidecar as well, which
 is fetched and verified beside the archive; :mod:`tests.conftest` then publishes
@@ -45,6 +45,10 @@ class ChannelArtifact:
     #: this artifact, where it publishes one at all. CEP 50 makes it the name of
     #: the immutable sidecar as well, so it is all that is needed to fetch it.
     attestations_sha256: str | None = None
+    #: A file committed below ``tests/fixtures`` instead of downloaded.
+    fixture_path: str | None = None
+    #: A committed attestation sidecar, independently of the archive source.
+    attestations_fixture_path: str | None = None
 
     def url(self, channel_url: str) -> str:
         return f"{channel_url}/{self.subdir}/{self.file_name}"
@@ -57,10 +61,14 @@ class ChannelArtifact:
 
     @property
     def local_path(self) -> Path:
+        if self.fixture_path is not None:
+            return FIXTURES_DIR / self.fixture_path
         return CHANNELS_DIR / self.channel / self.subdir / self.file_name
 
     @property
     def attestations_local_path(self) -> Path | None:
+        if self.attestations_fixture_path is not None:
+            return FIXTURES_DIR / self.attestations_fixture_path
         attestations_file_name = self.attestations_file_name
         if attestations_file_name is None:
             return None
@@ -111,11 +119,14 @@ class ChannelManifest:
         files: list[RemoteFile] = []
         for artifact in self.artifacts:
             url = self.url(artifact)
-            files.append(
-                RemoteFile(url=url, path=artifact.local_path, sha256=artifact.sha256)
-            )
+            if artifact.fixture_path is None:
+                files.append(
+                    RemoteFile(url=url, path=artifact.local_path, sha256=artifact.sha256)
+                )
             sidecar_path = artifact.attestations_local_path
             if sidecar_path is None or artifact.attestations_sha256 is None:
+                continue
+            if artifact.attestations_fixture_path is not None:
                 continue
             files.append(
                 RemoteFile(
@@ -158,6 +169,10 @@ def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
             file_name=str(entry["file_name"]),
             sha256=str(entry["sha256"]),
             attestations_sha256=_optional_str(entry.get("attestations_sha256")),
+            fixture_path=_optional_str(entry.get("fixture_path")),
+            attestations_fixture_path=_optional_str(
+                entry.get("attestations_fixture_path")
+            ),
         )
         for entry in manifest["artifacts"]
     )
@@ -230,6 +245,24 @@ def _download_missing_exclusively(manifest: ChannelManifest) -> int:
 def ensure_channel_artifacts() -> ChannelManifest:
     """Download every manifest artifact that is missing or has a wrong hash."""
     manifest = load_manifest()
+    for artifact in manifest.artifacts:
+        expected_files = [(artifact.local_path, artifact.sha256)]
+        if (
+            artifact.attestations_local_path is not None
+            and artifact.attestations_sha256 is not None
+        ):
+            expected_files.append(
+                (artifact.attestations_local_path, artifact.attestations_sha256)
+            )
+        for path, digest in expected_files:
+            if (
+                (artifact.fixture_path is not None and path == artifact.local_path)
+                or (
+                    artifact.attestations_fixture_path is not None
+                    and path == artifact.attestations_local_path
+                )
+            ) and (not path.is_file() or _sha256_of(path) != digest):
+                raise RuntimeError(f"committed fixture has the wrong SHA256: {path}")
     _download_missing_exclusively(manifest)
     return manifest
 

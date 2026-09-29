@@ -17,7 +17,7 @@ PackageFilePathType = Literal["hardlink", "softlink", "directory"]
 # Mirrors the return type of py-rattler's `FileMode.mode`, so it can be assigned
 # straight from there.
 PrefixReplacementMode = Literal["binary", "text", "unknown"]
-AttestationStatus = Literal["unsigned", "verified", "unverified"]
+AttestationStatus = Literal["unsigned", "verifying", "verified", "unverified"]
 MetadataRow = tuple[str, str]
 
 
@@ -109,7 +109,8 @@ class AttestationData:
     rejected bundle plus whatever went wrong before the bundles were reached.
     They are worth showing even for a verified artifact: a sidecar can hold
     several bundles, and the rejection of one is not hidden by the acceptance of
-    another.
+    another. ``verification_pending`` keeps the advertised sidecar distinct
+    from a completed verification that accepted no bundle.
     """
 
     sidecar_url: str | None = None
@@ -117,14 +118,19 @@ class AttestationData:
     #: The bundle that verified, or ``None`` if none did.
     attestation: VerifiedAttestation | None = None
     warnings: tuple[str, ...] = ()
+    verification_pending: bool = False
 
     @property
     def status(self) -> AttestationStatus:
-        """``unsigned`` when the record advertises no attestations -- which is
-        decided from the record alone and costs no request -- otherwise whether
-        one of the advertised bundles was accepted."""
+        """The advertised sidecar's verification state.
+
+        ``unsigned`` is decided from the record alone and costs no request;
+        ``verifying`` lets the archive details render while network checks run.
+        """
         if self.sidecar_url is None:
             return "unsigned"
+        if self.verification_pending:
+            return "verifying"
         return "verified" if self.attestation is not None else "unverified"
 
     @property

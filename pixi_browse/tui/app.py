@@ -1102,6 +1102,11 @@ class CondaMetadataTui(App[None]):
     def _show_version_details(self, details: VersionArtifactData) -> None:
         self.query_one("#main-panel", MainPanel).show_version_details(details)
 
+    def _update_version_attestation(self, details: VersionArtifactData) -> None:
+        self.query_one("#main-panel", MainPanel).update_version_attestation(
+            details.attestation
+        )
+
     def _set_active_main_section(self, index: int) -> None:
         self.query_one("#main-panel", MainPanel).set_active_section(index)
 
@@ -1625,6 +1630,17 @@ class CondaMetadataTui(App[None]):
         self._reset_main_panel_scroll()
         self._previewed_version_key = preview_key
 
+        if details.attestation.status != "verifying":
+            return
+        details = await self._version_loader.load_version_attestation(
+            record, preview_key=preview_key
+        )
+        if self._mode != "versions":
+            return
+        if self._pending_preview_version_key != preview_key:
+            return
+        self._update_version_attestation(details)
+
     def _request_selected_version_preview(
         self, package_name: str, entry: VersionEntry
     ) -> None:
@@ -1638,11 +1654,19 @@ class CondaMetadataTui(App[None]):
         label = self._describe_version_entry(entry)
         cached = self._version_artifact_data_cache.get(preview_key)
         if cached is not None:
-            self.log.info(f"preview: {label} shown from cache, nothing to fetch")
+            self.log.info(f"preview: {label} archive details shown from cache")
             self._show_version_details(cached)
             self._reset_main_panel_scroll()
             self._previewed_version_key = preview_key
-            self._schedule_sidebar_preview()
+            if cached.attestation.status == "verifying":
+                worker = self._schedule_sidebar_preview(
+                    lambda: self._load_and_render_selected_version_preview(
+                        package_name, entry, preview_key
+                    )
+                )
+                self._version_preview_request = (preview_key, worker)
+            else:
+                self._schedule_sidebar_preview()
             return
 
         if self._preview_request_in_flight(self._version_preview_request, preview_key):
