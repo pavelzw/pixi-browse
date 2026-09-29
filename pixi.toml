@@ -41,8 +41,11 @@ python-magic = ">=0.4.27,<0.5"
 textual-diff-view = ">=0.1.5,<0.2"
 python-magic = ">=0.4.27,<0.5"
 [dependencies]
-pixi-browse = { path = ".", extras = ["diff", "filetype"] }
+pixi-browse = { path = "." }
 textual-dev = "*"
+
+[feature.extra.dependencies]
+pixi-browse = { path = ".", extras = ["diff", "filetype"] }
 
 [feature.test.dependencies]
 pytest = "*"
@@ -95,6 +98,7 @@ python = "3.13.*"
 python = "3.14.*"
 
 [environments]
-default = ["test", "build", "lint"]
-py313 = ["py313", "test"]
-py314 = ["py314", "test"]
+default = { features = ["test", "extra", "build", "lint"], solve-group = "default" }
+py313 = ["py313", "test", "extra"]
+py314 = ["py314", "test", "extra"]
+minimal = { features = ["test"], solve-group = "default" }
