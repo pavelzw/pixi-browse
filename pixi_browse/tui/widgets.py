@@ -3474,6 +3474,14 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
 
     #file-action-metadata {
         color: $text;
+    }
+
+    #file-action-type {
+        color: $text;
+    }
+
+    #file-action-details {
+        height: auto;
         margin-bottom: 1;
     }
 
@@ -3506,7 +3514,11 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
         *,
         actions: tuple[FileActionOption, ...] | None = None,
         metadata_lines: tuple[str, ...] = (),
+        file_type: str | None = None,
     ) -> None:
+        """``file_type`` is the initial text of the ``Type:`` line (e.g.
+        ``detecting…``) that :meth:`show_file_type` later replaces; without
+        it the dialog has no such line."""
         super().__init__()
         self._file_path = file_path
         self._actions = actions or (
@@ -3514,17 +3526,44 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
             FileActionOption(action="download", label="Download as file"),
         )
         self._metadata_lines = metadata_lines
+        self._file_type = file_type
+        self._file_type_widget: Static | None = None
+
+    @staticmethod
+    def _file_type_line(file_type: str) -> str:
+        return f"Type: {file_type}"
+
+    def show_file_type(self, file_type: str) -> None:
+        """Replace the text of the ``Type:`` line.
+
+        The widget is updated through the reference ``compose`` keeps, not
+        through a query: a file can be described while the dialog is still
+        mounting, and between ``compose`` and the end of mounting the line is
+        neither found by ``query_one`` nor rendered from ``_file_type`` again.
+        """
+        self._file_type = file_type
+        if self._file_type_widget is not None:
+            self._file_type_widget.update(self._file_type_line(file_type))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
             yield Static(self._file_path, id="file-action-path", markup=False)
-            if self._metadata_lines:
-                yield Static(
-                    "\n".join(self._metadata_lines),
-                    id="file-action-metadata",
-                    markup=False,
-                )
+            if self._metadata_lines or self._file_type is not None:
+                with Vertical(id="file-action-details"):
+                    if self._metadata_lines:
+                        yield Static(
+                            "\n".join(self._metadata_lines),
+                            id="file-action-metadata",
+                            markup=False,
+                        )
+                    if self._file_type is not None:
+                        self._file_type_widget = Static(
+                            self._file_type_line(self._file_type),
+                            id="file-action-type",
+                            markup=False,
+                        )
+                        yield self._file_type_widget
             yield OptionList(
                 *(action.label for action in self._actions),
                 id="file-action-list",

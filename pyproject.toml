@@ -25,6 +25,8 @@ dependencies = [
 [project.optional-dependencies]
 # Side-by-side file diffs in the compare view (AGPL-3.0 licensed).
 diff = ["textual-diff-view >=0.1.5,<0.2"]
+# Names the type of a file in the file action dialog (needs libmagic).
+filetype = ["python-magic >=0.4.27,<0.5"]
 
 [project.urls]
 repository = "https://github.com/pavelzw/pixi-browse"
