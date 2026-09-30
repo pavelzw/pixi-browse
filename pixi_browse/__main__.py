@@ -9,9 +9,11 @@ from rattler.match_spec import MatchSpec
 from rattler.platform import Subdir
 
 from pixi_browse import __version__
+from pixi_browse.file_types import MAGIC_AVAILABLE
 from pixi_browse.models import VersionEntry, VersionRow
 from pixi_browse.repodata import DEFAULT_CHANNEL, normalize_channel_names
 from pixi_browse.tui import CondaMetadataTui
+from pixi_browse.tui.widgets import DIFF_VIEW_AVAILABLE
 
 __all__ = [
     "CondaMetadataTui",
@@ -30,11 +32,18 @@ def _version_callback(value: bool) -> None:
     raise typer.Exit()
 
 
-_EXTRAS_EPILOG = """\
+def _extra_status(available: bool) -> str:
+    """``enabled`` or ``not enabled``, padded so the descriptions line up."""
+    if available:
+        return "[green]enabled[/green]    "
+    return "[dim]not enabled[/dim]"
+
+
+_EXTRAS_EPILOG = f"""\
 [bold]Optional extras[/bold]
 
-  [bold]diff[/bold]      Side-by-side file diffs when comparing artifacts (AGPL-3.0).
-  [bold]filetype[/bold]  Name the type of a file, like `file` does (needs libmagic).
+  [bold]diff[/bold]      {_extra_status(DIFF_VIEW_AVAILABLE)}  Side-by-side diffs in the compare view (AGPL-3.0).
+  [bold]filetype[/bold]  {_extra_status(MAGIC_AVAILABLE)}  Name file types like `file` does (needs libmagic).
 
 Install them with pixi or uv, e.g.:
 
