@@ -30,9 +30,23 @@ def _version_callback(value: bool) -> None:
     raise typer.Exit()
 
 
+_EXTRAS_EPILOG = """\
+[bold]Optional extras[/bold]
+
+  [bold]diff[/bold]      Side-by-side file diffs when comparing artifacts (AGPL-3.0).
+  [bold]filetype[/bold]  Name the type of a file, like `file` does (needs libmagic).
+
+Install them with pixi or uv, e.g.:
+
+  pixi global install 'pixi-browse\\[extras=diff,filetype]'
+  uv tool install 'pixi-browse\\[diff,filetype]'
+"""
+
 cli = typer.Typer(
     add_completion=False,
     help="Browse conda package metadata in a Textual TUI.",
+    epilog=_EXTRAS_EPILOG,
+    rich_markup_mode="rich",
 )
 
 
