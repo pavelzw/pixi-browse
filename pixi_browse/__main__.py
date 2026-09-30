@@ -38,7 +38,7 @@ _EXTRAS_EPILOG = """\
 
 Install them with pixi or uv, e.g.:
 
-  pixi global install 'pixi-browse\\[extras=diff,filetype]'
+  pixi global install 'pixi-browse\\[extras=\\[diff,filetype]]'
   uv tool install 'pixi-browse\\[diff,filetype]'
 """
 

@@ -40,7 +40,7 @@ def test_help_lists_extras_and_how_to_install_them() -> None:
     assert "Optional extras" in output
     assert "diff" in output
     assert "filetype" in output
-    assert "pixi global install 'pixi-browse[extras=diff,filetype]'" in output
+    assert "pixi global install 'pixi-browse[extras=[diff,filetype]]'" in output
     assert "uv tool install 'pixi-browse[diff,filetype]'" in output
 
 
