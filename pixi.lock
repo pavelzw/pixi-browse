@@ -169,7 +169,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ttyd-1.7.7-h1639841_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ty-0.0.81-h39d0f39_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/typos-1.50.2-hf19af3b_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.0-hfc2019e_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.1-hfc2019e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.26.0-hc1c935e_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x264-1!164.3095-h7cc23a3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x265-3.5-h73f68a7_4.conda
@@ -495,7 +495,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ttyd-1.7.7-h89ed22c_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ty-0.0.81-h9d00c72_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/typos-1.50.2-hc2d82ec_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.0-hf76c51c_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.1-hf76c51c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x264-1!164.3095-hb001647_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x265-3.5-h55d2f36_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h74c22ad_3.conda
@@ -688,7 +688,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.0-h11686cb_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.1-h11686cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x264-1!164.3095-hfd05255_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x265-3.5-h3ee6617_4.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
@@ -833,7 +833,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h1df4ec4_4.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ttyd-1.7.7-h1639841_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ty-0.0.81-h39d0f39_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.0-hfc2019e_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.1-hfc2019e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.26.0-hc1c935e_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x264-1!164.3095-h7cc23a3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x265-3.5-h73f68a7_4.conda
@@ -1071,7 +1071,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-hbeba79b_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ttyd-1.7.7-h89ed22c_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ty-0.0.81-h9d00c72_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.0-hf76c51c_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.1-hf76c51c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x264-1!164.3095-hb001647_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x265-3.5-h55d2f36_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h74c22ad_3.conda
@@ -1215,7 +1215,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.0-h11686cb_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.1-h11686cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x264-1!164.3095-hfd05255_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x265-3.5-h3ee6617_4.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
@@ -1364,7 +1364,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h1df4ec4_4.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ttyd-1.7.7-h1639841_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ty-0.0.81-h39d0f39_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.0-hfc2019e_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.1-hfc2019e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.26.0-hc1c935e_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x264-1!164.3095-h7cc23a3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x265-3.5-h73f68a7_4.conda
@@ -1598,7 +1598,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-hbeba79b_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ttyd-1.7.7-h89ed22c_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ty-0.0.81-h9d00c72_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.0-hf76c51c_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.1-hf76c51c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x264-1!164.3095-hb001647_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x265-3.5-h55d2f36_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h74c22ad_3.conda
@@ -1743,7 +1743,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.0-h11686cb_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.1-h11686cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x264-1!164.3095-hfd05255_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x265-3.5-h3ee6617_4.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
@@ -1889,7 +1889,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/tk-8.6.13-noxft_h1df4ec4_4.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ttyd-1.7.7-h1639841_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ty-0.0.81-h39d0f39_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.0-hfc2019e_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.1-hfc2019e_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.26.0-hc1c935e_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x264-1!164.3095-h7cc23a3_3.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/x265-3.5-h73f68a7_4.conda
@@ -2132,7 +2132,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/tk-8.6.13-hbeba79b_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ttyd-1.7.7-h89ed22c_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/ty-0.0.81-h9d00c72_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.0-hf76c51c_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.1-hf76c51c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x264-1!164.3095-hb001647_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x265-3.5-h55d2f36_4.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/yaml-0.2.5-h74c22ad_3.conda
@@ -2279,7 +2279,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc-14.5-ha367084_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vc14_runtime-14.51.36247-habf1de7_41.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/vcomp14-14.51.36247-habf1de7_41.conda
-      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.0-h11686cb_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.1-h11686cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x264-1!164.3095-hfd05255_3.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/x265-3.5-h3ee6617_4.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/yaml-0.2.5-h6a83c73_3.conda
@@ -4805,17 +4805,17 @@ packages:
   run_exports: {}
   size: 17839971
   timestamp: 1789929235507
-- conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.0-hfc2019e_1.conda
-  sha256: ae2a5a4d51841f2d804b9348185cedf527d020237f39d118ad9f3126e415e738
-  md5: f07205e36c85ae7225d9b8d8225f3769
+- conda: https://conda.anaconda.org/conda-forge/linux-64/vhs-0.12.1-hfc2019e_0.conda
+  sha256: 93924d24cce2d232d63194a14cb2eb7d8f165421c0244011c8baf546ae43e14c
+  md5: cd93816ee6c5a9f593a9222b510ca450
   depends:
   - ffmpeg
   - ttyd
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 9006769
-  timestamp: 1789157662133
+  size: 9006453
+  timestamp: 1790259133220
 - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.26.0-hc1c935e_2.conda
   sha256: df65b987979e6d7f88e756494da5a230d4f2d08d17437d04eecd35559c3a04e4
   md5: 88a47e22b53e50865b1cabe2eb648352
@@ -8236,17 +8236,17 @@ packages:
   run_exports: {}
   size: 14838844
   timestamp: 1789929256482
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.0-hf76c51c_1.conda
-  sha256: 4c59b6026ba12ab93f9201a97db6e5e87776fdc5c91c931aaee75686720fd541
-  md5: 4b6827b29bb21734b8eda3008d72fb22
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/vhs-0.12.1-hf76c51c_0.conda
+  sha256: 617f9ac9169adc92ed865537ffa70f9f05d0ec55d05bb152a160bfb26161142b
+  md5: a0d722fed38720c2c2353a01ad0498f2
   depends:
   - ffmpeg
   - ttyd
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 8564016
-  timestamp: 1789157655439
+  size: 8565941
+  timestamp: 1790259155378
 - conda: https://conda.anaconda.org/conda-forge/osx-arm64/x264-1!164.3095-hb001647_3.conda
   sha256: 8a2c9866d7b37e07ab5ee8cdd622c694f232ef566273b67b0e9ea56f47a5d537
   md5: 332db3e81d6afec19726297d6ba3a0fe
@@ -9973,17 +9973,17 @@ packages:
     - vcomp14 >=14.51.36247
   size: 155910
   timestamp: 1785359349999
-- conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.0-h11686cb_1.conda
-  sha256: 5328e313575149227dbd07c16b1dfb1430b76b12a1de82c46d650a45debab27c
-  md5: b19df32c5df3714237dd9c785de25ad9
+- conda: https://conda.anaconda.org/conda-forge/win-64/vhs-0.12.1-h11686cb_0.conda
+  sha256: 18e70b91a8c58b7126b8f5332d6aa51b28bd94f7ef830a21564be2e48dfb78ac
+  md5: 5cbb45d06eb9503651ba12c821e0f8a4
   depends:
   - ffmpeg
   - ttyd
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 7959085
-  timestamp: 1789157654695
+  size: 7957544
+  timestamp: 1790259130843
 - conda: https://conda.anaconda.org/conda-forge/win-64/x264-1!164.3095-hfd05255_3.conda
   sha256: 78d3f5de77fc44ec761aa960b12c002340f9e3646266a200e50b41c435e1ba4a
   md5: 4871b189ce6e4d5ea1ef26dc6ab6a0ad
