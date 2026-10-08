@@ -7,11 +7,30 @@
 # every channel directory with py-rattler and serves them over a local HTTP
 # server under the channel names below.
 #
+# An artifact can also pin the Sigstore attestation sidecar that its channel
+# publishes for it, through `attestations_sha256`. CEP 50 names that sidecar
+# `<file_name>.sigs.<sha256>`, so the digest is all it takes to find it; it is
+# downloaded and hash-verified like the archive, and the session fixture
+# publishes it under both names CEP 50 gives it so that `index_fs` advertises
+# it in the repodata.
+#
+# A channel is normally just its URL. An artifact unavailable from a stable
+# upstream source can use `fixture_path` and `attestations_fixture_path` to name
+# files committed below this directory.
+#
 # Add an entry here and run `pixi run fetch-test-channel` to extend a channel.
 
 [channels]
 conda-forge = "https://conda.anaconda.org/conda-forge"
 bioconda = "https://conda.anaconda.org/bioconda"
+
+# Signed packages, for the attestation tab. The channel is the one the
+# attestations name in their `targetChannel`, which is what CEP 27 binds a
+# signature to and what the mirrored records keep saying they came from -- the
+# fixture therefore exercises that binding instead of warning about it. The
+# CEP 50 sidecars are so far only served by the preview deployment, so that is
+# where the bytes are fetched from.
+skill-forge = "https://prefix.dev/skill-forge"
 
 [[artifacts]]
 channel = "conda-forge"
@@ -114,3 +133,16 @@ channel = "bioconda"
 subdir = "noarch"
 file_name = "snakemake-wrapper-utils-0.9.0-pyhdfd78af_0.conda"
 sha256 = "9b52145e77f66a93f0cf71083e322bb53558874738605c839e71db0f54ab2546"
+
+# These are committed until stable upstream mirror files become available. The
+# sidecar belongs to 0.0.22 while the archive is 0.0.21, deliberately exercising
+# the rejected-subject path in the app. A direct verification test constructs
+# the matching 0.0.22 repodata record to exercise successful verification too.
+[[artifacts]]
+channel = "skill-forge"
+subdir = "noarch"
+file_name = "agent-skill-conda-forge-0.0.21-h4616a5c_0.conda"
+sha256 = "0024f57c1e6aa280b52c1475a792be2e56a89de71792b3ccbf2962fec92becc4"
+fixture_path = "local_channel_artifacts/agent-skill-conda-forge-0.0.21-h4616a5c_0.conda"
+attestations_sha256 = "218698f9dccb8df5880f40d2b56138ca73875879b1acfc0d8052f907787c2800"
+attestations_fixture_path = "local_channel_artifacts/agent-skill-conda-forge-0.0.22-h4616a5c_0.conda.sigs.218698f9dccb8df5880f40d2b56138ca73875879b1acfc0d8052f907787c2800"

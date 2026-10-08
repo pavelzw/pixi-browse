@@ -20,8 +20,9 @@ Explore packages, versions, dependencies, and more from any conda channel — ri
 - **View detailed metadata** including dependencies, license, checksums, build info, and timestamps
 - **Inspect package contents** — file listings and `about.json` extracted directly from artifacts
 - **Spot repodata patches** — diff an artifact's original `index.json` against the patched repodata served by the channel
+- **Verify Sigstore attestations** — see who built a signed artifact, from which workflow and ref, and whether the signature binds to this exact file and channel
 - **Compare artifacts** — metadata, dependencies, and file lists of two builds side by side, with optional file diffs
-- **Clickable links** to source repositories, maintainer GitHub profiles, and provenance commits
+- **Terminal hyperlinks** to source repositories, maintainer GitHub profiles, and provenance commits
 - **Download artifacts** directly to your working directory
 - **Vim-style keybindings** for fast keyboard-driven navigation
 
@@ -61,6 +62,29 @@ uvx 'pixi-browse[diff]'
 
 Without it, the `Diff left / right` action in the compare view asks for this
 package.
+
+### Optional: file types
+
+The file action dialog always says whether a file is text or binary. With
+[python-magic](https://github.com/ahupp/python-magic) installed it also names
+the type the way `file` does, e.g. `Python script` or `ELF 64-bit LSB shared
+object, x86-64`. python-magic needs the native libmagic library, so it is not
+installed by default:
+
+```bash
+pixi global install 'pixi-browse[extras=filetype]'
+pixi exec -s 'pixi-browse[extras=filetype]' pixi-browse
+
+# or from PyPI
+uv tool install 'pixi-browse[filetype]'
+uvx 'pixi-browse[filetype]'
+```
+
+Pixi installs libmagic along with it. From PyPI the library has to be installed
+separately: `brew install libmagic`, `apt install libmagic1`, or, on Windows, a
+libmagic DLL and its magic database.
+
+Without either, the dialog only says `text` or `binary`.
 
 ## Usage
 
@@ -165,9 +189,32 @@ MatchSpec and who-needs queries run against all of them.
 | -------------------- | ---------------------------------------------------- |
 | Text field           | Type a channel name or URL, `Enter` adds it          |
 | `✕` button           | Remove that channel (the last one cannot be removed) |
-| `Apply` button       | Load the listed channels                             |
+| `Apply` button       | Load the listed channels and the one typed, if any   |
 | `Up` / `Down`, `Tab` | Move between the `✕` buttons, the field and `Apply`  |
 | `Esc`                | Cancel                                               |
+
+## Attestations
+
+Channels can publish [Sigstore](https://www.sigstore.dev) attestations for the
+packages they serve, in a sidecar next to the archive whose digest the repodata
+advertises. The `Attestation` tab of the metadata section reports what verifying
+one says: the signing identity (for GitHub Actions, the workflow file and the ref
+it ran on), the certificate issuer, when the signature was logged, and the
+channel the attestation was issued for. The tab label carries `✓` when a
+signature verified and `✗` when none did, so signedness can be read without
+opening the tab.
+
+pixi-browse only reports; it never refuses to show a package. No publisher is
+required, and an attestation issued for a different channel than the one the
+artifact was fetched from — a mirror, say — is shown as a warning rather than
+treated as a rejection. Whether that is acceptable is yours to decide. An
+artifact whose channel advertises no attestations is reported as unsigned, which
+costs no request.
+
+Verifying loads the Sigstore trusted root over the network the first time, so
+the tab is the one part of pixi-browse that is not satisfied by the channel
+alone. Package metadata and files render as soon as the archive is available;
+the attestation tab updates when those independent checks finish.
 
 ## Development
 
@@ -186,12 +233,17 @@ pixi run pre-commit-install
 pixi run test
 ```
 
-The tests run the app against small offline conda channels (`conda-forge` and
-`bioconda`) made of real artifacts listed in `tests/fixtures/channel_artifacts.toml`.
+The tests run the app against small offline conda channels (`conda-forge`,
+`bioconda` and `skill-forge`) made of real artifacts listed in
+`tests/fixtures/channel_artifacts.toml`.
 They are downloaded into the git-ignored `tests/fixtures/channels/` directory on
 first use (or ahead of time with `pixi run fetch-test-channel`) and verified by
 SHA256, so later runs work offline. TUI screens are checked with
 [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot).
+
+Attestations are verified against the trusted root embedded in rattler rather
+than the one its TUF repository serves, so the whole suite runs offline — no test
+reaches `tuf-repo-cdn.sigstore.dev`.
 
 The app draws in ANSI colors, so the terminal palette alone decides how it looks.
 Every screen is therefore snapshotted twice from a single app run, with the two

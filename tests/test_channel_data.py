@@ -14,17 +14,20 @@ from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from syrupy.assertion import SnapshotAssertion
 
 from pixi_browse.models import VersionArtifactData
 from pixi_browse.rendering import (
-    format_version_details_metadata_lines,
+    build_version_details_metadata_rows,
     format_version_details_run_exports,
+    render_channel_notice_heading,
+    render_channel_notice_message,
     render_package_preview,
 )
 from pixi_browse.repodata import (
     discover_available_platforms,
+    fetch_channel_notices,
     fetch_package_names,
     normalize_channel_names,
     query_matchspec_records,
@@ -52,9 +55,9 @@ def test_discover_available_platforms_finds_indexed_subdirs(
     )
 
     assert platforms == [
-        Platform("linux-64"),
-        Platform("osx-arm64"),
-        Platform("noarch"),
+        Subdir("linux-64"),
+        Subdir("osx-arm64"),
+        Subdir("noarch"),
     ]
 
 
@@ -67,15 +70,15 @@ def test_discover_available_platforms_merges_the_channels(
 
     assert asyncio.run(
         discover_available_platforms(gateway=gateway, channel_names=[BIOCONDA_CHANNEL])
-    ) == [Platform("noarch")]
+    ) == [Subdir("noarch")]
     assert asyncio.run(
         discover_available_platforms(
             gateway=gateway, channel_names=[BIOCONDA_CHANNEL, MAIN_CHANNEL]
         )
     ) == [
-        Platform("linux-64"),
-        Platform("osx-arm64"),
-        Platform("noarch"),
+        Subdir("linux-64"),
+        Subdir("osx-arm64"),
+        Subdir("noarch"),
     ]
 
 
@@ -140,6 +143,53 @@ def test_fetch_package_names_merges_all_channels(
         "snakemake-wrapper-utils",
         "zlib",
     ]
+
+
+def test_fetch_channel_notices_without_notices_file(
+    make_gateway: GatewayFactory,
+) -> None:
+    """``conda-forge`` has no ``notices.json``; that is not an error."""
+    notices = asyncio.run(
+        fetch_channel_notices(gateway=make_gateway(), channel_names=[MAIN_CHANNEL])
+    )
+
+    assert notices == []
+
+
+def test_fetch_channel_notices_lists_live_notices(
+    make_gateway: GatewayFactory, snapshot: SnapshotAssertion
+) -> None:
+    """The notices of ``bioconda``'s ``notices.json`` come back most urgent
+    first, without the expired one, and render under the channel's name."""
+    result = asyncio.run(
+        fetch_channel_notices(
+            gateway=make_gateway(),
+            channel_names=[MAIN_CHANNEL, BIOCONDA_CHANNEL],
+        )
+    )
+
+    assert [(notice.level, notice.id) for notice in result] == [
+        ("critical", "pyfaidx-security"),
+        ("warning", "python-3.9-eol"),
+        ("info", "mirror"),
+    ]
+    assert [
+        {
+            "channel": notice.channel,
+            "created_at": notice.created_at,
+            "expires_at": notice.expires_at,
+            "interval": notice.interval,
+            "message": notice.message,
+        }
+        for notice in result
+    ] == snapshot
+    assert [
+        (
+            render_channel_notice_heading(notice).plain,
+            render_channel_notice_message(notice).plain,
+        )
+        for notice in result
+    ] == snapshot
 
 
 def test_query_whoneeds_records_spans_all_channels(
@@ -281,7 +331,7 @@ def test_load_version_artifact_data_reads_real_archives(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform(subdir)],
+            platforms=[Subdir(subdir)],
             package_name=package_name,
         )
         record = next(record for record in records if str(record.version) == version)
@@ -303,7 +353,10 @@ def test_load_version_artifact_data_reads_real_archives(
             for file in details.file_paths
         ]
         return (
-            list(format_version_details_metadata_lines(details)),
+            [
+                f"{label}: {value}"
+                for label, value in build_version_details_metadata_rows(details)
+            ],
             list(details.dependencies),
             [
                 f"{group}: {dependency}"
@@ -344,7 +397,7 @@ def test_load_version_artifact_data_reads_prefix_replacement_from_paths_json(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform("linux-64")],
+            platforms=[Subdir("linux-64")],
             package_name="zlib",
         )
         record = records[0]
@@ -376,7 +429,7 @@ def test_load_version_artifact_data_is_cached_per_preview_key(
         records = await query_package_records(
             gateway=make_gateway(),
             channel_names=["conda-forge"],
-            platforms=[Platform("noarch")],
+            platforms=[Subdir("noarch")],
             package_name="six",
         )
         record = records[0]

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from time import perf_counter
 
 import yaml
 from rattler.networking import Client
-from rattler.package import FileMode, PathType, RunExportsJson
+from rattler.package import PathType, RunExportsJson
 from rattler.package_streaming import PackageArchive
 from rattler.repo_data import RepoDataRecord
+from rattler.sigstore import TrustedRoot
 
+from pixi_browse.archives import open_package_archive
+from pixi_browse.attestations import pending_attestation, verify_record
 from pixi_browse.models import (
     PackageFile,
     PackageFilePathType,
-    PrefixReplacementMode,
+    RepodataPatchDiff,
     VersionArtifactData,
     VersionPreviewKey,
 )
@@ -20,18 +25,93 @@ from pixi_browse.rendering import (
     build_version_artifact_data,
 )
 
+from .prefetch import InFlightLoads
 from .state import AboutUrls
 
 
+def _discard_log(message: str) -> None:
+    return None
+
+
+@dataclass(frozen=True)
+class _ArchiveData:
+    """Everything the package archive of a record contributes to its details."""
+
+    package_paths: list[PackageFile]
+    info_files: list[PackageFile]
+    about_urls: AboutUrls
+    run_exports: RunExportsJson | None
+    repodata_patches: RepodataPatchDiff
+
+
+def _describe_preview_key(preview_key: VersionPreviewKey) -> str:
+    _, _, _, _, subdir, file_name = preview_key
+    return f"{subdir}/{file_name}"
+
+
 class VersionDataLoader:
-    def __init__(self, *, client: Client) -> None:
+    def __init__(
+        self,
+        *,
+        client: Client,
+        trusted_root: TrustedRoot | None = None,
+        log: Callable[[str], None] = _discard_log,
+        log_detail: Callable[[str], None] = _discard_log,
+        max_parallel_loads: int = 1,
+    ) -> None:
         self._client = client
+        self._trusted_root = trusted_root
+        self._log = log
         self.archive_cache: dict[VersionPreviewKey, PackageArchive] = {}
         self.about_urls_cache: dict[VersionPreviewKey, AboutUrls] = {}
         self.paths_cache: dict[VersionPreviewKey, list[PackageFile]] = {}
         self.artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData] = {}
+        self._artifact_data_loads: InFlightLoads[
+            VersionPreviewKey, VersionArtifactData
+        ] = InFlightLoads(
+            max_parallel=max_parallel_loads,
+            name="package",
+            log=log,
+            log_detail=log_detail,
+            describe=_describe_preview_key,
+        )
+        self._attestation_loads: InFlightLoads[
+            VersionPreviewKey, VersionArtifactData
+        ] = InFlightLoads(
+            max_parallel=max_parallel_loads,
+            name="attestation",
+            log=log,
+            log_detail=log_detail,
+            describe=_describe_preview_key,
+        )
+
+    def is_loading(self, preview_key: VersionPreviewKey) -> bool:
+        return preview_key in self._artifact_data_loads
+
+    def has_artifact_data(self, preview_key: VersionPreviewKey) -> bool:
+        return preview_key in self.artifact_data_cache
+
+    def prefetch(
+        self, package_name: str, records: Mapping[VersionPreviewKey, RepoDataRecord]
+    ) -> None:
+        self._artifact_data_loads.schedule(
+            (key for key in records if key not in self.artifact_data_cache),
+            lambda key: self._fetch_version_artifact_data(
+                package_name, records[key], preview_key=key
+            ),
+        )
+
+    def clear_prefetch(self) -> None:
+        self._artifact_data_loads.clear()
+
+    async def wait_for_prefetch(self) -> None:
+        await self._artifact_data_loads.wait()
 
     def clear_caches(self) -> None:
+        # A load still running belongs to the selection being replaced and
+        # must not fill the cleared caches with its results.
+        self._artifact_data_loads.cancel()
+        self._attestation_loads.cancel()
         self.archive_cache.clear()
         self.about_urls_cache.clear()
         self.paths_cache.clear()
@@ -45,6 +125,8 @@ class VersionDataLoader:
         paths_cache: dict[VersionPreviewKey, list[PackageFile]],
         artifact_data_cache: dict[VersionPreviewKey, VersionArtifactData],
     ) -> None:
+        self._artifact_data_loads.cancel()
+        self._attestation_loads.cancel()
         self.archive_cache.clear()
         self.archive_cache.update(archive_cache)
         self.about_urls_cache.clear()
@@ -63,17 +145,6 @@ class VersionDataLoader:
         if path_type.directory:
             return "directory"
         return None
-
-    @staticmethod
-    def _file_mode_name(file_mode: FileMode) -> PrefixReplacementMode:
-        # TODO: drop this in favour of `file_mode.mode` once
-        # https://github.com/conda/rattler/pull/2789 lands. It is a stand-in for
-        # that property, down to the return type.
-        if file_mode.binary:
-            return "binary"
-        if file_mode.text:
-            return "text"
-        return "unknown"
 
     @staticmethod
     def extract_rattler_build_version(rendered_recipe_text: str) -> str | None:
@@ -110,7 +181,7 @@ class VersionDataLoader:
                 no_link=path.no_link,
                 path_type=self._path_type_name(path.path_type),
                 prefix_replacement=(
-                    self._file_mode_name(path.prefix_placeholder.file_mode)
+                    path.prefix_placeholder.file_mode.mode
                     if path.prefix_placeholder is not None
                     else None
                 ),
@@ -141,7 +212,7 @@ class VersionDataLoader:
         if cached is not None:
             return cached
 
-        archive = await PackageArchive.from_url(self._client, url)
+        archive = await open_package_archive(self._client, url)
         self.archive_cache[preview_key] = archive
         return archive
 
@@ -243,10 +314,101 @@ class VersionDataLoader:
         *,
         preview_key: VersionPreviewKey,
     ) -> VersionArtifactData:
+        """Fetch what the archive of ``record`` says about it, once."""
         cached = self.artifact_data_cache.get(preview_key)
         if cached is not None:
             return cached
 
+        return await self._artifact_data_loads.run(
+            preview_key,
+            lambda: self._fetch_version_artifact_data(
+                package_name, record, preview_key=preview_key
+            ),
+        )
+
+    async def _fetch_version_artifact_data(
+        self,
+        package_name: str,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        started = perf_counter()
+        archive_data = await self._fetch_archive_data(record, preview_key=preview_key)
+        attestation = pending_attestation(record)
+
+        artifact_data = build_version_artifact_data(
+            package_name,
+            record,
+            package_paths=archive_data.package_paths,
+            info_files=archive_data.info_files,
+            repository_urls=archive_data.about_urls.repository,
+            documentation_urls=archive_data.about_urls.documentation,
+            homepage_urls=archive_data.about_urls.homepage,
+            recipe_maintainers=archive_data.about_urls.recipe_maintainers,
+            provenance_remote_url=archive_data.about_urls.provenance_remote_url,
+            provenance_sha=archive_data.about_urls.provenance_sha,
+            rattler_build_version=archive_data.about_urls.rattler_build_version,
+            run_exports=archive_data.run_exports,
+            repodata_patches=archive_data.repodata_patches,
+            attestation=attestation,
+        )
+        self.artifact_data_cache[preview_key] = artifact_data
+        self._log(
+            f"package: fetched {record.subdir}/{record.file_name} in "
+            f"{perf_counter() - started:.3f}s "
+            f"paths={len(archive_data.package_paths)} "
+            f"info_files={len(archive_data.info_files)} "
+            f"attestation={attestation.status}"
+        )
+        return artifact_data
+
+    async def load_version_attestation(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        """Verify ``record`` after its archive details are already available."""
+        cached = self.artifact_data_cache.get(preview_key)
+        if cached is None:
+            raise RuntimeError(
+                "Package information must be loaded before verification."
+            )
+        if cached.attestation.status != "verifying":
+            return cached
+        return await self._attestation_loads.run(
+            preview_key,
+            lambda: self._fetch_version_attestation(record, preview_key=preview_key),
+        )
+
+    async def _fetch_version_attestation(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> VersionArtifactData:
+        started = perf_counter()
+        attestation = await verify_record(
+            record, client=self._client, trusted_root=self._trusted_root
+        )
+        cached = self.artifact_data_cache.get(preview_key)
+        if cached is None:
+            raise RuntimeError("Package information was cleared during verification.")
+        artifact_data = replace(cached, attestation=attestation)
+        self.artifact_data_cache[preview_key] = artifact_data
+        self._log(
+            f"attestation: verified {record.subdir}/{record.file_name} in "
+            f"{perf_counter() - started:.3f}s status={attestation.status}"
+        )
+        return artifact_data
+
+    async def _fetch_archive_data(
+        self,
+        record: RepoDataRecord,
+        *,
+        preview_key: VersionPreviewKey,
+    ) -> _ArchiveData:
         archive = await self.get_package_archive(preview_key, str(record.url))
         package_paths = await self.get_package_paths(preview_key, archive)
         info_files = await self.get_info_files(archive)
@@ -269,20 +431,10 @@ class VersionDataLoader:
         # patch applies. Every conda package ships info/index.json.
         repodata_patches = build_repodata_patch_diff(record, await archive.index_json())
 
-        artifact_data = build_version_artifact_data(
-            package_name,
-            record,
+        return _ArchiveData(
             package_paths=package_paths,
             info_files=info_files,
-            repository_urls=about_urls.repository,
-            documentation_urls=about_urls.documentation,
-            homepage_urls=about_urls.homepage,
-            recipe_maintainers=about_urls.recipe_maintainers,
-            provenance_remote_url=about_urls.provenance_remote_url,
-            provenance_sha=about_urls.provenance_sha,
-            rattler_build_version=about_urls.rattler_build_version,
+            about_urls=about_urls,
             run_exports=run_exports,
             repodata_patches=repodata_patches,
         )
-        self.artifact_data_cache[preview_key] = artifact_data
-        return artifact_data

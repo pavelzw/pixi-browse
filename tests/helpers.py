@@ -8,6 +8,7 @@ import io
 import os
 import pickle
 import re
+import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from http import HTTPStatus
@@ -22,20 +23,24 @@ from pytest_textual_snapshot.plugin import (  # type: ignore[import-untyped]
     SVGImageExtension,
     node_to_report_path,
 )
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import Gateway
+from rattler.sigstore import VerifiedAttestation, VerifiedChecks
 from rich.color import Color
 from rich.console import Console
 from rich.terminal_theme import TerminalTheme
 from syrupy.assertion import SnapshotAssertion
 from syrupy.data import Snapshot, SnapshotCollection
 from syrupy.location import PyTestLocation
+from textual.css.query import NoMatches
 from textual.pilot import Pilot
 from textual.screen import Screen
 from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker, WorkerState
 
-from pixi_browse.tui import CondaMetadataTui
+from pixi_browse.file_types import DETECTING_FILE_TYPE
+from pixi_browse.models import AttestationData, AttestationStatus
+from pixi_browse.tui import CondaMetadataTui, FileActionScreen
 
 ANACONDA_CHANNELS_URL = "https://conda.anaconda.org/"
 # The channel the app loads by default.
@@ -43,15 +48,65 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
+# The manifest channel whose package advertises a committed Sigstore sidecar.
+# Spelled as a URL because the attestation binds to this exact channel.
+SIGNING_TESTS_CHANNEL = "https://prefix.dev/skill-forge"
+SIGNING_TESTS_PACKAGE = "agent-skill-conda-forge"
 # Mirrored, but without any repodata: loading it fails.
 MISSING_CHANNEL = "missing"
 TERMINAL_SIZE = (120, 40)
 # A window too narrow for a detail section to show its whole tab strip.
 NARROW_TERMINAL_SIZE = (76, 30)
-CHANNEL_PLATFORMS = (Platform("linux-64"), Platform("osx-arm64"), Platform("noarch"))
+CHANNEL_PLATFORMS = (Subdir("linux-64"), Subdir("osx-arm64"), Subdir("noarch"))
 
 AppFactory = Callable[..., CondaMetadataTui]
 GatewayFactory = Callable[..., Gateway]
+
+# Stands in for a real sidecar wherever only the outcome matters.
+EXAMPLE_SIDECAR_URL = "https://example.com/pkg.conda.sigs.abc"
+
+
+def attestation_in_status(status: AttestationStatus) -> AttestationData:
+    """An attestation outcome in each of the three states a record can be in.
+
+    The verified one is as empty as a bundle can be -- signed, and nothing
+    established beyond that -- so a test that only cares about signedness does
+    not have to spell out a whole certificate. ``tests.test_attestations`` uses
+    the real thing.
+    """
+    if status == "unsigned":
+        return AttestationData()
+    if status == "verifying":
+        return AttestationData(
+            sidecar_url=EXAMPLE_SIDECAR_URL, verification_pending=True
+        )
+    if status == "unverified":
+        return AttestationData(
+            sidecar_url=EXAMPLE_SIDECAR_URL, warnings=("no attestation accepted",)
+        )
+    return AttestationData(
+        sidecar_url=EXAMPLE_SIDECAR_URL,
+        attestation=VerifiedAttestation(
+            index=0,
+            identity=None,
+            issuer=None,
+            integrated_time=None,
+            target_channel=None,
+            claims=None,
+            signed_at=None,
+            log_index=None,
+            log_origin=None,
+            checks=VerifiedChecks(
+                certificate_chain=False,
+                signed_certificate_timestamp=False,
+                transparency_log=False,
+                inclusion_proof=False,
+            ),
+            warnings=[],
+        ),
+    )
+
+
 PilotHook = Callable[[Pilot[None]], Awaitable[None]]
 SnapComparePalettes = Callable[..., bool]
 
@@ -207,6 +262,36 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
         return io.BytesIO(body)
 
 
+class SubdirHold:
+    """Holds every response of one channel's subdir until released.
+
+    Requests for other paths are served straight away, so a channel served
+    through ``HeldSubdirRequestHandler`` loads completely except for that one
+    subdir: the app stays on its startup loading screen with every other probe
+    finished, which is a stable state to screenshot or press keys in.
+    """
+
+    def __init__(self, channel_name: str, subdir: str) -> None:
+        self.path_prefix = f"/{channel_name}/{subdir}/"
+        self.release = threading.Event()
+
+    def holds(self, path: str) -> bool:
+        return path.startswith(self.path_prefix)
+
+
+class HeldSubdirRequestHandler(RangeRequestHandler):
+    """``RangeRequestHandler`` that parks the requests of one subdir."""
+
+    def __init__(self, *args: Any, hold: SubdirHold, **kwargs: Any) -> None:
+        self._hold = hold
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self) -> None:  # noqa: N802 - the http.server hook name
+        if self._hold.holds(self.path):
+            self._hold.release.wait()
+        super().do_GET()
+
+
 class PaletteScreenshotApp(CondaMetadataTui):
     """The app under test, screenshotted with every palette in a single run.
 
@@ -342,11 +427,12 @@ async def still_cursors_after(run_before: PilotHook | None, pilot: Pilot[None]) 
 async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
     """Wait until the app finished loading repodata and all workers are done.
 
-    ``on_mount`` awaits the initial repodata load and the previews run in
-    Textual workers, so a snapshot must wait for both before it is stable.
-    Modal screens (query prompts, the who-needs loading screen, ...) may be on
-    top of the main screen while waiting, so the widgets are looked up on the
-    main screen rather than on whatever screen is active.
+    The initial repodata load runs in a Textual worker behind the repodata
+    loading screen and the previews run in workers too, so a snapshot must
+    wait for all of them before it is stable. Modal screens (the loading
+    screen, query prompts, the who-needs loading screen, ...) may be on top of
+    the main screen while waiting, so the widgets are looked up on the main
+    screen rather than on whatever screen is active.
     """
     app = pilot.app
     assert isinstance(app, CondaMetadataTui)
@@ -386,6 +472,23 @@ async def wait_for_idle(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
         )
 
 
+async def wait_until(
+    pilot: Pilot[None],
+    condition: Callable[[], bool],
+    *,
+    what: str,
+    timeout: float = 10.0,
+) -> None:
+    """Pump the app until ``condition`` holds; ``what`` names it in the timeout."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"waited {timeout}s for {what}")
+        await pilot.pause()
+        await asyncio.sleep(0.02)
+    await pilot.pause()
+
+
 async def wait_for_screen(
     # ``Screen`` is invariant in its result type, so only ``Any`` accepts every
     # modal of the app here.
@@ -408,6 +511,35 @@ async def wait_for_screen(
                 f"{screen_type.__name__} did not open within {timeout}s "
                 f"(top screen: {type(pilot.app.screen).__name__})"
             )
+        await pilot.pause()
+    await pilot.pause()
+
+
+async def wait_for_file_actions(pilot: Pilot[None], *, timeout: float = 30.0) -> None:
+    """Wait for the action dialog of a package file and for its ``Type:`` line,
+    which is only filled in once the file has been fetched and described.
+
+    Waiting for the line and not only for the workers that fill it in keeps a
+    description that never arrives from being snapshotted: the test times out
+    on ``detecting…`` instead of recording it.
+    """
+    await wait_for_screen(pilot, FileActionScreen)
+    await wait_for_idle(pilot)
+    deadline = time.monotonic() + timeout
+    while True:
+        screen = pilot.app.screen
+        assert isinstance(screen, FileActionScreen)
+        try:
+            line = str(screen.query_one("#file-action-type", Static).content)
+        except NoMatches:  # The dialog is still composing.
+            line = DETECTING_FILE_TYPE
+        if DETECTING_FILE_TYPE not in line:
+            break
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"the file type was not detected within {timeout}s ({line!r})"
+            )
+        await asyncio.sleep(0.02)
         await pilot.pause()
     await pilot.pause()
 

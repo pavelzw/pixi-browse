@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Literal, Protocol
 
 from rattler.exceptions import InvalidMatchSpecError, InvalidPackageNameError
 from rattler.match_spec import MatchSpec
 from rattler.package import PackageName
+from rattler.platform import Subdir
+from rattler.repo_data import ChannelNotice
 from rich import box
 from rich.console import RenderableType
 from rich.style import Style
@@ -18,18 +20,31 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.events import Click, Key
 from textual.screen import ModalScreen, Screen
+from textual.timer import Timer
+from textual.visual import VisualType
 from textual.widget import Widget
-from textual.widgets import Button, Input, LoadingIndicator, OptionList, Static
+from textual.widgets import (
+    Button,
+    Input,
+    LoadingIndicator,
+    OptionList,
+    ProgressBar,
+    Static,
+)
 from textual.widgets.option_list import Option
 
 from pixi_browse.models import (
+    AttestationData,
+    AttestationStatus,
     CompareFileRow,
     CompareRow,
     CompareSelection,
     DependencyTab,
     FileTab,
+    MetadataRow,
     MetadataTab,
     PackageFile,
     RepodataPatchDiff,
@@ -37,10 +52,14 @@ from pixi_browse.models import (
     VersionCompareData,
 )
 from pixi_browse.rendering import (
+    build_version_details_attestation_rows,
+    build_version_details_metadata_rows,
     format_human_byte_size,
-    format_version_details_metadata_lines,
     format_version_details_run_exports,
+    render_channel_notice_heading,
+    render_channel_notice_message,
 )
+from pixi_browse.repodata import PlatformDiscoveryProgress, channels_label
 from pixi_browse.search import substring_filter
 from pixi_browse.tui.list_search import ListSearchState
 from pixi_browse.tui.messages import (
@@ -74,7 +93,16 @@ NO_REPODATA_PATCHES_MESSAGE = "No repodata patches."
 NO_COMPARE_METADATA_MESSAGE = "No metadata available."
 NO_COMPARE_DEPENDENCIES_MESSAGE = "No dependency data."
 
-METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches")
+METADATA_TABS: tuple[MetadataTab, ...] = ("metadata", "patches", "attestation")
+# Suffixed to the ``Attestation`` tab label. An unsigned artifact gets nothing:
+# most packages are unsigned, and a glyph on every one of them would say less
+# about the few that are signed.
+ATTESTATION_TAB_GLYPHS: dict[AttestationStatus, str] = {
+    "unsigned": "",
+    "verifying": " …",
+    "verified": " ✓",
+    "unverified": " ✗",
+}
 DEPENDENCY_TABS: tuple[DependencyTab, ...] = (
     "dependencies",
     "extra_depends",
@@ -254,6 +282,74 @@ def render_repodata_patches_body(patches: RepodataPatchDiff) -> Table:
     )
 
 
+# The gap between a detail body's label column and its value column.
+DETAIL_LABEL_GAP = 2
+
+
+def render_detail_rows(rows: Sequence[MetadataRow], width: int | None) -> Content:
+    """Lay out label/value rows as the body of a detail section.
+
+    A value too wide for ``width`` is wrapped under itself rather than under its
+    label: the label column stays blank on the continuation lines, so a folded
+    URL or a long list of maintainers still reads as one field. Rows without a
+    label -- the attestation verdict, the blank lines between its groups -- are
+    lines of their own and wrap at the left edge instead.
+
+    ``width`` is what the body has to fit into, or ``None`` while it has not been
+    laid out and so has no width to wrap at yet.
+    """
+    labels = {label: Content.from_markup(label) for label, _ in rows if label}
+    indent = max((label.cell_length for label in labels.values()), default=0)
+    indent += DETAIL_LABEL_GAP
+    lines: list[Content] = []
+    for label, value in rows:
+        offset = indent if label else 0
+        content = Content.from_markup(value)
+        wrapped = (
+            content.wrap(width - offset)
+            if width is not None and width - offset > 0
+            else [content]
+        )
+        head, *rest = wrapped
+        if label:
+            padded_label = labels[label].pad_right(indent - labels[label].cell_length)
+            head = Content("").join([padded_label, head])
+        lines.append(head)
+        lines.extend(line.pad_left(offset) for line in rest)
+    return Content("\n").join(lines)
+
+
+class DetailBody(Static):
+    """A detail section's body, which lays out label/value rows itself.
+
+    Wrapping such a row is the body's job because only the body knows the width
+    to wrap at, and that width is what decides where a value continues; the rows
+    are therefore kept and laid out again whenever the body is resized. Anything
+    else -- a table, an empty message -- is handed to ``Static`` as it is.
+    """
+
+    def __init__(self, *, id: str, classes: str) -> None:
+        super().__init__(id=id, classes=classes)
+        self._rows: tuple[MetadataRow, ...] | None = None
+
+    def update(self, content: VisualType = "", *, layout: bool = True) -> None:
+        self._rows = None
+        super().update(content, layout=layout)
+
+    def update_rows(self, rows: Sequence[MetadataRow]) -> None:
+        self._rows = tuple(rows)
+        self._draw_rows()
+
+    def on_resize(self) -> None:
+        if self._rows is not None:
+            self._draw_rows()
+
+    def _draw_rows(self) -> None:
+        assert self._rows is not None
+        width = self.content_size.width
+        super().update(render_detail_rows(self._rows, width if width > 0 else None))
+
+
 class DetailOptionList(OptionList):
     can_focus = False
 
@@ -305,7 +401,7 @@ class DetailSection(Vertical):
         with VerticalScroll(
             id=f"{self._id_prefix}-scroll-{self._index}", classes="detail-scroll"
         ):
-            yield Static(
+            yield DetailBody(
                 id=f"{self._id_prefix}-body-{self._index}",
                 classes="detail-body",
             )
@@ -364,6 +460,13 @@ class DetailSection(Vertical):
         body_static.remove_class("detail-empty")
         body_static.update(body)
 
+    def update_rows(self, rows: Sequence[MetadataRow]) -> None:
+        """Show ``rows`` as a label column and a value column, wrapped to the
+        width the body has."""
+        body_static = self._body_static()
+        body_static.remove_class("detail-empty")
+        body_static.update_rows(rows)
+
     def update_options(
         self, labels: list[str | Text | Option], *, highlighted: int = 0
     ) -> None:
@@ -397,8 +500,8 @@ class DetailSection(Vertical):
             f"#{self._id_prefix}-option-list-{self._index}", DetailOptionList
         )
 
-    def _body_static(self) -> Static:
-        return self.query_one(f"#{self._id_prefix}-body-{self._index}", Static)
+    def _body_static(self) -> DetailBody:
+        return self.query_one(f"#{self._id_prefix}-body-{self._index}", DetailBody)
 
     def _empty_message_static(self) -> Static:
         return self.query_one(f"#{self._id_prefix}-empty-{self._index}", Static)
@@ -487,6 +590,13 @@ class VersionDetailsView(Vertical):
         self._file_highlighted = {tab: 0 for tab in FILE_TABS}
         self.display = True
         self._refresh_sections()
+
+    def update_attestation(self, attestation: AttestationData) -> None:
+        """Refresh verification without disturbing navigation in other sections."""
+        if self._details is None:
+            return
+        self._details = replace(self._details, attestation=attestation)
+        self._refresh_metadata_section()
 
     def set_active_section(self, index: int) -> None:
         self._active_section = max(0, min(index, VERSION_DETAIL_SECTION_COUNT - 1))
@@ -762,16 +872,22 @@ class VersionDetailsView(Vertical):
 
         metadata_section = self._section(0)
         metadata_section.update_tab_header(self._render_metadata_header)
-        if self._active_metadata_tab() == "patches":
+        active_tab = self._active_metadata_tab()
+        if active_tab == "patches":
             patches = self._details.repodata_patches
             if not patches.rows:
                 metadata_section.show_empty_message(NO_REPODATA_PATCHES_MESSAGE)
                 return
             metadata_section.update_body(render_repodata_patches_body(patches))
             return
-        metadata_section.update_body(
-            "\n".join(format_version_details_metadata_lines(self._details))
-        )
+        if active_tab == "attestation":
+            # An unsigned artifact needs no empty message: saying so is the
+            # whole content of the tab.
+            metadata_section.update_rows(
+                build_version_details_attestation_rows(self._details.attestation)
+            )
+            return
+        metadata_section.update_rows(build_version_details_metadata_rows(self._details))
 
     def _refresh_dependency_section(self) -> None:
         if self._details is None:
@@ -976,12 +1092,21 @@ class VersionDetailsView(Vertical):
     def _render_metadata_tabs(self) -> tuple[Text, ...]:
         labels: dict[MetadataTab, str]
         if self._details is None:
-            labels = {"metadata": "Metadata", "patches": "Repodata patches"}
+            labels = {
+                "metadata": "Metadata",
+                "patches": "Repodata patches",
+                "attestation": "Attestation",
+            }
         else:
             labels = {
                 "metadata": "Metadata",
                 "patches": (
                     f"Repodata patches ({self._details.repodata_patches.change_count})"
+                ),
+                # The glyph puts signedness in the header, so it can be read
+                # without opening the tab, the way the patch count already is.
+                "attestation": (
+                    f"Attestation{ATTESTATION_TAB_GLYPHS[self._details.attestation.status]}"
                 ),
             }
         return tuple(
@@ -1223,6 +1348,11 @@ class MainPanel(Vertical):
         version_details.set_details(details)
         version_details.set_pane_selected(self._pane_selected)
         version_details.display = True
+
+    def update_version_attestation(self, attestation: AttestationData) -> None:
+        self.query_one("#version-details-view", VersionDetailsView).update_attestation(
+            attestation
+        )
 
     def set_pane_selected(self, selected: bool) -> None:
         self._pane_selected = selected
@@ -2271,13 +2401,37 @@ class ChannelRow(Horizontal):
         )
 
 
+class ChannelNoticeView(Vertical):
+    """One CEP-6 channel notice: its heading with the message indented below."""
+
+    def __init__(self, notice: ChannelNotice) -> None:
+        super().__init__(classes="channel-notice")
+        self._notice = notice
+
+    def compose(self) -> ComposeResult:
+        yield Static(render_channel_notice_heading(self._notice), markup=False)
+        yield Static(
+            render_channel_notice_message(self._notice),
+            classes="channel-notice-message",
+            markup=False,
+        )
+
+
 class ChannelScreen(ModalScreen[list[str] | None]):
     """Edit the list of channels the app browses.
 
     The selected channels are listed with a ``✕`` button each; the field below
     adds the typed channel to the list on ``Enter``. Nothing is loaded until
-    ``Apply`` is pressed, and ``Escape`` drops every edit. At least one channel
-    always stays, so the app never ends up without anything to show.
+    ``Apply`` is pressed, which also takes a channel still sitting in the
+    field, and ``Escape`` drops every edit. At least one channel always stays,
+    so the app never ends up without anything to show.
+
+    When the loaded channels published CEP-6 notices (``notices.json`` at the
+    channel root, e.g. a security advisory or a deprecation), the app fetches
+    them as the dialog opens and :meth:`show_notices` lists them under the
+    channels, most urgent first. The notices belong to the channels as loaded:
+    adding a channel in the dialog shows its notices only after ``Apply``
+    loaded it.
 
     ``Up``/``Down`` walk the dialog top to bottom: the ``✕`` buttons, the
     field, ``Apply``. ``Tab`` cycles the same widgets.
@@ -2306,6 +2460,26 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     #channel-rows {
         height: auto;
         max-height: 10;
+    }
+
+    #channel-notices {
+        height: auto;
+        max-height: 12;
+        margin-top: 1;
+    }
+
+    #channel-notices-title {
+        text-style: bold;
+    }
+
+    .channel-notice {
+        height: auto;
+        padding: 0 1;
+        margin-top: 1;
+    }
+
+    .channel-notice-message {
+        padding-left: 3;
     }
 
     .channel-row {
@@ -2409,6 +2583,25 @@ class ChannelScreen(ModalScreen[list[str] | None]):
 
     # -- rendering -------------------------------------------------------------
 
+    async def show_notices(self, notices: Sequence[ChannelNotice]) -> None:
+        """List ``notices`` between the channels and the field, replacing any
+        notices shown before. Nothing is shown for an empty list."""
+        for previous in self.query("#channel-notices"):
+            await previous.remove()
+        if not notices:
+            return
+        count = len(notices)
+        title = f"{count} channel notice{'s' if count != 1 else ''}"
+        await self.query_one("#channel-dialog", Vertical).mount(
+            VerticalScroll(
+                Static(title, id="channel-notices-title"),
+                *(ChannelNoticeView(notice) for notice in notices),
+                id="channel-notices",
+                can_focus=False,
+            ),
+            after=self.query_one("#channel-rows", VerticalScroll),
+        )
+
     def _channel_rows(self) -> list[ChannelRow]:
         removable = len(self._channel_names) > 1
         return [
@@ -2492,6 +2685,11 @@ class ChannelScreen(ModalScreen[list[str] | None]):
     @on(Button.Pressed, "#channel-apply")
     def _apply_pressed(self, event: Button.Pressed) -> None:
         event.stop()
+        # A channel typed but not yet added with Enter is meant as well; one
+        # that is already listed needs no second entry.
+        typed = self.query_one("#channel-input", Input).value.strip()
+        if typed and typed not in self._channel_names:
+            self._channel_names.append(typed)
         self.dismiss(list(self._channel_names))
 
     async def action_dismiss(self, result: list[str] | None = None) -> None:
@@ -2811,6 +3009,102 @@ class WhoNeedsConfirmScreen(ModalScreen[WhoNeedsConfirmChoice | None]):
         self.dismiss(self.CHOICES[event.option_index][1])
 
 
+class QueryLeaveConfirmScreen(ModalScreen[bool]):
+    """Confirm leaving a MatchSpec or who-needs result for the full package list.
+
+    ``Escape`` in a query result goes back to every package of the channel, the
+    same way it goes back from a package to the package list. The result took a
+    query (and for who-needs a long repodata scan) to arrive at, though, and an
+    ``Escape`` too many is a common slip, so leaving it asks first. Dismissing
+    the prompt with ``Escape`` again keeps the result.
+    """
+
+    DEFAULT_CSS = """
+    QueryLeaveConfirmScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #query-leave-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #query-leave-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #query-leave-query {
+        color: $text;
+        margin-bottom: 1;
+    }
+
+    #query-leave-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #query-leave-list {
+        border: none;
+        background: $background;
+        padding: 0 0 0 1;
+    }
+
+    #query-leave-list > .option-list--option-highlighted {
+        color: #ffffff;
+        background: #ec4899;
+        text-style: bold;
+    }
+
+    #query-leave-list > .option-list--option-hover {
+        color: #f9a8d4;
+        background: #4a2233;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", show=False),
+        Binding("q", "dismiss", show=False),
+    ]
+
+    CHOICES: tuple[tuple[str, bool], ...] = (
+        ("Back to all packages", True),
+        ("Keep the result", False),
+    )
+
+    def __init__(self, query_label: str) -> None:
+        super().__init__()
+        self._query_label = query_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="query-leave-dialog"):
+            yield Static("Leave query result", id="query-leave-title")
+            yield Static(self._query_label, id="query-leave-query", markup=False)
+            yield Static(
+                "Going back shows every package of the selected channels again"
+                " and drops this result.",
+                id="query-leave-help",
+            )
+            yield OptionList(
+                *(label for label, _leave in self.CHOICES),
+                id="query-leave-list",
+                markup=False,
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#query-leave-list", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#query-leave-list")
+    def _select_action(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.dismiss(self.CHOICES[event.option_index][1])
+
+
 class WhoNeedsLoadingScreen(ModalScreen[None]):
     """Modal that holds the user in place while a who-needs query runs.
 
@@ -2886,6 +3180,272 @@ class WhoNeedsLoadingScreen(ModalScreen[None]):
         )
 
 
+RepodataLoadingResult = Literal["channels"] | None
+"""How the repodata loading screen was closed: ``"channels"`` asks the app to
+open the channel selector after a failed load, ``None`` closes it."""
+
+
+class RepodataLoadingScreen(ModalScreen[RepodataLoadingResult]):
+    """Modal shown while the repodata of the selected channels loads.
+
+    Shown at startup and when switching channels. Textual only starts handling
+    keys once ``on_mount`` has returned, so the startup load runs in a worker
+    and this screen covers the still empty main screen in the meantime. It
+    shows the platforms found so far, the ones still being
+    checked, how far the probing has come and for how long it has been
+    running; without sharded repodata that can take minutes.
+
+    The keys that open dialogs over the package list (which does not exist
+    yet) are swallowed here; ``q`` still quits. A failed load stays on this
+    screen with the error and offers ``c`` to correct the channels; closing it
+    any other way could leave the app without a package list.
+    """
+
+    DEFAULT_CSS = """
+    RepodataLoadingScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #repodata-loading-dialog {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        max-height: 90%;
+        border: round #ec4899;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #repodata-loading-title {
+        text-style: bold;
+    }
+
+    #repodata-loading-help {
+        color: $text-muted;
+        margin-top: 1;
+    }
+
+    #repodata-loading-platforms {
+        margin-top: 1;
+    }
+
+    #repodata-loading-bar {
+        width: 100%;
+        margin-top: 1;
+    }
+
+    #repodata-loading-bar Bar {
+        width: 1fr;
+    }
+
+    #repodata-loading-bar Bar > .bar--bar,
+    #repodata-loading-bar Bar > .bar--complete {
+        color: #ec4899;
+    }
+
+    #repodata-loading-status {
+        color: $text-muted;
+    }
+
+    #repodata-loading-hint {
+        color: $text-muted;
+        text-align: right;
+        margin-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("q", "quit_app", show=False),
+        Binding("c", "switch_channels", show=False),
+        # The app binds these to dialogs over the package list; while the list
+        # is still loading (or failed to load) they have nothing to act on.
+        Binding("escape", "ignore", show=False),
+        Binding("p", "ignore", show=False),
+        Binding("C", "ignore", show=False),
+        Binding("m", "ignore", show=False),
+        Binding("w", "ignore", show=False),
+        Binding("slash", "ignore", show=False),
+        Binding("question_mark", "ignore", show=False),
+    ]
+
+    _PLATFORM_COLUMNS = 3
+
+    def __init__(self, *, channel_names: Sequence[str]) -> None:
+        super().__init__()
+        self._channel_names = list(channel_names)
+        self._progress: PlatformDiscoveryProgress | None = None
+        self._collecting_names_for: int | None = None
+        self._failed = False
+        self._error_message = ""
+        self._elapsed_timer: Timer | None = None
+        self.started_at = monotonic()
+        """When the load started (``time.monotonic``); the elapsed counter
+        counts from here."""
+
+    @property
+    def progress(self) -> PlatformDiscoveryProgress | None:
+        """The latest platform discovery progress, ``None`` before the first."""
+        return self._progress
+
+    @property
+    def failed(self) -> bool:
+        """Whether the screen shows a failed load."""
+        return self._failed
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="repodata-loading-dialog"):
+            yield Static(
+                Text.assemble(
+                    "Loading ",
+                    (
+                        channels_label(self._channel_names),
+                        Style(color="#ec4899", bold=True),
+                    ),
+                ),
+                id="repodata-loading-title",
+            )
+            yield Static(
+                "Fetching the repodata of every platform. The first load can "
+                "take a while; later loads come from the cache.",
+                id="repodata-loading-help",
+            )
+            yield Static("", id="repodata-loading-platforms")
+            yield ProgressBar(show_eta=False, id="repodata-loading-bar")
+            yield Static("", id="repodata-loading-status")
+            yield Static("q to quit", id="repodata-loading-hint")
+
+    def on_mount(self) -> None:
+        self.started_at = monotonic()
+        # The load starts reporting before this screen has composed (pushing a
+        # screen mounts it a message later), so the widgets are only touched
+        # here and in the renders after this point, from the state kept so far.
+        self._render_dialog()
+        if not self._failed:
+            self._elapsed_timer = self.set_interval(1.0, self.refresh_elapsed)
+
+    def report_discovery(self, progress: PlatformDiscoveryProgress) -> None:
+        """Show the platform discovery at ``progress``."""
+        self._progress = progress
+        self._render_dialog()
+
+    def report_collecting_names(self, platforms: Sequence[Subdir]) -> None:
+        """Show that the package names of ``platforms`` are being collected."""
+        self._collecting_names_for = len(platforms)
+        self._render_dialog()
+
+    def show_error(self, message: str) -> None:
+        """Replace the progress with the error ``message`` of a failed load."""
+        self._failed = True
+        self._error_message = message.strip()
+        if self._elapsed_timer is not None:
+            self._elapsed_timer.stop()
+        self._render_dialog()
+
+    def refresh_elapsed(self) -> None:
+        """Re-render the elapsed time; runs every second while loading."""
+        self._render_dialog()
+
+    def _render_dialog(self) -> None:
+        if not self.is_mounted:
+            return
+        if self._failed:
+            self._render_error()
+            return
+        self._render_platforms()
+        self._render_progress()
+        self._render_status()
+
+    def _render_error(self) -> None:
+        self.query_one("#repodata-loading-title", Static).update(
+            Text.assemble(
+                "Failed to load ",
+                (
+                    channels_label(self._channel_names),
+                    Style(color="#ec4899", bold=True),
+                ),
+            )
+        )
+        self.query_one("#repodata-loading-help", Static).update(self._error_message)
+        # Which probes had finished when the load failed is a matter of timing,
+        # so the platforms would be a random subset.
+        self.query_one("#repodata-loading-platforms", Static).display = False
+        self.query_one("#repodata-loading-bar", ProgressBar).display = False
+        self.query_one("#repodata-loading-status", Static).display = False
+        self.query_one("#repodata-loading-hint", Static).update(
+            "c to change channels · q to quit"
+        )
+
+    def _render_platforms(self) -> None:
+        platforms = self.query_one("#repodata-loading-platforms", Static)
+        progress = self._progress
+        cells = (
+            []
+            if progress is None
+            else [
+                Text.assemble(("✓ ", Style(color="#ec4899")), str(platform))
+                for platform in progress.found
+            ]
+            + [
+                Text.assemble(("⋯ ", Style(dim=True)), (str(platform), Style(dim=True)))
+                for platform in progress.checking
+            ]
+        )
+        if not cells:
+            platforms.display = False
+            return
+        grid = Table.grid(padding=(0, 2))
+        for _ in range(self._PLATFORM_COLUMNS):
+            grid.add_column()
+        for start in range(0, len(cells), self._PLATFORM_COLUMNS):
+            grid.add_row(*cells[start : start + self._PLATFORM_COLUMNS])
+        platforms.update(grid)
+        platforms.display = True
+
+    def _render_progress(self) -> None:
+        progress = self._progress
+        if progress is None:
+            return
+        # One step more than the probes: collecting the package names after
+        # the platforms are known.
+        completed = (
+            progress.probes_total
+            if self._collecting_names_for is not None
+            else progress.probes_completed
+        )
+        self.query_one("#repodata-loading-bar", ProgressBar).update(
+            total=progress.probes_total + 1, progress=completed
+        )
+
+    def _render_status(self) -> None:
+        elapsed = f"{int(monotonic() - self.started_at)}s elapsed"
+        if self._collecting_names_for is not None:
+            count = self._collecting_names_for
+            noun = "platform" if count == 1 else "platforms"
+            text = f"Collecting the package names of {count} {noun} · {elapsed}"
+        elif self._progress is None:
+            text = f"Starting · {elapsed}"
+        else:
+            progress = self._progress
+            found = len(progress.found)
+            noun = "platform" if found == 1 else "platforms"
+            text = (
+                f"{progress.probes_completed} of {progress.probes_total} subdirs "
+                f"checked · {found} {noun} found · {elapsed}"
+            )
+        self.query_one("#repodata-loading-status", Static).update(text)
+
+    def action_quit_app(self) -> None:
+        self.app.exit()
+
+    def action_switch_channels(self) -> None:
+        if self._failed:
+            self.dismiss("channels")
+
+    def action_ignore(self) -> None:
+        return None
+
+
 class FileActionScreen(ModalScreen[FileActionOption | None]):
     DEFAULT_CSS = """
     FileActionScreen {
@@ -2914,6 +3474,14 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
 
     #file-action-metadata {
         color: $text;
+    }
+
+    #file-action-type {
+        color: $text;
+    }
+
+    #file-action-details {
+        height: auto;
         margin-bottom: 1;
     }
 
@@ -2946,7 +3514,11 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
         *,
         actions: tuple[FileActionOption, ...] | None = None,
         metadata_lines: tuple[str, ...] = (),
+        file_type: str | None = None,
     ) -> None:
+        """``file_type`` is the initial text of the ``Type:`` line (e.g.
+        ``detecting…``) that :meth:`show_file_type` later replaces; without
+        it the dialog has no such line."""
         super().__init__()
         self._file_path = file_path
         self._actions = actions or (
@@ -2954,17 +3526,44 @@ class FileActionScreen(ModalScreen[FileActionOption | None]):
             FileActionOption(action="download", label="Download as file"),
         )
         self._metadata_lines = metadata_lines
+        self._file_type = file_type
+        self._file_type_widget: Static | None = None
+
+    @staticmethod
+    def _file_type_line(file_type: str) -> str:
+        return f"Type: {file_type}"
+
+    def show_file_type(self, file_type: str) -> None:
+        """Replace the text of the ``Type:`` line.
+
+        The widget is updated through the reference ``compose`` keeps, not
+        through a query: a file can be described while the dialog is still
+        mounting, and between ``compose`` and the end of mounting the line is
+        neither found by ``query_one`` nor rendered from ``_file_type`` again.
+        """
+        self._file_type = file_type
+        if self._file_type_widget is not None:
+            self._file_type_widget.update(self._file_type_line(file_type))
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-action-dialog"):
             yield Static("File Action", id="file-action-title")
             yield Static(self._file_path, id="file-action-path", markup=False)
-            if self._metadata_lines:
-                yield Static(
-                    "\n".join(self._metadata_lines),
-                    id="file-action-metadata",
-                    markup=False,
-                )
+            if self._metadata_lines or self._file_type is not None:
+                with Vertical(id="file-action-details"):
+                    if self._metadata_lines:
+                        yield Static(
+                            "\n".join(self._metadata_lines),
+                            id="file-action-metadata",
+                            markup=False,
+                        )
+                    if self._file_type is not None:
+                        self._file_type_widget = Static(
+                            self._file_type_line(self._file_type),
+                            id="file-action-type",
+                            markup=False,
+                        )
+                        yield self._file_type_widget
             yield OptionList(
                 *(action.label for action in self._actions),
                 id="file-action-list",

@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 from rattler.match_spec import MatchSpec
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from typer.testing import CliRunner
 
 import pixi_browse.__main__ as entrypoint
 from pixi_browse import __version__
+from pixi_browse.file_types import MAGIC_AVAILABLE
+from pixi_browse.tui.widgets import DIFF_VIEW_AVAILABLE
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -32,6 +34,34 @@ def test_help_includes_expected_options() -> None:
     assert "--version" in output
 
 
+def test_help_lists_extras_and_how_to_install_them() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(entrypoint.cli, ["--help"])
+    output = strip_ansi(result.output)
+
+    assert result.exit_code == 0
+    assert "Optional extras" in output
+    assert "pixi global install 'pixi-browse[extras=[diff,filetype]]'" in output
+    assert "uv tool install 'pixi-browse[diff,filetype]'" in output
+
+
+def test_help_says_which_extras_are_enabled() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(entrypoint.cli, ["--help"])
+    output = strip_ansi(result.output)
+
+    # The default environment has both extras, the minimal one neither.
+    assert result.exit_code == 0
+    for extra, available in (
+        ("diff", DIFF_VIEW_AVAILABLE),
+        ("filetype", MAGIC_AVAILABLE),
+    ):
+        status = "enabled" if available else "not enabled"
+        assert re.search(rf"^\s*{extra}\s+{status}\s{{2}}", output, re.MULTILINE)
+
+
 def test_version_flag_prints_version_and_exits() -> None:
     runner = CliRunner()
 
@@ -50,9 +80,9 @@ def test_build_app_passes_channel_and_platforms() -> None:
 
     assert app._channel_names == ["https://prefix.dev/conda-forge"]
     assert app._selected_platform_names == {
-        Platform("linux-64"),
-        Platform("noarch"),
-        Platform("osx-arm64"),
+        Subdir("linux-64"),
+        Subdir("noarch"),
+        Subdir("osx-arm64"),
     }
     assert app._startup_matchspec is None
 
@@ -110,11 +140,11 @@ def test_build_app_ignores_blank_matchspec(matchspec: str | None) -> None:
 def test_cli_exits_for_invalid_platform() -> None:
     runner = CliRunner()
 
-    result = runner.invoke(entrypoint.cli, ["-p", "linux-64", "-p", "bad-platform"])
+    result = runner.invoke(entrypoint.cli, ["-p", "linux-64", "-p", "bad-subdir"])
 
     assert result.exit_code == 1
-    assert "bad-platform" in result.output
-    assert "not a known platform" in result.output
+    assert "bad-subdir" in result.output
+    assert "not a known subdir" in result.output
 
 
 def test_cli_exits_for_invalid_matchspec() -> None:

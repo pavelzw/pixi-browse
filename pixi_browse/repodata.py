@@ -10,8 +10,9 @@ from rattler.config import Config
 from rattler.exceptions import GatewayError
 from rattler.match_spec import MatchSpec
 from rattler.networking import Client
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from rattler.repo_data import (
+    ChannelNotice,
     Gateway,
     PackageRecord,
     RepoDataRecord,
@@ -22,7 +23,15 @@ from pixi_browse.platform_utils import platform_sort_key
 # The channel the app browses when none is given.
 DEFAULT_CHANNEL = "conda-forge"
 # The one subdir every conda channel must serve.
-NOARCH_PLATFORM = Platform("noarch")
+NOARCH_PLATFORM = Subdir("noarch")
+
+
+# Most urgent first, the order the channel dialog lists notices in.
+CHANNEL_NOTICE_LEVEL_ORDER: dict[str, int] = {
+    "critical": 0,
+    "warning": 1,
+    "info": 2,
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,24 @@ class MatchSpecQueryResult:
 class WhoNeedsQueryResult:
     package_names: list[str]
     records_by_package: dict[str, list[RepoDataRecord]]
+
+
+@dataclass(frozen=True)
+class PlatformDiscoveryProgress:
+    """How far ``discover_available_platforms`` has come.
+
+    A probe is one channel asked for one subdir. ``found`` and ``checking``
+    span all channels: a platform is found once any channel serves it and is
+    being checked while any channel's probe for it is still running.
+    """
+
+    probes_total: int
+    probes_completed: int
+    found: tuple[Subdir, ...]
+    checking: tuple[Subdir, ...]
+
+
+DiscoveryProgressCallback = Callable[[PlatformDiscoveryProgress], None]
 
 
 def whoneeds_target_label(target: str | PackageRecord) -> str:
@@ -78,7 +105,8 @@ async def discover_available_platforms(
     gateway: Gateway,
     channel_names: Sequence[str],
     max_parallel: int = 12,
-) -> list[Platform]:
+    on_progress: DiscoveryProgressCallback | None = None,
+) -> list[Subdir]:
     """Probe which platforms at least one of the channels serves repodata for.
 
     Every conda channel has to serve a ``noarch`` subdir, and rattler enforces
@@ -87,24 +115,59 @@ async def discover_available_platforms(
     private channel without access) therefore cannot be browsed at all, and
     its ``GatewayError`` is raised instead of quietly browsing the other
     channels without it. Errors on the other subdirs only drop that platform.
+
+    ``on_progress`` is called whenever a probe starts or finishes. Without
+    sharded repodata a probe downloads and parses the subdir's complete
+    ``repodata.json``, so this is where a slow start spends its time.
     """
     candidates = sorted(
-        Platform.all(),
+        Subdir.all(),
         key=platform_sort_key,
     )
     semaphore = asyncio.Semaphore(max_parallel)
+    probes_total = len(candidates) * len(channel_names)
+    probes_completed = 0
+    found: set[Subdir] = set()
+    # Platforms with a running probe, and how many channels are probing them.
+    checking: dict[Subdir, int] = {}
 
-    async def probe(channel_name: str, platform: Platform) -> Platform | None:
+    def report() -> None:
+        if on_progress is None:
+            return
+        on_progress(
+            PlatformDiscoveryProgress(
+                probes_total=probes_total,
+                probes_completed=probes_completed,
+                found=tuple(sorted(found, key=platform_sort_key)),
+                checking=tuple(sorted(checking, key=platform_sort_key)),
+            )
+        )
+
+    def finish_probe(platform: Subdir, *, serves_repodata: bool) -> None:
+        nonlocal probes_completed
+        probes_completed += 1
+        checking[platform] -= 1
+        if checking[platform] == 0:
+            del checking[platform]
+        if serves_repodata:
+            found.add(platform)
+        report()
+
+    async def probe(channel_name: str, platform: Subdir) -> Subdir | None:
         async with semaphore:
+            checking[platform] = checking.get(platform, 0) + 1
+            report()
             try:
                 names = await gateway.names(
                     sources=[channel_name],
                     platforms=[platform],
                 )
             except GatewayError:
+                finish_probe(platform, serves_repodata=False)
                 if platform == NOARCH_PLATFORM:
                     raise
                 return None
+            finish_probe(platform, serves_repodata=bool(names))
 
         return platform if names else None
 
@@ -121,12 +184,35 @@ async def discover_available_platforms(
     )
 
 
+async def fetch_channel_notices(
+    *,
+    gateway: Gateway,
+    channel_names: Sequence[str],
+) -> list[ChannelNotice]:
+    """The CEP-6 notices the channels publish, most urgent first.
+
+    Rattler fetches each channel's ``notices.json``, drops expired notices and
+    treats a missing or malformed file as "no notices". The results share the
+    gateway's in-memory cache, which expires with the earliest notice, so
+    calling this whenever the notices are shown costs at most one small
+    request per channel and picks up new and expired notices. Rattler's order
+    (by channel, then as published) breaks ties between equal levels.
+    """
+    notices = await gateway.channel_notices(list(channel_names))
+    return sorted(
+        notices,
+        key=lambda notice: CHANNEL_NOTICE_LEVEL_ORDER.get(
+            notice.level, len(CHANNEL_NOTICE_LEVEL_ORDER)
+        ),
+    )
+
+
 async def fetch_package_names(
     *,
     gateway: Gateway,
     channel_names: Sequence[str],
-    selected_platforms: Iterable[Platform],
-) -> tuple[list[Platform], list[str]]:
+    selected_platforms: Iterable[Subdir],
+) -> tuple[list[Subdir], list[str]]:
     platforms = sorted(
         set(selected_platforms),
         key=platform_sort_key,
@@ -162,7 +248,7 @@ async def query_package_records(
     *,
     gateway: Gateway,
     channel_names: Sequence[str],
-    platforms: list[Platform],
+    platforms: list[Subdir],
     package_name: str,
 ) -> list[RepoDataRecord]:
     by_source = await gateway.query(
@@ -181,7 +267,7 @@ async def query_matchspec_records(
     *,
     gateway: Gateway,
     channel_names: Sequence[str],
-    platforms: list[Platform],
+    platforms: list[Subdir],
     matchspec: MatchSpec,
 ) -> MatchSpecQueryResult:
     by_source = await gateway.query(
@@ -210,7 +296,7 @@ async def query_whoneeds_records(
     *,
     gateway: Gateway,
     channel_names: Sequence[str],
-    platforms: list[Platform],
+    platforms: list[Subdir],
     target: str | PackageRecord,
     log: Callable[[str], None],
 ) -> WhoNeedsQueryResult:

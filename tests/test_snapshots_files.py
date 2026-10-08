@@ -5,14 +5,13 @@ from __future__ import annotations
 import pytest
 from textual.pilot import Pilot
 
-from pixi_browse.tui import FileActionScreen
 from tests.helpers import (
     TERMINAL_SIZE,
     AppFactory,
     SnapComparePalettes,
     open_versions,
+    wait_for_file_actions,
     wait_for_idle,
-    wait_for_screen,
 )
 
 
@@ -24,7 +23,7 @@ def test_enter_on_package_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -39,7 +38,23 @@ def test_enter_on_info_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_file_actions_name_the_type_of_a_binary_file(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """The dialog fetches the file as it opens and names its type: the real
+    ``libz.so`` behind ``libzlib``'s symlinks is an ELF shared library."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=0)
+        await pilot.press("3", "j", "j", "enter")
+        await wait_for_file_actions(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -54,7 +69,7 @@ def test_clicking_file_opens_file_actions(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.click("#detail-option-list-2", offset=(2, 0))
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -84,7 +99,7 @@ def test_file_actions_escape_returns_to_details(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         await pilot.press("escape")
         await pilot.pause()
 
@@ -101,7 +116,7 @@ def test_preview_python_file_uses_syntax_highlighting(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         await pilot.press("enter")
         await wait_for_idle(pilot)
         await pilot.press("j", "j", "j")
@@ -120,7 +135,7 @@ def test_preview_escape_returns_to_details(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         await pilot.press("enter")
         await wait_for_idle(pilot)
         await pilot.press("escape")
@@ -140,7 +155,7 @@ def test_download_path_screen_rejects_empty_destination(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         # "Download as file": the default destination is selected on focus.
         await pilot.press("down", "enter")
         await pilot.pause()
@@ -186,7 +201,7 @@ def test_preview_scroll_keys(
         await open_versions(pilot, package_index=1)
         # The second pkg/ file is site-packages/pixi_browse/__main__.py.
         await pilot.press("3", "j", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         await pilot.press("enter")
         await wait_for_idle(pilot)
         await pilot.press(*keys)
@@ -206,7 +221,7 @@ def test_download_path_escape_cancels_download(
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("3", "]", "enter")
-        await wait_for_screen(pilot, FileActionScreen)
+        await wait_for_file_actions(pilot)
         await pilot.press("down", "enter")
         await pilot.pause()
         await pilot.press("escape")

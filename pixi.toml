@@ -7,13 +7,14 @@ preview = ["pixi-build"]
 
 [tasks]
 demo = "vhs .github/assets/demo-dark.tape && vhs .github/assets/demo-light.tape"
-dev = "textual run --dev pixi_browse/__main__.py"
+# Every log line also lands in textual.log (gitignored), including the debug
+# detail the console below filters out, so a run can be read back afterwards.
+dev = { cmd = "textual run --dev pixi_browse/__main__.py", env = { TEXTUAL_LOG = "textual.log" } }
 console = "textual console -x SYSTEM -x EVENT -x DEBUG -x WORKER"
 
 [exclude-newer]
-py-rattler = "0d"
 typer = "0d"
-pytest-textual-snapshot = "0d"
+py-rattler = "0d"
 
 [package]
 name = "pixi-browse"
@@ -26,17 +27,25 @@ hatchling = "*"
 [package.run-dependencies]
 textual = ">=8.2.8,<9"
 pyyaml = ">=6.0.3,<7"
-py-rattler = ">=0.26.0,<0.27"
+py-rattler = ">=0.27.0,<0.28"
 typer = ">=0.27.2,<0.28"
 # Optional: side-by-side file diffs in the compare view. AGPL-3.0 licensed, so
 # it is only an extra and not a run dependency of pixi-browse itself.
 [package.extra-dependencies.diff]
 textual-diff-view = ">=0.1.5,<0.2"
+# Optional: names the type of a file in the file action dialog. python-magic
+# needs the native libmagic library, so it stays out of the run dependencies.
+[package.extra-dependencies.filetype]
+python-magic = ">=0.4.27,<0.5"
 [package.run-constraints]
 textual-diff-view = ">=0.1.5,<0.2"
+python-magic = ">=0.4.27,<0.5"
 [dependencies]
-pixi-browse = { path = ".", extras = ["diff"] }
+pixi-browse = { path = "." }
 textual-dev = "*"
+
+[feature.extra.dependencies]
+pixi-browse = { path = ".", extras = ["diff", "filetype"] }
 
 [feature.test.dependencies]
 pytest = "*"
@@ -45,7 +54,7 @@ pytest-xdist = "*"
 mypy = "*"
 ty = "*"
 types-pyyaml = "*"
-vhs = "*"
+vhs = ">=0.12.1"
 filelock = ">=3.32.5,<4"
 pytest-textual-snapshot = ">=1.1.0"
 [feature.test.tasks]
@@ -89,6 +98,12 @@ python = "3.13.*"
 python = "3.14.*"
 
 [environments]
-default = ["test", "build", "lint"]
-py313 = ["py313", "test"]
-py314 = ["py314", "test"]
+default = { features = [
+  "test",
+  "extra",
+  "build",
+  "lint",
+], solve-group = "default" }
+py313 = ["py313", "test", "extra"]
+py314 = ["py314", "test", "extra"]
+minimal = { features = ["test"], solve-group = "default" }

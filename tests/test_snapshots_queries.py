@@ -3,11 +3,19 @@ platform selector and channel switching, all against the offline channels."""
 
 from __future__ import annotations
 
+from time import monotonic
+
+from rattler.config import Config
 from rattler.match_spec import MatchSpec
-from rattler.platform import Platform
+from rattler.platform import Subdir
 from textual.pilot import Pilot
 
-from pixi_browse.tui import ChannelScreen, MatchSpecScreen
+from pixi_browse.tui import (
+    ChannelScreen,
+    MatchSpecScreen,
+    QueryLeaveConfirmScreen,
+    RepodataLoadingScreen,
+)
 from tests.helpers import (
     BIOCONDA_CHANNEL,
     MAIN_CHANNEL,
@@ -19,6 +27,7 @@ from tests.helpers import (
     type_text,
     wait_for_idle,
     wait_for_screen,
+    wait_until,
 )
 
 
@@ -41,6 +50,8 @@ async def run_whoneeds_query(pilot: Pilot[None], query: str) -> None:
 async def open_channel_screen(pilot: Pilot[None]) -> None:
     await pilot.press("c")
     await wait_for_screen(pilot, ChannelScreen)
+    # The dialog fetches the channel notices in a worker once it is open.
+    await wait_for_idle(pilot)
 
 
 async def add_channel(pilot: Pilot[None], channel_name: str) -> None:
@@ -344,6 +355,78 @@ def test_dependency_matchspec_query_opens_dependency_versions(
     )
 
 
+def test_escape_in_matchspec_result_asks_before_leaving(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in a MatchSpec result asks before dropping the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_confirmed_leaves_matchspec_result_for_all_packages(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Confirming the prompt drops the MatchSpec and lists every package again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_on_leave_prompt_keeps_matchspec_result(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` on the prompt itself keeps the MatchSpec result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_matchspec_query(pilot, "*zlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_from_query_versions_returns_to_query_result(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in the versions a query opened goes back to the query result
+    first, without asking; only the next ``Escape`` leaves the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await pilot.press("escape")
+        await wait_for_idle(pilot)
+
+    assert snap_compare_palettes(
+        make_app(
+            default_matchspec=MatchSpec("libzlib >=1.3.2", exact_names_only=False)
+        ),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
 # --- who needs ----------------------------------------------------------------
 
 
@@ -523,6 +606,22 @@ def test_whoneeds_screen_escape_keeps_result(
     )
 
 
+def test_escape_in_whoneeds_result_asks_before_leaving(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``Escape`` in a who-needs result asks before dropping the result."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "libzlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
 def test_whoneeds_prompt_prefills_the_name_of_a_build_target(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
@@ -537,6 +636,25 @@ def test_whoneeds_prompt_prefills_the_name_of_a_build_target(
         await wait_for_idle(pilot)
         await pilot.press("w")
         await pilot.pause()
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_escape_confirmed_leaves_whoneeds_result_for_all_packages(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """Confirming the prompt drops the who-needs target and lists every
+    package again."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await run_whoneeds_query(pilot, "libzlib")
+        await pilot.press("escape")
+        await wait_for_screen(pilot, QueryLeaveConfirmScreen)
+        await pilot.press("enter")
+        await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -645,7 +763,7 @@ def test_default_platforms_restrict_the_startup_selection(
     """Unavailable platforms passed on the command line are dropped."""
 
     assert snap_compare_palettes(
-        make_app(default_platforms=[Platform("osx-arm64"), Platform("win-64")]),
+        make_app(default_platforms=[Subdir("osx-arm64"), Subdir("win-64")]),
         run_before=wait_for_idle,
         terminal_size=TERMINAL_SIZE,
     )
@@ -706,7 +824,8 @@ def test_channel_screen_lists_selected_channels(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """``c`` opens the channel dialog: the channels in the order they were
-    added, each with a remove button, the field to add one, and ``Apply``."""
+    added, each with a remove button, the notices ``bioconda`` published, the
+    field to add one, and ``Apply``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
@@ -716,6 +835,43 @@ def test_channel_screen_lists_selected_channels(
         make_app(default_channels=[MAIN_CHANNEL, BIOCONDA_CHANNEL]),
         run_before=run_before,
         terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_shows_channel_notices(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``bioconda``'s ``notices.json`` has a critical, a warning and an info
+    notice plus an expired one: the dialog lists the three live notices most
+    urgent first, with the multi-line message indented under its heading."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+
+    assert snap_compare_palettes(
+        make_app(default_channels=[BIOCONDA_CHANNEL]),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_channel_screen_shows_notices_after_adding_channel(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """The notices belong to the channels as loaded: adding ``bioconda`` shows
+    nothing yet (see ``test_channel_screen_adds_channel_at_the_end``), but
+    once ``Apply`` loaded it, reopening the dialog lists its notices."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await apply_channels(pilot)
+        await open_channel_screen(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
     )
 
 
@@ -1007,11 +1163,65 @@ def test_switching_channel_clears_active_matchspec(
     )
 
 
-def test_switching_to_unreachable_channel_restores_previous_view(
+def test_switching_channels_shows_the_loading_screen(
+    snap_compare_palettes: SnapComparePalettes,
+    make_app: AppFactory,
+    stalled_bioconda_config: Config,
+) -> None:
+    """Switching to ``bioconda`` while its ``noarch`` is still downloading:
+    the loading screen names the new channel and the pending subdir. The
+    elapsed time is wall-clock time, pinned to 31s for the screenshot."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await open_channel_screen(pilot)
+        await add_channel(pilot, BIOCONDA_CHANNEL)
+        await pilot.click("#channel-remove-0")
+        await pilot.pause()
+        await pilot.click("#channel-apply")
+        await wait_for_screen(pilot, RepodataLoadingScreen)
+        screen = pilot.app.screen
+        assert isinstance(screen, RepodataLoadingScreen)
+        await wait_until(
+            pilot,
+            lambda: (
+                screen.progress is not None
+                and screen.progress.probes_completed == screen.progress.probes_total - 1
+            ),
+            what="every probe but noarch to finish",
+        )
+        screen.started_at = monotonic() - 31
+        screen.refresh_elapsed()
+
+    assert snap_compare_palettes(
+        make_app(config=stalled_bioconda_config),
+        run_before=run_before,
+        terminal_size=TERMINAL_SIZE,
+    )
+
+
+def test_apply_adds_the_channel_still_typed_in_the_field(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """A channel without repodata fails to load; the previous view is restored
-    with an error toast."""
+    """``Apply`` with ``bioconda`` typed but not yet added with ``Enter`` loads
+    it next to ``conda-forge``: the package list gains ``pyfaidx``."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await wait_for_idle(pilot)
+        await open_channel_screen(pilot)
+        await type_text(pilot, BIOCONDA_CHANNEL)
+        await apply_channels(pilot)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_switching_to_unreachable_channel_shows_the_failure_screen(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """A channel without repodata fails to load; the loading screen stays up
+    with the error over the restored previous view."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
@@ -1022,11 +1232,11 @@ def test_switching_to_unreachable_channel_restores_previous_view(
     )
 
 
-def test_adding_unreachable_channel_restores_previous_view(
+def test_adding_unreachable_channel_shows_the_failure_screen(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """An unreachable channel is refused even next to a working one, so a
-    typo does not silently browse the other channels; the toast names it."""
+    typo does not silently browse the other channels; the error names it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
@@ -1050,6 +1260,23 @@ def test_switching_to_unreachable_channel_from_packages_restores_list(
         await pilot.press("j")
         await wait_for_idle(pilot)
         await switch_channel(pilot, MISSING_CHANNEL)
+
+    assert snap_compare_palettes(
+        make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
+    )
+
+
+def test_failed_channel_switch_reopens_the_selector_with_the_typed_channels(
+    snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
+) -> None:
+    """``c`` on the failure screen reopens the channel selector with the
+    channels that failed to load, so the typo can be corrected in place."""
+
+    async def run_before(pilot: Pilot[None]) -> None:
+        await open_versions(pilot, package_index=1)
+        await switch_channel(pilot, MISSING_CHANNEL)
+        await pilot.press("c")
+        await wait_for_screen(pilot, ChannelScreen)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE

@@ -13,7 +13,8 @@ Type "pixi shell" Enter
 Sleep 5s
 Type "clear" Enter
 Sleep 1s
-Type "pixi-browse"
+# ignore the local ~/.pixi/config.toml so the demo always starts on conda-forge
+Type "pixi-browse --config /dev/null"
 Enter
 Sleep 3s
 Show
@@ -61,7 +62,9 @@ Sleep 1s
 
 # go to dependencies view
 Shift+Tab
-# cycle through dependencies/constraints/run exports
+# cycle through dependencies/extra depends/constraints/run exports
+Sleep 1
+Type "]"
 Sleep 1
 Type "]"
 Sleep 1
@@ -90,6 +93,9 @@ Sleep 1s
 Type "C"
 Sleep 3s
 Tab
+Sleep 1s
+# skip the extra depends tab, show the constraints diff
+Type "]"
 Sleep 1s
 Type "]"
 Sleep 2s

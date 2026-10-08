@@ -4,14 +4,16 @@ from pathlib import Path
 
 import typer
 from rattler.config import Config
-from rattler.exceptions import ConfigError, InvalidMatchSpecError, ParsePlatformError
+from rattler.exceptions import ConfigError, InvalidMatchSpecError, ParseSubdirError
 from rattler.match_spec import MatchSpec
-from rattler.platform import Platform
+from rattler.platform import Subdir
 
 from pixi_browse import __version__
+from pixi_browse.file_types import MAGIC_AVAILABLE
 from pixi_browse.models import VersionEntry, VersionRow
 from pixi_browse.repodata import DEFAULT_CHANNEL, normalize_channel_names
 from pixi_browse.tui import CondaMetadataTui
+from pixi_browse.tui.widgets import DIFF_VIEW_AVAILABLE
 
 __all__ = [
     "CondaMetadataTui",
@@ -30,9 +32,30 @@ def _version_callback(value: bool) -> None:
     raise typer.Exit()
 
 
+def _extra_status(available: bool) -> str:
+    """``enabled`` or ``not enabled``, padded so the descriptions line up."""
+    if available:
+        return "[green]enabled[/green]    "
+    return "[dim]not enabled[/dim]"
+
+
+_EXTRAS_EPILOG = f"""\
+[bold]Optional extras[/bold]
+
+  [bold]diff[/bold]      {_extra_status(DIFF_VIEW_AVAILABLE)}  Side-by-side diffs in the compare view (AGPL-3.0).
+  [bold]filetype[/bold]  {_extra_status(MAGIC_AVAILABLE)}  Name file types like `file` does (needs libmagic).
+
+Install them with pixi or uv, e.g.:
+
+  pixi global install 'pixi-browse\\[extras=\\[diff,filetype]]'
+  uv tool install 'pixi-browse\\[diff,filetype]'
+"""
+
 cli = typer.Typer(
     add_completion=False,
     help="Browse conda package metadata in a Textual TUI.",
+    epilog=_EXTRAS_EPILOG,
+    rich_markup_mode="rich",
 )
 
 
@@ -104,14 +127,12 @@ def build_app(
     if not channel_names:
         typer.echo("At least one channel is required.", err=True)
         raise typer.Exit(code=1)
-    requested_platforms: list[Platform] | None = None
+    requested_platforms: list[Subdir] | None = None
     requested_matchspec: MatchSpec | None = None
     if platforms is not None:
         try:
-            requested_platforms = [
-                Platform(platform_name) for platform_name in platforms
-            ]
-        except ParsePlatformError as exc:
+            requested_platforms = [Subdir(platform_name) for platform_name in platforms]
+        except ParseSubdirError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
     if matchspec is not None and matchspec.strip():
