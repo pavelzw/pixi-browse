@@ -102,3 +102,52 @@ def test_file_destination_path_rejects_symlink_escape(tmp_path: Path) -> None:
         pytest.raises(RuntimeError, match="Unsafe package file path"),
     ):
         CondaMetadataTui._file_destination_path("link/demo.py")
+
+
+def test_compare_file_action_downloads_right_side_file(
+    make_app: AppFactory, rattler_client: Client, tmp_path: Path
+) -> None:
+    """``Download right`` on a compare row fetches the file from the right
+    build's archive (``libzlib 1.3.2`` here)."""
+    expected = asyncio.run(
+        fetch_raw_package_file_from_url(
+            rattler_client,
+            f"{UPSTREAM_CHANNEL_URL}linux-64/libzlib-1.3.2-h25fd6f3_3.conda",
+            "lib/libz.so.1.3.2",
+        )
+    )
+
+    async def run() -> None:
+        app = make_app()
+        async with app.run_test(size=TERMINAL_SIZE) as pilot:
+            # Compare libzlib 1.3.2 (compare A) with 1.3.1 on linux-64.
+            await open_versions(pilot, package_index=0)
+            await pilot.press("C", "j")
+            await wait_for_idle(pilot)
+            await pilot.press("C")
+            await wait_for_idle(pilot)
+            # Row 2 is lib/libz.so.1.3.2, which only the right build has, so
+            # its actions are "Preview right" and "Download right".
+            await pilot.press("3", "j", "j", "enter")
+            await wait_for_screen(pilot, FileActionScreen)
+            await pilot.press("down", "enter")
+            await pilot.pause()
+            await type_text(pilot, "right/libz.so")
+            await pilot.press("enter")
+            await wait_for_idle(pilot)
+            assert notification_messages(app)[-1] == (
+                f"Files: Downloaded file to {tmp_path / 'right' / 'libz.so'}"
+            )
+
+    with contextlib.chdir(tmp_path):
+        asyncio.run(run())
+
+    assert (tmp_path / "right" / "libz.so").read_bytes() == expected
+
+
+@pytest.mark.parametrize("file_path", ["/etc/passwd", "../outside.py"])
+def test_file_destination_path_rejects_absolute_and_parent_paths(
+    file_path: str,
+) -> None:
+    with pytest.raises(RuntimeError, match="Unsafe package file path"):
+        CondaMetadataTui._file_destination_path(file_path)

@@ -1,0 +1,105 @@
+# serializer version: 1
+# name: test_version_details_metadata_rows_for_a_tiny_legacy_record
+  tuple(
+    tuple(
+      'Package',
+      'demo',
+    ),
+    tuple(
+      'Name',
+      'demo',
+    ),
+    tuple(
+      'Version',
+      '1.2.3',
+    ),
+    tuple(
+      'Build',
+      'py313h123_0',
+    ),
+    tuple(
+      'Build Number',
+      '0',
+    ),
+    tuple(
+      'Subdir',
+      'noarch',
+    ),
+    tuple(
+      'File Name',
+      'demo-1.2.3-py313h123_0.conda',
+    ),
+    tuple(
+      'Channel',
+      'https://conda.anaconda.org/conda-forge/',
+    ),
+    tuple(
+      'Size',
+      '512 B',
+    ),
+    tuple(
+      'Timestamp',
+      '2026-01-01T00:00:00+00:00',
+    ),
+    tuple(
+      'Indexed Timestamp',
+      'not available',
+    ),
+    tuple(
+      'License',
+      'BSD-3-Clause',
+    ),
+    tuple(
+      'License Family',
+      'BSD',
+    ),
+    tuple(
+      'Arch',
+      'x86_64',
+    ),
+    tuple(
+      'Platform',
+      'linux',
+    ),
+    tuple(
+      'NoArch',
+      'none',
+    ),
+    tuple(
+      'Features',
+      'nomkl',
+    ),
+    tuple(
+      'Track Features',
+      'nomkl, debug',
+    ),
+    tuple(
+      'Python Site-Packages',
+      'lib/python3.13/site-packages',
+    ),
+    tuple(
+      'MD5',
+      '00112233445566778899aabbccddeeff',
+    ),
+    tuple(
+      'SHA256',
+      '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+    ),
+    tuple(
+      'Legacy .tar.bz2 MD5',
+      'ffeeddccbbaa99887766554433221100',
+    ),
+    tuple(
+      'Legacy .tar.bz2 Size',
+      '900 B',
+    ),
+    tuple(
+      'Package URL',
+      "[underline link='https://example.invalid/demo-1.2.3-py313h123_0.conda']https://example.invalid/demo-1.2.3-py313h123_0.conda[/]",
+    ),
+    tuple(
+      'Provenance',
+      "[underline link='https://gitlab.com/example/demo-feedstock.git']https://gitlab.com/example/demo-feedstock.git@0123456789abcdef[/]",
+    ),
+  )
+# ---
