@@ -97,7 +97,7 @@ def test_search_narrows_the_package_file_list(
     ``lit.py`` and counts them in the tab labels."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=2)
+        await open_versions(pilot, package_index=3)
         # The file section, then search it.
         await pilot.press("3", "slash")
         await type_text(pilot, "lit.py")
@@ -114,7 +114,7 @@ def test_search_without_matches_reports_it(
     """A query no file matches empties the list instead of hiding the search."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=2)
+        await open_versions(pilot, package_index=3)
         await pilot.press("3", "slash")
         await type_text(pilot, "qqq")
         await wait_for_idle(pilot)
@@ -130,7 +130,7 @@ def test_search_escape_restores_the_full_file_list(
     """``Escape`` leaves the search and shows every file again."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=2)
+        await open_versions(pilot, package_index=3)
         await pilot.press("3", "slash")
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
@@ -148,7 +148,7 @@ def test_search_backspace_widens_the_file_list(
     """``Backspace`` shortens the query, so more files match it again."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=2)
+        await open_versions(pilot, package_index=3)
         await pilot.press("3", "slash")
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
@@ -167,7 +167,7 @@ def test_enter_on_a_searched_file_opens_its_file_actions(
     sat at that position before the search."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=2)
+        await open_versions(pilot, package_index=3)
         await pilot.press("3", "slash")
         await type_text(pilot, "lit.py")
         await wait_for_idle(pilot)
@@ -185,7 +185,7 @@ def test_search_narrows_the_info_file_list(
     """The search follows the active tab, so it narrows ``info/`` files too."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         # The file section, its info tab, then search it.
         await pilot.press("3", "]", "slash")
         await type_text(pilot, "json")
@@ -203,7 +203,7 @@ def test_search_narrows_the_dependency_list(
     MatchSpecs, which ``Enter`` can still query."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         # The dependency section, then search it.
         await pilot.press("2", "slash")
         await type_text(pilot, "ratt")
@@ -218,13 +218,14 @@ def test_search_narrows_the_extra_depends_list(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
     """A group in the extra depends tab is kept as the header of the
-    dependencies of its own that matched."""
+    dependencies of its own that matched: ``manim``'s ``jupyterlab`` extra
+    keeps ``notebook`` but not ``jupyterlab``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         # The dependency section, its extra depends tab, then search it.
         await pilot.press("2", "]", "slash")
-        await type_text(pilot, "diff-view")
+        await type_text(pilot, "notebook")
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
@@ -235,12 +236,13 @@ def test_search_narrows_the_extra_depends_list(
 def test_search_drops_groups_without_matches(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """A group whose dependencies all miss the query leaves with them."""
+    """A group whose dependencies all miss the query leaves with them: only
+    ``manim``'s ``gui`` extra depends on ``dearpygui``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=1)
         await pilot.press("2", "]", "slash")
-        await type_text(pilot, "qqq")
+        await type_text(pilot, "dear")
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
@@ -274,7 +276,7 @@ def test_search_does_not_start_on_a_section_without_a_list(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             await pilot.press("1", "slash")
             await wait_for_idle(pilot)
 
@@ -326,7 +328,7 @@ def test_changing_the_tab_ends_the_search(make_app: AppFactory) -> None:
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             await pilot.press("2", "slash")
             await type_text(pilot, "ratt")
             await wait_for_idle(pilot)

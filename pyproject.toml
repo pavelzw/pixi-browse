@@ -78,3 +78,7 @@ check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.typos.default]
+# Build strings of the fixture packages, e.g. manim's `pyh5ded981_0`.
+extend-ignore-identifiers-re = ["^pyh[0-9a-f]{7}_[0-9]+$"]

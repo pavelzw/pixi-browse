@@ -52,7 +52,7 @@ def test_attestation_tab_of_an_unsigned_artifact(
     label stays bare -- the case nearly every package is in."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_attestation_tab(pilot, package_index=1)
+        await open_attestation_tab(pilot, package_index=2)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -66,7 +66,7 @@ def test_attestation_tab_strip_clips_in_a_narrow_terminal(
     clips and the active tab is kept in view."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_attestation_tab(pilot, package_index=1)
+        await open_attestation_tab(pilot, package_index=2)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=NARROW_TERMINAL_SIZE

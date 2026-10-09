@@ -62,7 +62,7 @@ def test_version_details_load_from_a_directory_channel(
     async def run() -> None:
         app = make_app(default_channels=(str(fixture_channels_dir / MAIN_CHANNEL),))
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
 
             preview_key = app._previewed_version_key
             assert preview_key is not None, (
@@ -91,7 +91,7 @@ def test_download_from_a_directory_channel(
     async def run() -> None:
         app = make_app(default_channels=(str(fixture_channels_dir / MAIN_CHANNEL),))
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             await pilot.press("d")
             await wait_for_idle(pilot)
             assert notification_messages(app) == [
@@ -116,7 +116,7 @@ def test_file_download_from_a_directory_channel(
     async def run() -> None:
         app = make_app(default_channels=(str(fixture_channels_dir / MAIN_CHANNEL),))
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             # info/ tab, first file is about.json; "Download as file".
             await pilot.press("3", "]", "enter")
             await wait_for_screen(pilot, FileActionScreen)
@@ -159,7 +159,7 @@ def test_unreadable_artifact_reports_instead_of_loading_forever(
     async def run() -> None:
         app = make_app(default_channels=(str(channel_dir),))
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
 
             assert app._previewed_version_key is None
             placeholder = str(app.query_one("#main-placeholder", Static).content)

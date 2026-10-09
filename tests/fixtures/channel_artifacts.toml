@@ -32,6 +32,14 @@ bioconda = "https://conda.anaconda.org/bioconda"
 # where the bytes are fetched from.
 skill-forge = "https://prefix.dev/skill-forge"
 
+# Several extras, one of them with more than one dependency, for the extra
+# depends tab.
+[[artifacts]]
+channel = "conda-forge"
+subdir = "noarch"
+file_name = "manim-0.22.0-pyh5ded981_0.conda"
+sha256 = "73a6d9fa7da4be0339734375aaf729b7e7606feb2fa991f9dae348d85806057a"
+
 [[artifacts]]
 channel = "conda-forge"
 subdir = "noarch"

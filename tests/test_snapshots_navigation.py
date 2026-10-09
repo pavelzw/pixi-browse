@@ -57,12 +57,12 @@ def test_key_returns_focus_to_sidebar_from_main_panel(
 def test_j_moves_sidebar_highlight_and_previews_package(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory
 ) -> None:
-    """Two ``j`` presses highlight ``six`` and preview its ``.conda`` and
+    """Four ``j`` presses highlight ``six`` and preview its ``.conda`` and
     legacy ``.tar.bz2`` builds."""
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("j", "j")
+        await pilot.press("j", "j", "j", "j")
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
@@ -164,8 +164,8 @@ def test_clicking_package_opens_its_versions(
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        # The second option row is ``pixi-browse``.
-        await pilot.click("#sidebar-list", offset=(2, 1))
+        # The third option row is ``pixi-browse``.
+        await pilot.click("#sidebar-list", offset=(2, 2))
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
@@ -179,7 +179,7 @@ def test_escape_returns_from_versions_to_packages(
     """Going back restores the previously highlighted package."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("escape")
         await wait_for_idle(pilot)
 
@@ -194,7 +194,7 @@ def test_back_row_previews_the_package_again(
     """Highlighting ``< Back to packages`` shows the package preview again."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("g", "g")
         await wait_for_idle(pilot)
 
@@ -241,7 +241,7 @@ def test_enter_on_version_entry_focuses_main_panel(
     """Selecting an entry with the keyboard hands focus to the details."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("enter")
         await wait_for_idle(pilot)
 
@@ -257,7 +257,7 @@ def test_clicking_version_entry_keeps_sidebar_focused(
     sidebar focused."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         # Row 3 is the second artifact (0.0.13) of the noarch section.
         await pilot.click("#sidebar-list", offset=(2, 3))
         await wait_for_idle(pilot)
@@ -275,7 +275,7 @@ def test_numeric_shortcut_activates_section_and_focuses_main_panel(
     and focus the details."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press(key)
         await pilot.pause()
 
@@ -290,7 +290,7 @@ def test_zero_returns_focus_to_sidebar_in_versions_view(
     """``0`` returns focus to the version list after a section shortcut."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "0")
         await pilot.pause()
 
@@ -305,7 +305,7 @@ def test_shift_tab_cycles_sections_backwards(
     """``Shift+Tab`` from the metadata section wraps around to the file section."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("l", "shift+tab")
         await pilot.pause()
 
@@ -323,7 +323,7 @@ def test_tab_in_sidebar_focuses_the_active_section(
     past it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "0", key)
         await pilot.pause()
 
@@ -339,7 +339,7 @@ def test_tab_cycles_sections_after_entering_from_sidebar(
     from the active section ``[2]`` to the file section ``[3]``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "0", "tab", "tab")
         await pilot.pause()
 
@@ -354,7 +354,7 @@ def test_bracket_in_sidebar_does_not_cycle_tabs(
     """``]`` and ``[`` are ignored while the sidebar is the selected pane."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("]", "[")
         await pilot.pause()
 
@@ -370,7 +370,7 @@ def test_bracket_switches_metadata_to_repodata_patches_tab(
     patches tab reports none."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("l", "]")
         await pilot.pause()
 
@@ -386,7 +386,7 @@ def test_metadata_tab_persists_across_artifacts(
     highlighted."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("l", "]", "h", "j")
         await wait_for_idle(pilot)
 
@@ -401,7 +401,7 @@ def test_bracket_switches_dependency_tab_to_constraints(
     """``]`` in the dependency section switches past extra dependencies to the constraints tab."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "]", "]")
         await pilot.pause()
 
@@ -417,7 +417,7 @@ def test_narrow_window_clips_dependency_tabs_to_the_active_tab(
     the left so that the constraints tab it switched to is readable."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "]", "]")
         await pilot.pause()
 
@@ -433,7 +433,7 @@ def test_shrinking_the_window_clips_the_tabs_of_the_active_section(
     are left with, so the run exports tab stays visible in the narrow window."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "]", "]", "]")
         await pilot.resize_terminal(*NARROW_TERMINAL_SIZE)
         await wait_for_idle(pilot)
@@ -464,7 +464,7 @@ def test_bracket_switches_file_tab_to_info(
     """``]`` in the file section switches from ``pkg/`` to the ``info/`` files."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "]")
         await pilot.pause()
 
@@ -480,7 +480,7 @@ def test_j_and_shift_g_move_highlight_in_file_list(
     second-to-last file."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "j", "j", "G", "k")
         await pilot.pause()
 
@@ -496,7 +496,7 @@ def test_clicking_metadata_body_activates_metadata_section(
     was active."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3")
         await pilot.pause()
         await pilot.click("#detail-body-0")
@@ -527,6 +527,9 @@ def test_resize_rerenders_versions_view(
 def test_extra_depends_tab(
     snap_compare_palettes: SnapComparePalettes, make_app: AppFactory, package_index: int
 ) -> None:
+    """``libzlib`` has no extras; ``manim`` has three, one of them with two
+    dependencies."""
+
     async def run_before(pilot: Pilot[None]) -> None:
         await open_versions(pilot, package_index=package_index)
         await pilot.press("2", "]")

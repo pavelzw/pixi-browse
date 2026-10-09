@@ -43,7 +43,7 @@ def test_d_downloads_highlighted_artifact_to_cwd(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             await pilot.press("d")
             await wait_for_idle(pilot)
             assert notification_messages(app) == [
@@ -72,7 +72,7 @@ def test_file_action_downloads_file_to_chosen_destination(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             # info/ tab, first file is about.json; "Download as file".
             await pilot.press("3", "]", "enter")
             await wait_for_screen(pilot, FileActionScreen)

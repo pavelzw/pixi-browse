@@ -20,7 +20,7 @@ def test_enter_on_package_file_opens_file_actions(
     """Files from ``paths.json`` carry their SHA256."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "enter")
         await wait_for_file_actions(pilot)
 
@@ -35,7 +35,7 @@ def test_enter_on_info_file_opens_file_actions(
     """Files streamed from ``info/`` only know their size."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "]", "enter")
         await wait_for_file_actions(pilot)
 
@@ -66,7 +66,7 @@ def test_clicking_file_opens_file_actions(
     """Clicking a file row opens the same file action screen as ``Enter``."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.click("#detail-option-list-2", offset=(2, 0))
         await wait_for_file_actions(pilot)
 
@@ -96,7 +96,7 @@ def test_file_actions_escape_returns_to_details(
     """``Escape`` closes the file action screen and leaves the file pane active."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "enter")
         await wait_for_file_actions(pilot)
         await pilot.press("escape")
@@ -113,7 +113,7 @@ def test_preview_python_file_uses_syntax_highlighting(
     """Previewing a ``.py`` file renders it with Python syntax highlighting."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "enter")
         await wait_for_file_actions(pilot)
         await pilot.press("enter")
@@ -132,7 +132,7 @@ def test_preview_escape_returns_to_details(
     """``Escape`` closes the preview and returns to the details view."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "enter")
         await wait_for_file_actions(pilot)
         await pilot.press("enter")
@@ -152,7 +152,7 @@ def test_download_path_screen_rejects_empty_destination(
     error."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("3", "]", "enter")
         await wait_for_file_actions(pilot)
         # "Download as file": the default destination is selected on focus.
@@ -173,7 +173,7 @@ def test_d_on_section_row_warns(
     selected."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("k", "d")
         await pilot.pause()
 

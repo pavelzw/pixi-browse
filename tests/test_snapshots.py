@@ -103,7 +103,7 @@ def test_versions_view_shows_real_artifact_details(
     from the real ``.conda`` archive."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
 
     assert snap_compare_palettes(
         make_app(), run_before=run_before, terminal_size=TERMINAL_SIZE
@@ -117,7 +117,7 @@ def test_versions_view_marks_prefix_replacement_files(
     the file list marks it as needing text prefix replacement."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=4)
+        await open_versions(pilot, package_index=5)
         # Focus the main panel and activate the file section so all files show.
         await pilot.press("l", "3")
         await wait_for_idle(pilot)
@@ -258,7 +258,7 @@ def test_file_preview_renders_info_about_json(
     and renders it with JSON syntax highlighting."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         # Main panel -> files section -> info tab -> open the first file.
         await pilot.press("l", "tab", "tab", "]")
         await pilot.pause()

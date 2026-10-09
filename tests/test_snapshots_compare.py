@@ -31,7 +31,7 @@ async def open_compare_screen(pilot: Pilot[None]) -> None:
 async def open_polars_compare_screen(pilot: Pilot[None]) -> None:
     """Compare ``polars 1.44.1`` (compare A) with ``polars 1.44.0`` on noarch;
     the screen orders the older build on the left."""
-    await open_versions(pilot, package_index=2)
+    await open_versions(pilot, package_index=3)
     await pilot.press("C", "j")
     await wait_for_idle(pilot)
     await pilot.press("C")
@@ -329,7 +329,7 @@ def test_compare_extra_depends(
     """0.0.15 adds the diff extra relative to 0.0.14; swapping reverses it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("C", "j")
         await wait_for_idle(pilot)
         await pilot.press("C")
