@@ -498,7 +498,7 @@ def test_startup_prefetches_the_repodata_of_the_neighbouring_packages(
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
             await wait_for_idle(pilot)
-            assert len(app._visible_package_names) == 5
+            assert len(app._visible_package_names) == 6
             assert set(app._package_records_cache) == set(app._visible_package_names)
 
             # Moving on therefore shows the next package straight away.
@@ -529,7 +529,7 @@ def test_opening_versions_prefetches_the_neighbouring_builds(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             assert app._selected_package == "pixi-browse"
             expected = _preview_keys(app)
             assert len(expected) == 4
@@ -587,7 +587,7 @@ def test_leaving_the_version_list_drops_its_prefetch_queue(
     async def run() -> None:
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             await pilot.press("escape")
             await wait_for_idle(pilot)
 
@@ -650,7 +650,7 @@ def test_rapid_version_navigation_debounces_loads(
 
     async def run() -> None:
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             sidebar = app.query_one("#sidebar-list", OptionList)
             entries = [
                 (index, app._version_preview_key("pixi-browse", row.entry))
@@ -712,7 +712,7 @@ def test_single_download_slot_skips_prefetch(
             assert not app._package_records_loads.running
             assert not app._package_records_loads.waiting
 
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             entry = app._highlighted_version_entry()
             assert entry is not None
             key = app._version_preview_key("pixi-browse", entry)

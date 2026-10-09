@@ -72,7 +72,7 @@ def test_file_action_dialog_does_not_read_a_file_too_large_to_preview(
         app = make_app()
         async with app.run_test(size=TERMINAL_SIZE) as pilot:
             await wait_for_idle(pilot)
-            await open_versions(pilot, package_index=1)
+            await open_versions(pilot, package_index=2)
             entry = app._highlighted_version_entry()
             assert entry is not None
 

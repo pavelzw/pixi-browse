@@ -120,7 +120,7 @@ def test_fetch_package_names_lists_channel_packages(
     )
 
     assert platforms == list(CHANNEL_PLATFORMS)
-    assert names == ["libzlib", "pixi-browse", "polars", "six", "zlib"]
+    assert names == ["libzlib", "manim", "pixi-browse", "polars", "six", "zlib"]
 
 
 def test_fetch_package_names_merges_all_channels(
@@ -136,6 +136,7 @@ def test_fetch_package_names_merges_all_channels(
 
     assert names == [
         "libzlib",
+        "manim",
         "pixi-browse",
         "polars",
         "pyfaidx",
@@ -310,6 +311,7 @@ def test_render_package_preview_from_real_records(
     [
         ("pixi-browse", "noarch", "0.0.14"),
         ("pixi-browse", "noarch", "0.0.15"),
+        ("manim", "noarch", "0.22.0"),
         ("libzlib", "linux-64", "1.3.2"),
         ("six", "noarch", "1.16.0"),
     ],

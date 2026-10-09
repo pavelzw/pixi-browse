@@ -313,7 +313,7 @@ def test_enter_on_dependency_opens_matchspec_screen(
     """Selecting a dependency pre-fills the MatchSpec prompt with it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await pilot.press("2", "enter")
         await wait_for_screen(pilot, MatchSpecScreen)
 
@@ -329,7 +329,7 @@ def test_dependency_matchspec_query_opens_dependency_versions(
     querying it opens exactly that build."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=4)
+        await open_versions(pilot, package_index=5)
         await pilot.press("2", "G", "enter")
         await wait_for_screen(pilot, MatchSpecScreen)
         await pilot.press("enter")
@@ -490,7 +490,7 @@ def test_whoneeds_on_back_row_prefills_open_package(
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("j", "enter")
+        await pilot.press("j", "j", "enter")
         await wait_for_idle(pilot)
         await pilot.press("w")
         await pilot.pause()
@@ -696,7 +696,7 @@ def test_applying_unchanged_platforms_returns_to_packages(
 
     async def run_before(pilot: Pilot[None]) -> None:
         await wait_for_idle(pilot)
-        await pilot.press("j", "p", "enter")
+        await pilot.press("j", "j", "p", "enter")
         await wait_for_idle(pilot)
 
     assert snap_compare_palettes(
@@ -1006,7 +1006,7 @@ def test_confirming_unchanged_channels_keeps_the_view(
     """``Apply`` without edits does not reload anything."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await open_channel_screen(pilot)
         await apply_channels(pilot)
 
@@ -1086,7 +1086,7 @@ def test_switching_channels_shows_the_loading_screen(
     elapsed time is wall-clock time, pinned to 31s for the screenshot."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await open_channel_screen(pilot)
         await add_channel(pilot, BIOCONDA_CHANNEL)
         await pilot.click("#channel-remove-0")
@@ -1137,7 +1137,7 @@ def test_switching_to_unreachable_channel_shows_the_failure_screen(
     with the error over the restored previous view."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await switch_channel(pilot, MISSING_CHANNEL)
 
     assert snap_compare_palettes(
@@ -1152,7 +1152,7 @@ def test_adding_unreachable_channel_shows_the_failure_screen(
     typo does not silently browse the other channels; the error names it."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await open_channel_screen(pilot)
         await add_channel(pilot, MISSING_CHANNEL)
         await apply_channels(pilot)
@@ -1169,7 +1169,7 @@ def test_failed_channel_switch_reopens_the_selector_with_the_typed_channels(
     channels that failed to load, so the typo can be corrected in place."""
 
     async def run_before(pilot: Pilot[None]) -> None:
-        await open_versions(pilot, package_index=1)
+        await open_versions(pilot, package_index=2)
         await switch_channel(pilot, MISSING_CHANNEL)
         await pilot.press("c")
         await wait_for_screen(pilot, ChannelScreen)
