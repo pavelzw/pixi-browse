@@ -48,7 +48,7 @@ MAIN_CHANNEL = "conda-forge"
 UPSTREAM_CHANNEL_URL = f"{ANACONDA_CHANNELS_URL}{MAIN_CHANNEL}/"
 # A second real channel from the manifest, for channel switching.
 BIOCONDA_CHANNEL = "bioconda"
-# The manifest channel whose package advertises a committed Sigstore sidecar.
+# The manifest channel whose packages advertise real Sigstore sidecars.
 # Spelled as a URL because the attestation binds to this exact channel.
 SIGNING_TESTS_CHANNEL = "https://prefix.dev/skill-forge"
 SIGNING_TESTS_PACKAGE = "agent-skill-conda-forge"

@@ -16,7 +16,7 @@ The manifest lists artifacts of more than one channel (``bioconda`` next to
 for real. ``missing`` is mirrored too but has no repodata at all, so loading
 it fails.
 
-``skill-forge`` carries a package with real Sigstore attestations, published
+``skill-forge`` carries packages with real Sigstore attestations, published
 the way CEP 50 wants them: the sidecar is laid out beside the archive under both
 of its names before indexing, so the repodata advertises its digest the way the
 signing channel's own does. Verifying one would load the Sigstore trusted root
@@ -135,11 +135,6 @@ def _copy_attestations(artifact: ChannelArtifact, destination: Path) -> None:
         f"{destination.name}.sigs.{artifact.attestations_sha256}",
     ):
         shutil.copyfile(sidecar_path, destination.with_name(name))
-    # A committed sidecar may intentionally belong to a different archive in
-    # order to exercise rejection. Serve its original name too so direct tests
-    # can construct the matching repodata record and verify the genuine bundle.
-    if artifact.attestations_fixture_path is not None:
-        shutil.copyfile(sidecar_path, destination.parent / sidecar_path.name)
 
 
 @pytest.fixture(scope="session")
@@ -183,8 +178,8 @@ def mirrored_config(channel_manifest: ChannelManifest, channel_server: str) -> C
     """Configure the test channels to be served from ``channel_server`` under
     the URLs the app resolves their names to."""
     mirrors = {
-        f"{source.url}/": [f"{channel_server}{channel_name}/"]
-        for channel_name, source in channel_manifest.channels.items()
+        f"{channel_url}/": [f"{channel_server}{channel_name}/"]
+        for channel_name, channel_url in channel_manifest.channels.items()
     }
     mirrors[f"{ANACONDA_CHANNELS_URL}{MISSING_CHANNEL}/"] = [
         f"{channel_server}{MISSING_CHANNEL}/"

@@ -40,15 +40,14 @@ from tests.helpers import (
     attestation_in_status,
 )
 
-FIXTURE_VERSION = "0.0.21"
-FIXTURE_FILE_NAME = "agent-skill-conda-forge-0.0.21-h4616a5c_0.conda"
 SIGNED_VERSION = "0.0.22"
 SIGNED_FILE_NAME = "agent-skill-conda-forge-0.0.22-h4616a5c_0.conda"
-SIGNED_PACKAGE_SHA256 = (
-    "42479754072901d52769a13c5bad0c2bb820dd387ca0eebbfd9d17edb3454723"
-)
 SIGNED_ATTESTATIONS_SHA256 = (
-    "218698f9dccb8df5880f40d2b56138ca73875879b1acfc0d8052f907787c2800"
+    "68ece082f42f9caf55c3e5cdf4fccced33e51da23ed16941dc393fd9158bf3ad"
+)
+# The archive of the previous version: signed too, but by its own sidecar.
+OTHER_PACKAGE_SHA256 = (
+    "0024f57c1e6aa280b52c1475a792be2e56a89de71792b3ccbf2962fec92becc4"
 )
 SIGNED_SIDECAR_URL = (
     f"{SIGNING_TESTS_CHANNEL}/noarch/{SIGNED_FILE_NAME}"
@@ -69,8 +68,12 @@ _NO_CLAIMS = CertificateClaims(
 
 
 def _record(
-    make_gateway: GatewayFactory, channel: str, package_name: str
+    make_gateway: GatewayFactory,
+    channel: str,
+    package_name: str,
+    file_name: str | None = None,
 ) -> RepoDataRecord:
+    """The record of ``package_name`` named ``file_name``, or any one of them."""
     records = asyncio.run(
         query_package_records(
             gateway=make_gateway(),
@@ -79,42 +82,43 @@ def _record(
             package_name=package_name,
         )
     )
-    return records[0]
+    if file_name is None:
+        return records[0]
+    return next(record for record in records if record.file_name == file_name)
 
 
-def _matching_signed_record(make_gateway: GatewayFactory) -> RepoDataRecord:
-    """A repodata record matching the committed 0.0.22 sidecar's subject."""
-    fixture_record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
+def _signed_record(make_gateway: GatewayFactory) -> RepoDataRecord:
+    return _record(
+        make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE, SIGNED_FILE_NAME
+    )
+
+
+def _record_of_another_archive(make_gateway: GatewayFactory) -> RepoDataRecord:
+    """The signed record, but carrying the digest of an archive its sidecar
+    does not sign -- what a mirror serving a swapped file would hand out."""
+    signed = _signed_record(make_gateway)
     package_record = PackageRecord(
         name=SIGNING_TESTS_PACKAGE,
         version=SIGNED_VERSION,
-        build=fixture_record.build,
-        build_number=fixture_record.build_number,
-        subdir=fixture_record.subdir,
-        sha256=bytes.fromhex(SIGNED_PACKAGE_SHA256),
+        build=signed.build,
+        build_number=signed.build_number,
+        subdir=signed.subdir,
+        sha256=bytes.fromhex(OTHER_PACKAGE_SHA256),
         attestations_sha256=bytes.fromhex(SIGNED_ATTESTATIONS_SHA256),
     )
-    package_url = f"{SIGNING_TESTS_CHANNEL}/noarch/{SIGNED_FILE_NAME}"
     return RepoDataRecord(
-        package_record,
-        SIGNED_FILE_NAME,
-        package_url,
-        SIGNING_TESTS_CHANNEL,
+        package_record, signed.file_name, signed.url, SIGNING_TESTS_CHANNEL
     )
 
 
 def test_signed_record_advertises_its_sidecar(make_gateway: GatewayFactory) -> None:
     """``index_fs`` copies the sidecar digest into the repodata, which is the
     only way a client learns that an artifact is signed at all."""
-    record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
+    record = _signed_record(make_gateway)
 
-    assert record.file_name == FIXTURE_FILE_NAME
     assert record.attestations_sha256 is not None
     assert record.attestations_sha256.hex() == SIGNED_ATTESTATIONS_SHA256
-    assert sidecar_url(record) == (
-        f"{SIGNING_TESTS_CHANNEL}/noarch/{FIXTURE_FILE_NAME}"
-        f".sigs.{SIGNED_ATTESTATIONS_SHA256}"
-    )
+    assert sidecar_url(record) == SIGNED_SIDECAR_URL
 
 
 def test_unsigned_record_costs_no_request(
@@ -141,7 +145,7 @@ def test_signed_record_verifies_against_the_real_bundle(
     attestation tab is built from: which workflow of which repository signed,
     which commit it built, and where the signature was logged.
     """
-    record = _matching_signed_record(make_gateway)
+    record = _signed_record(make_gateway)
 
     attestation = asyncio.run(
         verify_record(
@@ -227,24 +231,44 @@ def test_signed_record_verifies_against_the_real_bundle(
         (
             "Sidecar",
             f"[underline link='{SIGNED_SIDECAR_URL}']"
-            f"{SIGNED_FILE_NAME}.sigs.218698f9dc…[/] (bundle 1)",
+            f"{SIGNED_FILE_NAME}.sigs.68ece082f4…[/] (bundle 1)",
         ),
     )
+
+
+def test_a_sidecar_does_not_vouch_for_another_archive(
+    make_gateway: GatewayFactory, rattler_client: Client
+) -> None:
+    """A genuine bundle only signs the digest in its subject, so checked against
+    any other archive it is rejected, however valid the rest of it is."""
+    record = _record_of_another_archive(make_gateway)
+
+    attestation = asyncio.run(
+        verify_record(
+            record, client=rattler_client, trusted_root=TrustedRoot.embedded()
+        )
+    )
+
+    assert not attestation.is_verified
+    assert attestation.status == "unverified"
+    assert attestation.sidecar_url == SIGNED_SIDECAR_URL
+    assert len(attestation.warnings) == 1
+    assert "artifact hash does not match any subject" in attestation.warnings[0]
 
 
 def test_loader_returns_archive_details_before_it_verifies(
     make_gateway: GatewayFactory, rattler_client: Client
 ) -> None:
     """The archive is available before external Sigstore networking finishes,
-    then the rejected sidecar replaces the pending state in the same cache.
+    then the verified sidecar replaces the pending state in the same cache.
     """
-    record = _record(make_gateway, SIGNING_TESTS_CHANNEL, SIGNING_TESTS_PACKAGE)
+    record = _signed_record(make_gateway)
     loader = VersionDataLoader(
         client=rattler_client, trusted_root=TrustedRoot.embedded()
     )
     preview_key = (
         SIGNING_TESTS_PACKAGE,
-        FIXTURE_VERSION,
+        SIGNED_VERSION,
         record.build,
         record.build_number,
         record.subdir,
@@ -265,23 +289,17 @@ def test_loader_returns_archive_details_before_it_verifies(
     pending, attestation = asyncio.run(load())
 
     assert pending.status == "verifying"
-    fixture_sidecar_url = (
-        f"{SIGNING_TESTS_CHANNEL}/noarch/{FIXTURE_FILE_NAME}"
-        f".sigs.{SIGNED_ATTESTATIONS_SHA256}"
-    )
     assert build_version_details_attestation_rows(pending) == (
         ("", "Verifying… - package details are available while checks run"),
         ("", ""),
         (
             "Sidecar",
-            f"[underline link='{fixture_sidecar_url}']"
-            f"{FIXTURE_FILE_NAME}.sigs.218698f9dc…[/]",
+            f"[underline link='{SIGNED_SIDECAR_URL}']"
+            f"{SIGNED_FILE_NAME}.sigs.68ece082f4…[/]",
         ),
     )
-    assert not attestation.is_verified
-    assert attestation.status == "unverified"
-    assert len(attestation.warnings) == 1
-    assert "artifact hash does not match any subject" in attestation.warnings[0]
+    assert attestation.is_verified
+    assert attestation.status == "verified"
 
 
 def test_a_bare_signature_does_not_claim_more_than_it_established() -> None:

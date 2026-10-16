@@ -1,10 +1,9 @@
 """Download and verify the real artifacts of the offline test channels.
 
-Most artifacts listed in ``tests/fixtures/channel_artifacts.toml`` are fetched
+The artifacts listed in ``tests/fixtures/channel_artifacts.toml`` are fetched
 into the git-ignored ``tests/fixtures/channels`` directory (one subdirectory per
-channel) on first use and verified by SHA256. Artifacts not available from a
-stable upstream mirror can instead name files committed below ``tests/fixtures``.
-Run ``pixi run fetch-test-channel`` to pre-download the remote ones.
+channel) on first use and verified by SHA256. Run ``pixi run fetch-test-channel``
+to pre-download them.
 
 An artifact can pin the digest of a Sigstore attestation sidecar as well, which
 is fetched and verified beside the archive; :mod:`tests.conftest` then publishes
@@ -45,10 +44,6 @@ class ChannelArtifact:
     #: this artifact, where it publishes one at all. CEP 50 makes it the name of
     #: the immutable sidecar as well, so it is all that is needed to fetch it.
     attestations_sha256: str | None = None
-    #: A file committed below ``tests/fixtures`` instead of downloaded.
-    fixture_path: str | None = None
-    #: A committed attestation sidecar, independently of the archive source.
-    attestations_fixture_path: str | None = None
 
     def url(self, channel_url: str) -> str:
         return f"{channel_url}/{self.subdir}/{self.file_name}"
@@ -61,14 +56,10 @@ class ChannelArtifact:
 
     @property
     def local_path(self) -> Path:
-        if self.fixture_path is not None:
-            return FIXTURES_DIR / self.fixture_path
         return CHANNELS_DIR / self.channel / self.subdir / self.file_name
 
     @property
     def attestations_local_path(self) -> Path | None:
-        if self.attestations_fixture_path is not None:
-            return FIXTURES_DIR / self.attestations_fixture_path
         attestations_file_name = self.attestations_file_name
         if attestations_file_name is None:
             return None
@@ -86,27 +77,13 @@ class RemoteFile:
 
 
 @dataclass(frozen=True)
-class ChannelSource:
-    """A test channel: the URL it is known by, and the one it is fetched from.
-
-    The two are the same for a channel that serves its own artifacts. Only the
-    download side may be swapped for a preview deployment or a mirror: the
-    records of a channel carry the URL it is known by, and an attestation's
-    ``targetChannel`` is bound to exactly that.
-    """
-
-    url: str
-    download_url: str
-
-
-@dataclass(frozen=True)
 class ChannelManifest:
-    #: Channel name (as typed into the app) to where that channel is.
-    channels: dict[str, ChannelSource]
+    #: Channel name (as typed into the app) to the URL of that channel.
+    channels: dict[str, str]
     artifacts: tuple[ChannelArtifact, ...]
 
     def url(self, artifact: ChannelArtifact) -> str:
-        return artifact.url(self.channels[artifact.channel].download_url)
+        return artifact.url(self.channels[artifact.channel])
 
     def artifacts_of(self, channel: str) -> tuple[ChannelArtifact, ...]:
         return tuple(
@@ -119,16 +96,11 @@ class ChannelManifest:
         files: list[RemoteFile] = []
         for artifact in self.artifacts:
             url = self.url(artifact)
-            if artifact.fixture_path is None:
-                files.append(
-                    RemoteFile(
-                        url=url, path=artifact.local_path, sha256=artifact.sha256
-                    )
-                )
+            files.append(
+                RemoteFile(url=url, path=artifact.local_path, sha256=artifact.sha256)
+            )
             sidecar_path = artifact.attestations_local_path
             if sidecar_path is None or artifact.attestations_sha256 is None:
-                continue
-            if artifact.attestations_fixture_path is not None:
                 continue
             files.append(
                 RemoteFile(
@@ -144,25 +116,10 @@ def _optional_str(value: object) -> str | None:
     return None if value is None else str(value)
 
 
-def _channel_source(entry: object) -> ChannelSource:
-    """A ``[channels]`` value: a URL, or a table that overrides where to
-    download from."""
-    if isinstance(entry, str):
-        url = entry.rstrip("/")
-        return ChannelSource(url=url, download_url=url)
-    if not isinstance(entry, dict):
-        raise ValueError(f"a channel is a URL or a table, not {entry!r}")
-    url = str(entry["url"]).rstrip("/")
-    return ChannelSource(
-        url=url, download_url=str(entry.get("download_url", url)).rstrip("/")
-    )
-
-
 def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
     manifest = tomllib.loads(path.read_text(encoding="utf-8"))
     channels = {
-        str(name): _channel_source(entry)
-        for name, entry in manifest["channels"].items()
+        str(name): str(url).rstrip("/") for name, url in manifest["channels"].items()
     }
     artifacts = tuple(
         ChannelArtifact(
@@ -171,10 +128,6 @@ def load_manifest(path: Path = MANIFEST_PATH) -> ChannelManifest:
             file_name=str(entry["file_name"]),
             sha256=str(entry["sha256"]),
             attestations_sha256=_optional_str(entry.get("attestations_sha256")),
-            fixture_path=_optional_str(entry.get("fixture_path")),
-            attestations_fixture_path=_optional_str(
-                entry.get("attestations_fixture_path")
-            ),
         )
         for entry in manifest["artifacts"]
     )
@@ -247,24 +200,6 @@ def _download_missing_exclusively(manifest: ChannelManifest) -> int:
 def ensure_channel_artifacts() -> ChannelManifest:
     """Download every manifest artifact that is missing or has a wrong hash."""
     manifest = load_manifest()
-    for artifact in manifest.artifacts:
-        expected_files = [(artifact.local_path, artifact.sha256)]
-        if (
-            artifact.attestations_local_path is not None
-            and artifact.attestations_sha256 is not None
-        ):
-            expected_files.append(
-                (artifact.attestations_local_path, artifact.attestations_sha256)
-            )
-        for path, digest in expected_files:
-            if (
-                (artifact.fixture_path is not None and path == artifact.local_path)
-                or (
-                    artifact.attestations_fixture_path is not None
-                    and path == artifact.attestations_local_path
-                )
-            ) and (not path.is_file() or _sha256_of(path) != digest):
-                raise RuntimeError(f"committed fixture has the wrong SHA256: {path}")
     _download_missing_exclusively(manifest)
     return manifest
 
